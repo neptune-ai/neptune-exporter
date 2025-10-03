@@ -18,10 +18,9 @@ Migration tool to help Neptune customers transition their data out of neptune in
 
 ### Core Components
 ```
-neptune_migration/
+neptune_exporter/
 ├── main.py                       # Cli entry point
 ├── model.py                      # Neptune data model
-├── persistence.py                # Storage as files in a popular format
 ├── exporters/
 │   ├── neptune3.py               # Using neptune-query
 │   └── neptune2.py               # Using neptune-client

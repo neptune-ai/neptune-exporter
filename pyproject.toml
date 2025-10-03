@@ -29,3 +29,4 @@ build-backend = "uv_build"
 [tool.mypy]
 mypy_path = './src/'
 packages = 'neptune_exporter'
+ignore_missing_imports = "True"
