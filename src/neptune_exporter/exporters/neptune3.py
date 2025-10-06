@@ -148,15 +148,81 @@ class Neptune3Exporter:
         run_ids: list[RunId],
         attributes: None | str | Sequence[str],
     ) -> Generator[pa.RecordBatch, None, None]:
-        metrics_df = nq_runs.fetch_metrics(  # index=["run", "step"], column="path"
+        metrics_df = nq_runs.fetch_metrics(  # index=["run", "step"], column lvl1="path" lvl2=["value", "absolute_time"]
             project=project_id,
             runs=run_ids,
             attributes=AttributeFilter(name=attributes, type=_METRIC_TYPES),
-            include_time=True,
+            include_time="absolute",
+            include_preview=False,
             lineage_to_the_root=False,
             type_suffix_in_column_names=True,
         )
-        yield pa.RecordBatch.from_pandas(metrics_df, schema=model.SCHEMA)
+        converted_df = self._convert_metrics_to_schema(metrics_df, project_id)
+        yield pa.RecordBatch.from_pandas(converted_df, schema=model.SCHEMA)
+
+    def _convert_metrics_to_schema(
+        self, metrics_df: pd.DataFrame, project_id: str
+    ) -> pd.DataFrame:
+        """Convert metrics DataFrame with multiindex to long format matching model.SCHEMA."""
+        # Reset index to convert multiindex (run, step) to columns
+        metrics_df = metrics_df.reset_index()
+
+        # Get the column levels - should be (path, [value, absolute_time])
+        if not isinstance(metrics_df.columns, pd.MultiIndex):
+            raise ValueError("Expected MultiIndex columns for metrics DataFrame")
+
+        # Flatten the multiindex columns
+        metrics_df.columns = [
+            f"{col[0]}:{col[1]}" if col[1] else col[0] for col in metrics_df.columns
+        ]
+
+        # Melt the DataFrame to convert from wide to long format
+        # Keep run and step as id_vars, melt all other columns
+        id_vars = ["run", "step"]
+        melted_df = metrics_df.melt(
+            id_vars=id_vars,
+            var_name="attribute_path_time",
+            value_name="value",
+        )
+
+        # Split attribute_path_time into path and time component
+        melted_df[["attribute_path", "time_component"]] = melted_df[
+            "attribute_path_time"
+        ].str.rsplit(":", n=1, expand=True)
+
+        # Pivot to separate value and absolute_time columns
+        pivoted_df = melted_df.pivot_table(
+            index=["run", "step", "attribute_path"],
+            columns="time_component",
+            values="value",
+            aggfunc="first",
+        ).reset_index()
+
+        # Flatten column names
+        pivoted_df.columns.name = None
+
+        # Create the schema-compliant DataFrame
+        result_df = pd.DataFrame(
+            {
+                "project_id": project_id,
+                "run_id": pivoted_df["run"],
+                "attribute_path": pivoted_df["attribute_path"],
+                "attribute_type": "float_series",  # Metrics are always float_series
+                "step": pivoted_df["step"],
+                "timestamp": pivoted_df["absolute_time"],
+                "int_value": None,
+                "float_value": pivoted_df["value"],  # Metrics are float values
+                "string_value": None,
+                "bool_value": None,
+                "datetime_value": None,
+                "string_set_value": None,
+                "file_value": None,
+                "histogram_value": None,
+            }
+        )
+
+        # PyArrow will handle dtype conversion based on the schema
+        return result_df
 
     def download_series(
         self,
@@ -164,13 +230,13 @@ class Neptune3Exporter:
         run_ids: list[RunId],
         attributes: None | str | Sequence[str],
     ) -> Generator[pa.RecordBatch, None, None]:
-        series_df = nq_runs.fetch_series(  # index=["run", "step"], column="path"
+        series_df = nq_runs.fetch_series(  # index=["run", "step"], column lvl1="path" lvl2=["value", "absolute_time"]
             project=project_id,
             runs=run_ids,
             attributes=AttributeFilter(name=attributes, type=_SERIES_TYPES),
-            include_time=True,
+            include_time="absolute",
             lineage_to_the_root=False,
-            ype_suffix_in_column_names=True,
+            type_suffix_in_column_names=True,
         )
         yield pa.RecordBatch.from_pandas(series_df, schema=model.SCHEMA)
 
@@ -190,13 +256,13 @@ class Neptune3Exporter:
             type_suffix_in_column_names=True,
         )
 
-        files_series_df = nq_runs.fetch_series(  # index=["run", "step"], column="path"
+        files_series_df = nq_runs.fetch_series(  # index=["run", "step"], column lvl1="path" lvl2=["value", "absolute_time"]
             project=project_id,
             runs=run_ids,
             attributes=AttributeFilter(name=attributes, type=_FILE_SERIES_TYPES),
-            include_time=True,
+            include_time="absolute",
             lineage_to_the_root=False,
-            ype_suffix_in_column_names=True,
+            type_suffix_in_column_names=True,
         )
 
         file_paths_df = nq_runs.download_files(  # index=["run", "step"], column="path"
