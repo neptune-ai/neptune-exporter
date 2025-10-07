@@ -171,27 +171,22 @@ class Neptune3Exporter:
         if not isinstance(metrics_df.columns, pd.MultiIndex):
             raise ValueError("Expected MultiIndex columns for metrics DataFrame")
 
-        # Flatten the multiindex columns
-        metrics_df.columns = [
-            f"{col[0]}:{col[1]}" if col[1] else col[0] for col in metrics_df.columns
+        # Use vectorized stack() but handle dtypes by converting to object first
+        # This avoids expensive merges while maintaining vectorization
+        metrics_df_obj = metrics_df.astype(
+            object
+        )  # Convert to object to avoid dtype conflicts
+        stacked_df = metrics_df_obj.stack([0, 1]).reset_index()
+        stacked_df.columns = [
+            "run",
+            "step",
+            "attribute_path",
+            "time_component",
+            "value",
         ]
 
-        # Melt the DataFrame to convert from wide to long format
-        # Keep run and step as id_vars, melt all other columns
-        id_vars = ["run", "step"]
-        melted_df = metrics_df.melt(
-            id_vars=id_vars,
-            var_name="attribute_path_time",
-            value_name="value",
-        )
-
-        # Split attribute_path_time into path and time component
-        melted_df[["attribute_path", "time_component"]] = melted_df[
-            "attribute_path_time"
-        ].str.rsplit(":", n=1, expand=True)
-
         # Pivot to separate value and absolute_time columns
-        pivoted_df = melted_df.pivot_table(
+        pivoted_df = stacked_df.pivot_table(
             index=["run", "step", "attribute_path"],
             columns="time_component",
             values="value",
@@ -238,7 +233,90 @@ class Neptune3Exporter:
             lineage_to_the_root=False,
             type_suffix_in_column_names=True,
         )
-        yield pa.RecordBatch.from_pandas(series_df, schema=model.SCHEMA)
+        converted_df = self._convert_series_to_schema(series_df, project_id)
+        yield pa.RecordBatch.from_pandas(converted_df, schema=model.SCHEMA)
+
+    def _convert_series_to_schema(
+        self, series_df: pd.DataFrame, project_id: str
+    ) -> pd.DataFrame:
+        """Convert series DataFrame with multiindex to long format matching model.SCHEMA."""
+        # Reset index to convert multiindex (run, step) to columns
+        series_df = series_df.reset_index()
+
+        # Get the column levels - should be (path, [value, absolute_time])
+        if not isinstance(series_df.columns, pd.MultiIndex):
+            raise ValueError("Expected MultiIndex columns for series DataFrame")
+
+        # Use vectorized stack() but handle dtypes by converting to object first
+        # This avoids expensive merges while maintaining vectorization
+        series_df_obj = series_df.astype(
+            object
+        )  # Convert to object to avoid dtype conflicts
+        stacked_df = series_df_obj.stack([0, 1]).reset_index()
+        stacked_df.columns = [
+            "run",
+            "step",
+            "attribute_path",
+            "time_component",
+            "value",
+        ]
+
+        # Pivot to separate value and absolute_time columns
+        pivoted_df = stacked_df.pivot_table(
+            index=["run", "step", "attribute_path"],
+            columns="time_component",
+            values="value",
+            aggfunc="first",
+        ).reset_index()
+
+        # Flatten column names
+        pivoted_df.columns.name = None
+
+        # Extract attribute type from attribute_path (format: "path:type")
+        pivoted_df[["attribute_path", "attribute_type"]] = pivoted_df[
+            "attribute_path"
+        ].str.rsplit(":", n=1, expand=True)
+
+        # Create the schema-compliant DataFrame
+        result_df = pd.DataFrame(
+            {
+                "project_id": project_id,
+                "run_id": pivoted_df["run"],
+                "attribute_path": pivoted_df["attribute_path"],
+                "attribute_type": pivoted_df["attribute_type"],
+                "step": pivoted_df["step"],
+                "timestamp": pivoted_df["absolute_time"],
+                "value": pivoted_df["value"],
+                "int_value": None,
+                "float_value": None,
+                "string_value": None,
+                "bool_value": None,
+                "datetime_value": None,
+                "string_set_value": None,
+                "file_value": None,
+                "histogram_value": None,
+            }
+        )
+
+        # Fill in the appropriate value column based on attribute_type
+        for attr_type in result_df["attribute_type"].unique():
+            mask = result_df["attribute_type"] == attr_type
+
+            if attr_type == "string_series":
+                result_df.loc[mask, "string_value"] = result_df.loc[mask, "value"]
+            elif attr_type == "histogram_series":
+                # Convert Histogram objects to dict format for PyArrow struct schema
+                histogram_values = result_df.loc[mask, "value"].apply(
+                    lambda h: {"type": h.type, "edges": h.edges, "values": h.values}
+                )
+                result_df.loc[mask, "histogram_value"] = histogram_values
+            else:
+                raise ValueError(f"Unsupported series type: {attr_type}")
+
+        result_df = result_df.drop(columns=["value"])
+
+        # PyArrow will handle dtype conversion based on the schema
+        return result_df
 
     def download_files(
         self,
