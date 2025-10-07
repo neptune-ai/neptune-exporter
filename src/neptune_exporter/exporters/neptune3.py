@@ -157,7 +157,7 @@ class Neptune3Exporter:
             runs=run_ids,
             attributes=AttributeFilter(name=attributes, type=_METRIC_TYPES),
             include_time="absolute",
-            include_preview=False,
+            include_point_previews=False,
             lineage_to_the_root=False,
             type_suffix_in_column_names=True,
         )
@@ -173,49 +173,22 @@ class Neptune3Exporter:
         self, metrics_df: pd.DataFrame, project_id: str
     ) -> pd.DataFrame:
         """Convert metrics DataFrame with multiindex to long format matching model.SCHEMA."""
-        # Reset index to convert multiindex (run, step) to columns
-        metrics_df = metrics_df.reset_index()
+        stacked_df = metrics_df.stack(
+            [0]
+        )  # index = [run, step, attribute_path], columns = [value_type(absolute_time, value)]
+        stacked_df.index.names = ["run", "step", "attribute_path"]
+        stacked_df = stacked_df.reset_index()
 
-        # Get the column levels - should be (path, [value, absolute_time])
-        if not isinstance(metrics_df.columns, pd.MultiIndex):
-            raise ValueError("Expected MultiIndex columns for metrics DataFrame")
-
-        # Use vectorized stack() but handle dtypes by converting to object first
-        # This avoids expensive merges while maintaining vectorization
-        metrics_df_obj = metrics_df.astype(
-            object
-        )  # Convert to object to avoid dtype conflicts
-        stacked_df = metrics_df_obj.stack([0, 1]).reset_index()
-        stacked_df.columns = [
-            "run",
-            "step",
-            "attribute_path",
-            "time_component",
-            "value",
-        ]
-
-        # Pivot to separate value and absolute_time columns
-        pivoted_df = stacked_df.pivot_table(
-            index=["run", "step", "attribute_path"],
-            columns="time_component",
-            values="value",
-            aggfunc="first",
-        ).reset_index()
-
-        # Flatten column names
-        pivoted_df.columns.name = None
-
-        # Create the schema-compliant DataFrame
-        result_df = pd.DataFrame(
+        return pd.DataFrame(
             {
                 "project_id": project_id,
-                "run_id": pivoted_df["run"],
-                "attribute_path": pivoted_df["attribute_path"],
+                "run_id": stacked_df["run"],
+                "attribute_path": stacked_df["attribute_path"],
                 "attribute_type": "float_series",  # Metrics are always float_series
-                "step": pivoted_df["step"],
-                "timestamp": pivoted_df["absolute_time"],
+                "step": stacked_df["step"],
+                "timestamp": stacked_df["absolute_time"],
                 "int_value": None,
-                "float_value": pivoted_df["value"],  # Metrics are float values
+                "float_value": stacked_df["value"],  # Metrics are float values
                 "string_value": None,
                 "bool_value": None,
                 "datetime_value": None,
@@ -224,9 +197,6 @@ class Neptune3Exporter:
                 "histogram_value": None,
             }
         )
-
-        # PyArrow will handle dtype conversion based on the schema
-        return result_df
 
     def download_series(
         self,
@@ -278,7 +248,7 @@ class Neptune3Exporter:
         # Pivot to separate value and absolute_time columns
         pivoted_df = stacked_df.pivot_table(
             index=["run", "step", "attribute_path"],
-            columns="time_component",
+            columns="value_type",
             values="value",
             aggfunc="first",
         ).reset_index()
