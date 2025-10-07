@@ -13,6 +13,8 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
+import dataclasses
+from decimal import Decimal
 import pyarrow as pa
 import pandas as pd
 from typing import Generator, Optional, Sequence
@@ -170,25 +172,29 @@ class Neptune3Exporter:
         yield pa.RecordBatch.from_pandas(converted_df, schema=model.SCHEMA)
 
     def _convert_metrics_to_schema(
-        self, metrics_df: pd.DataFrame, project_id: str
+        self, series_df: pd.DataFrame, project_id: str
     ) -> pd.DataFrame:
-        """Convert metrics DataFrame with multiindex to long format matching model.SCHEMA."""
-        stacked_df = metrics_df.stack(
-            [0]
-        )  # index = [run, step, attribute_path], columns = [value_type(absolute_time, value)]
-        stacked_df.index.names = ["run", "step", "attribute_path"]
+        """Convert metrics (which are float series) DataFrame with multiindex to long format matching model.SCHEMA."""
+        stacked_df = series_df.stack(
+            [0], future_stack=True
+        )  # index = [run, step, attribute_path_type], columns = [value_type(absolute_time, value)]
+        stacked_df.index.names = ["run", "step", "attribute_path_type"]
         stacked_df = stacked_df.reset_index()
+
+        stacked_df[["attribute_path", "attribute_type"]] = stacked_df[
+            "attribute_path_type"
+        ].str.rsplit(":", n=1, expand=True)
 
         return pd.DataFrame(
             {
                 "project_id": project_id,
                 "run_id": stacked_df["run"],
                 "attribute_path": stacked_df["attribute_path"],
-                "attribute_type": "float_series",  # Metrics are always float_series
-                "step": stacked_df["step"],
+                "attribute_type": stacked_df["attribute_type"],
+                "step": stacked_df["step"].map(Decimal),
                 "timestamp": stacked_df["absolute_time"],
                 "int_value": None,
-                "float_value": stacked_df["value"],  # Metrics are float values
+                "float_value": stacked_df["value"],
                 "string_value": None,
                 "bool_value": None,
                 "datetime_value": None,
@@ -210,7 +216,6 @@ class Neptune3Exporter:
             attributes=AttributeFilter(name=attributes, type=_SERIES_TYPES),
             include_time="absolute",
             lineage_to_the_root=False,
-            type_suffix_in_column_names=True,
         )
 
         if series_df.empty:
@@ -224,53 +229,27 @@ class Neptune3Exporter:
         self, series_df: pd.DataFrame, project_id: str
     ) -> pd.DataFrame:
         """Convert series DataFrame with multiindex to long format matching model.SCHEMA."""
-        # Reset index to convert multiindex (run, step) to columns
-        series_df = series_df.reset_index()
+        stacked_df = series_df.stack(
+            [0], future_stack=True
+        )  # index = [run, step, attribute_path], columns = [value_type(absolute_time, value)]
+        stacked_df.index.names = ["run", "step", "attribute_path"]
+        stacked_df = stacked_df.reset_index()
 
-        # Get the column levels - should be (path, [value, absolute_time])
-        if not isinstance(series_df.columns, pd.MultiIndex):
-            raise ValueError("Expected MultiIndex columns for series DataFrame")
+        stacked_df["attribute_type"] = stacked_df["value"].map(
+            lambda x: "string_series" if isinstance(x, str) else "histogram_series"
+        )
 
-        # Use vectorized stack() but handle dtypes by converting to object first
-        # This avoids expensive merges while maintaining vectorization
-        series_df_obj = series_df.astype(
-            object
-        )  # Convert to object to avoid dtype conflicts
-        stacked_df = series_df_obj.stack([0, 1]).reset_index()
-        stacked_df.columns = [
-            "run",
-            "step",
-            "attribute_path",
-            "time_component",
-            "value",
-        ]
-
-        # Pivot to separate value and absolute_time columns
-        pivoted_df = stacked_df.pivot_table(
-            index=["run", "step", "attribute_path"],
-            columns="value_type",
-            values="value",
-            aggfunc="first",
-        ).reset_index()
-
-        # Flatten column names
-        pivoted_df.columns.name = None
-
-        # Extract attribute type from attribute_path (format: "path:type")
-        pivoted_df[["attribute_path", "attribute_type"]] = pivoted_df[
-            "attribute_path"
-        ].str.rsplit(":", n=1, expand=True)
-
-        # Create the schema-compliant DataFrame
         result_df = pd.DataFrame(
             {
                 "project_id": project_id,
-                "run_id": pivoted_df["run"],
-                "attribute_path": pivoted_df["attribute_path"],
-                "attribute_type": pivoted_df["attribute_type"],
-                "step": pivoted_df["step"],
-                "timestamp": pivoted_df["absolute_time"],
-                "value": pivoted_df["value"],
+                "run_id": stacked_df["run"],
+                "attribute_path": stacked_df["attribute_path"],
+                "attribute_type": stacked_df["attribute_type"],
+                "step": stacked_df["step"].map(
+                    lambda x: Decimal(x)
+                ),  # Use object dtype to avoid decimal conversion issues
+                "timestamp": stacked_df["absolute_time"],
+                "value": stacked_df["value"],
                 "int_value": None,
                 "float_value": None,
                 "string_value": None,
@@ -282,24 +261,19 @@ class Neptune3Exporter:
             }
         )
 
-        # Fill in the appropriate value column based on attribute_type
         for attr_type in result_df["attribute_type"].unique():
             mask = result_df["attribute_type"] == attr_type
-
             if attr_type == "string_series":
                 result_df.loc[mask, "string_value"] = result_df.loc[mask, "value"]
             elif attr_type == "histogram_series":
-                # Convert Histogram objects to dict format for PyArrow struct schema
-                histogram_values = result_df.loc[mask, "value"].apply(
-                    lambda h: {"type": h.type, "edges": h.edges, "values": h.values}
-                )
-                result_df.loc[mask, "histogram_value"] = histogram_values
+                result_df.loc[mask, "histogram_value"] = result_df.loc[
+                    mask, "value"
+                ].map(dataclasses.asdict)
             else:
                 raise ValueError(f"Unsupported series type: {attr_type}")
 
         result_df = result_df.drop(columns=["value"])
 
-        # PyArrow will handle dtype conversion based on the schema
         return result_df
 
     def download_files(
