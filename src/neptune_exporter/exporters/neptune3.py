@@ -76,6 +76,10 @@ class Neptune3Exporter:
                 type_suffix_in_column_names=True,
             )
         )
+        if parameters_df.empty:
+            yield pa.RecordBatch.from_pylist([], schema=model.SCHEMA)
+            return
+
         converted_df = self._convert_parameters_to_schema(parameters_df, project_id)
         yield pa.RecordBatch.from_pandas(converted_df, schema=model.SCHEMA)
 
@@ -157,6 +161,11 @@ class Neptune3Exporter:
             lineage_to_the_root=False,
             type_suffix_in_column_names=True,
         )
+
+        if metrics_df.empty:
+            yield pa.RecordBatch.from_pylist([], schema=model.SCHEMA)
+            return
+
         converted_df = self._convert_metrics_to_schema(metrics_df, project_id)
         yield pa.RecordBatch.from_pandas(converted_df, schema=model.SCHEMA)
 
@@ -233,6 +242,11 @@ class Neptune3Exporter:
             lineage_to_the_root=False,
             type_suffix_in_column_names=True,
         )
+
+        if series_df.empty:
+            yield pa.RecordBatch.from_pylist([], schema=model.SCHEMA)
+            return
+
         converted_df = self._convert_series_to_schema(series_df, project_id)
         yield pa.RecordBatch.from_pandas(converted_df, schema=model.SCHEMA)
 

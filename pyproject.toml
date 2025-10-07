@@ -15,6 +15,7 @@ dependencies = [
 [dependency-groups]
 dev = [
     "mypy>=1.18.2",
+    "neptune-scale==0.27.0",
     "pre-commit>=4.3.0",
     "pytest>=8.4.2",
     "ruff>=0.13.2",
@@ -31,3 +32,6 @@ build-backend = "uv_build"
 mypy_path = './src/'
 packages = 'neptune_exporter'
 ignore_missing_imports = "True"
+
+[tool.pytest.ini_options]
+addopts = "-s"
