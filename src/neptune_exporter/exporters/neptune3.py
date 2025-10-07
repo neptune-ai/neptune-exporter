@@ -245,9 +245,7 @@ class Neptune3Exporter:
                 "run_id": stacked_df["run"],
                 "attribute_path": stacked_df["attribute_path"],
                 "attribute_type": stacked_df["attribute_type"],
-                "step": stacked_df["step"].map(
-                    lambda x: Decimal(x)
-                ),  # Use object dtype to avoid decimal conversion issues
+                "step": stacked_df["step"].map(Decimal),
                 "timestamp": stacked_df["absolute_time"],
                 "value": stacked_df["value"],
                 "int_value": None,

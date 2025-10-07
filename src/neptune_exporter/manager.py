@@ -51,6 +51,19 @@ class ExportManager:
                 project_id=project_id, run_ids=[run_id], attributes=attributes
             ):
                 project_batches[project_id].append(batch)
+            for batch in self.exporter.download_metrics(
+                project_id=project_id, run_ids=[run_id], attributes=attributes
+            ):
+                project_batches[project_id].append(batch)
+            for batch in self.exporter.download_series(
+                project_id=project_id, run_ids=[run_id], attributes=attributes
+            ):
+                project_batches[project_id].append(batch)
+
+            # for batch in self.exporter.download_files(
+            #     project_id=project_id, run_ids=[run_id], attributes=attributes
+            # ):
+            #     project_batches[project_id].append(batch)
 
         # Convert accumulated batches to tables and save
         for project_id, batches in project_batches.items():
