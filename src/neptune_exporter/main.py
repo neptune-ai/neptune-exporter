@@ -114,7 +114,9 @@ def main(
         raise click.BadParameter(f"Invalid export classes: {', '.join(invalid)}")
 
     # Create exporter instance
-    if exporter == "neptune2":
+    if (
+        exporter == "neptune2"
+    ):  # TODO: reenable type checking after Neptune2Exporter is implemented
         exporter_instance: NeptuneExporter = Neptune2Exporter(api_token=api_token)  # type: ignore
     elif exporter == "neptune3":
         exporter_instance = Neptune3Exporter(api_token=api_token)
@@ -128,6 +130,7 @@ def main(
     export_manager = ExportManager(
         exporter=exporter_instance,
         storage=storage,
+        files_destination=output_path / "files",
     )
 
     click.echo(f"Starting export of {len(project_ids_list)} project(s)...")

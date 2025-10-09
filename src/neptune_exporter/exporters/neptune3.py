@@ -17,12 +17,12 @@ import dataclasses
 from decimal import Decimal
 import pyarrow as pa
 import pandas as pd
-from typing import Generator, Optional, Sequence
+from typing import Generator, Literal, Optional, Sequence
 from pathlib import Path
 import neptune_query as nq
 from neptune_query import runs as nq_runs
 from neptune_query.filters import Attribute, AttributeFilter
-from concurrent.futures import ThreadPoolExecutor
+from concurrent.futures import ThreadPoolExecutor, as_completed
 
 from neptune_exporter import model
 from neptune_exporter.exporters.exporter import ProjectId, RunId
@@ -49,11 +49,15 @@ class Neptune3Exporter:
     def __init__(
         self,
         api_token: Optional[str] = None,
-        attribute_batch_size: int = 128,
+        series_attribute_batch_size: int = 128,
+        file_attribute_batch_size: int = 16,
+        file_series_attribute_batch_size: int = 8,
         max_workers: int = 16,
     ):
         self._initialize_client(api_token=api_token)
-        self._attribute_batch_size = attribute_batch_size
+        self._series_attribute_batch_size = series_attribute_batch_size
+        self._file_attribute_batch_size = file_attribute_batch_size
+        self._file_series_attribute_batch_size = file_series_attribute_batch_size
         self._executor = ThreadPoolExecutor(max_workers=max_workers)
 
     def _initialize_client(self, api_token: Optional[str]) -> None:
@@ -176,7 +180,7 @@ class Neptune3Exporter:
                 include_time="absolute",
                 include_point_previews=False,
                 lineage_to_the_root=False,
-                type_suffix_in_column_names=True,
+                type_suffix_in_column_names=False,  # assume the type is always "float_series"
             )
 
             if not metrics_df.empty:
@@ -186,8 +190,8 @@ class Neptune3Exporter:
 
         # Create batches of attributes
         attribute_batches = [
-            attributes_list[i : i + self._attribute_batch_size]
-            for i in range(0, len(attributes_list), self._attribute_batch_size)
+            attributes_list[i : i + self._series_attribute_batch_size]
+            for i in range(0, len(attributes_list), self._series_attribute_batch_size)
         ]
 
         # Submit all batches to the executor
@@ -197,7 +201,7 @@ class Neptune3Exporter:
         ]
 
         # Yield results as they complete
-        for future in futures:
+        for future in as_completed(futures):
             result = future.result()
             if result is not None:
                 yield result
@@ -209,19 +213,15 @@ class Neptune3Exporter:
         stacked_df = series_df.stack(
             [0], future_stack=True
         )  # index = [run, step, attribute_path_type], columns = [value_type(absolute_time, value)]
-        stacked_df.index.names = ["run", "step", "attribute_path_type"]
+        stacked_df.index.names = ["run", "step", "attribute_path"]
         stacked_df = stacked_df.reset_index()
-
-        stacked_df[["attribute_path", "attribute_type"]] = stacked_df[
-            "attribute_path_type"
-        ].str.rsplit(":", n=1, expand=True)
 
         return pd.DataFrame(
             {
                 "project_id": project_id,
                 "run_id": stacked_df["run"],
                 "attribute_path": stacked_df["attribute_path"],
-                "attribute_type": stacked_df["attribute_type"],
+                "attribute_type": "float_series",
                 "step": stacked_df["step"].map(Decimal),
                 "timestamp": stacked_df["absolute_time"],
                 "int_value": None,
@@ -273,8 +273,10 @@ class Neptune3Exporter:
 
         # Create batches of attributes
         attribute_batches = [
-            attribute_path_types[i : i + self._attribute_batch_size]
-            for i in range(0, len(attribute_path_types), self._attribute_batch_size)
+            attribute_path_types[i : i + self._series_attribute_batch_size]
+            for i in range(
+                0, len(attribute_path_types), self._series_attribute_batch_size
+            )
         ]
 
         # Submit all batches to the executor
@@ -284,7 +286,7 @@ class Neptune3Exporter:
         ]
 
         # Yield results as they complete
-        for future in futures:
+        for future in as_completed(futures):
             result = future.result()
             if result is not None:
                 yield result
@@ -349,36 +351,168 @@ class Neptune3Exporter:
         attributes: None | str | Sequence[str],
         destination: Path,
     ) -> Generator[pa.RecordBatch, None, None]:
-        files_df = nq_runs.fetch_runs_table(  # index="run", cols="attribute" (=path)
+        # Get list of file attributes to batch
+        file_attributes = nq_runs.list_attributes(
             project=project_id,
             runs=run_ids,
             attributes=AttributeFilter(name=attributes, type=_FILE_TYPES),
-            sort_by=Attribute(name="sys/id", type="string"),
-            sort_direction="asc",
-            type_suffix_in_column_names=True,
         )
 
-        files_series_df = nq_runs.fetch_series(  # index=["run", "step"], column lvl1="path" lvl2=["value", "absolute_time"]
+        file_series_attributes = nq_runs.list_attributes(
             project=project_id,
             runs=run_ids,
             attributes=AttributeFilter(name=attributes, type=_FILE_SERIES_TYPES),
-            include_time="absolute",
-            lineage_to_the_root=False,
-            type_suffix_in_column_names=True,
         )
 
-        file_paths_df = nq_runs.download_files(  # index=["run", "step"], column="path"
-            files=files_df,
-            destination=destination,
-        )
+        def fetch_and_convert_file_batch(batch_attributes):
+            if not batch_attributes:
+                return None
 
-        file_series_paths_df = (
-            nq_runs.download_files(  # index=["run", "step"], column="path"
+            # Fetch files table for this batch
+            files_df = nq_runs.fetch_runs_table(
+                project=project_id,
+                runs=run_ids,
+                attributes=AttributeFilter(name=batch_attributes, type=_FILE_TYPES),
+                sort_by=Attribute(name="sys/id", type="string"),
+                sort_direction="asc",
+                type_suffix_in_column_names=True,
+            )
+
+            if files_df.empty:
+                return None
+
+            # Download files for this batch
+            file_paths_df = nq_runs.download_files(
+                files=files_df,
+                destination=destination,
+            )
+
+            # Convert to schema
+            converted_df = self._convert_files_to_schema(
+                file_paths_df, project_id, "file", None
+            )
+
+            return pa.RecordBatch.from_pandas(converted_df, schema=model.SCHEMA)
+
+        def fetch_and_convert_file_series_batch(batch_attributes):
+            if not batch_attributes:
+                return None
+
+            # Fetch file series for this batch
+            files_series_df = nq_runs.fetch_series(
+                project=project_id,
+                runs=run_ids,
+                attributes=AttributeFilter(
+                    name=batch_attributes, type=_FILE_SERIES_TYPES
+                ),
+                include_time="absolute",
+                lineage_to_the_root=False,
+            )
+
+            if files_series_df.empty:
+                return None
+
+            # Download file series for this batch
+            file_series_paths_df = nq_runs.download_files(
                 files=files_series_df,
                 destination=destination,
             )
+
+            # Convert to schema
+            converted_df = self._convert_files_to_schema(
+                file_series_paths_df, project_id, "file_series", files_series_df
+            )
+
+            return pa.RecordBatch.from_pandas(converted_df, schema=model.SCHEMA)
+
+        # Create batches of attributes
+        file_attribute_batches = [
+            file_attributes[i : i + self._file_attribute_batch_size]
+            for i in range(0, len(file_attributes), self._file_attribute_batch_size)
+        ]
+
+        file_series_attribute_batches = [
+            file_series_attributes[i : i + self._file_series_attribute_batch_size]
+            for i in range(
+                0, len(file_series_attributes), self._file_series_attribute_batch_size
+            )
+        ]
+
+        # Submit all batches to the executor
+        futures = []
+
+        # Submit file batches
+        for batch_attributes in file_attribute_batches:
+            futures.append(
+                self._executor.submit(fetch_and_convert_file_batch, batch_attributes)
+            )
+
+        # Submit file series batches
+        for batch_attributes in file_series_attribute_batches:
+            futures.append(
+                self._executor.submit(
+                    fetch_and_convert_file_series_batch, batch_attributes
+                )
+            )
+
+        # Yield results as they complete
+        for future in as_completed(futures):
+            result = future.result()
+            if result is not None:
+                yield result
+
+    def _convert_files_to_schema(
+        self,
+        downloaded_files_df: pd.DataFrame,
+        project_id: str,
+        attribute_type: Literal["file", "file_series"],
+        file_series_df: Optional[pd.DataFrame],
+    ) -> pd.DataFrame:
+        """Convert downloaded files DataFrame to long format matching model.SCHEMA."""
+        # Reset index to make 'run' a column
+        downloaded_files_df = downloaded_files_df.reset_index()
+
+        # Melt the DataFrame to convert from wide to long format
+        melted_df = downloaded_files_df.melt(
+            id_vars=["run", "step"],
+            var_name="attribute_path",
+            value_name="file_path",
         )
 
-        yield pa.stack_batches(
-            [file_paths_df, file_series_paths_df], schema=model.SCHEMA
+        # For file_series, we need to add timestamp information
+        if file_series_df is not None:
+            # Reset index and melt the file_series_df to get step and timestamp info
+            series_stacked_df = file_series_df.stack([0], future_stack=True)
+            series_stacked_df.index.names = ["run", "step", "attribute_path"]
+            series_stacked_df = series_stacked_df.reset_index()
+
+            # Merge with melted_df to get timestamp
+            melted_df = melted_df.merge(
+                series_stacked_df[["run", "attribute_path", "step", "absolute_time"]],
+                on=["run", "attribute_path", "step"],
+                how="left",
+            )
+        else:
+            # For regular files, no timestamp
+            melted_df["absolute_time"] = None
+
+        return pd.DataFrame(
+            {
+                "project_id": project_id,
+                "run_id": melted_df["run"],
+                "attribute_path": melted_df["attribute_path"],
+                "attribute_type": attribute_type,
+                "step": melted_df["step"].map(Decimal),
+                "timestamp": melted_df["absolute_time"],
+                "int_value": None,
+                "float_value": None,
+                "string_value": None,
+                "bool_value": None,
+                "datetime_value": None,
+                "string_set_value": None,
+                "file_value": melted_df["file_path"].map(
+                    lambda x: {"path": x} if pd.notna(x) else None
+                ),
+                "histogram_value": None,
+            }
         )

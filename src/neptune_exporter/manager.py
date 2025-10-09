@@ -15,6 +15,7 @@
 
 
 from typing import Iterable, Literal
+from click import Path
 from tqdm import tqdm
 from neptune_exporter.exporters.exporter import NeptuneExporter
 from neptune_exporter.storage import ParquetStorage
@@ -25,9 +26,11 @@ class ExportManager:
         self,
         exporter: NeptuneExporter,
         storage: ParquetStorage,
+        files_destination: Path,
     ):
-        self.exporter = exporter
+        self._exporter = exporter
         self._storage = storage
+        self._files_destination = files_destination
 
     def run(
         self,
@@ -43,7 +46,7 @@ class ExportManager:
         for project_id in tqdm(
             project_ids, desc="Listing runs in projects", unit="project"
         ):
-            run_ids = self.exporter.list_runs(project_id, runs)
+            run_ids = self._exporter.list_runs(project_id, runs)
             project_runs[project_id] = run_ids
 
         # Step 2: Process each project's runs
@@ -64,7 +67,7 @@ class ExportManager:
                             unit_scale=True,
                             leave=False,
                         ) as pbar:
-                            for batch in self.exporter.download_parameters(
+                            for batch in self._exporter.download_parameters(
                                 project_id=project_id,
                                 run_ids=[run_id],
                                 attributes=attributes,
@@ -79,7 +82,7 @@ class ExportManager:
                             unit_scale=True,
                             leave=False,
                         ) as pbar:
-                            for batch in self.exporter.download_metrics(
+                            for batch in self._exporter.download_metrics(
                                 project_id=project_id,
                                 run_ids=[run_id],
                                 attributes=attributes,
@@ -94,7 +97,7 @@ class ExportManager:
                             unit_scale=True,
                             leave=False,
                         ) as pbar:
-                            for batch in self.exporter.download_series(
+                            for batch in self._exporter.download_series(
                                 project_id=project_id,
                                 run_ids=[run_id],
                                 attributes=attributes,
@@ -103,4 +106,21 @@ class ExportManager:
                                 pbar.update(batch.nbytes)
 
                     if "files" in export_classes:
-                        pass  # TODO: Implement files export
+                        with tqdm(
+                            desc=f"  Files for {run_id}",
+                            unit="files",
+                            leave=False,
+                        ) as pbar:
+                            for batch in self._exporter.download_files(
+                                project_id=project_id,
+                                run_ids=[run_id],
+                                attributes=attributes,
+                                destination=self._files_destination
+                                / _sanitize_path_part(project_id),
+                            ):
+                                writer.save(batch)
+                                pbar.update(batch.num_rows)
+
+
+def _sanitize_path_part(part: str) -> str:
+    return "".join(c if c.isalnum() or c in ("_", "-") else "_" for c in part)

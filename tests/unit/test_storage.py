@@ -1,10 +1,11 @@
 import pyarrow as pa
+from pathlib import Path
 from neptune_exporter.storage.parquet import ParquetStorage
 
 
-def test_parquet_storage_init(temp_dir):
+def test_parquet_storage_init():
     """Test ParquetStorage initialization."""
-    base_path = temp_dir / "test_parquet_storage_init"
+    base_path = Path("./test_output")
     storage = ParquetStorage(base_path)
     assert storage.base_path == base_path
     assert base_path.exists()
@@ -12,7 +13,7 @@ def test_parquet_storage_init(temp_dir):
 
 def test_parquet_storage_save(temp_dir):
     """Test saving data to Parquet file."""
-    base_path = temp_dir / "test_parquet_storage_save"
+    base_path = temp_dir
     storage = ParquetStorage(base_path)
 
     # Create test data as RecordBatch
@@ -37,7 +38,7 @@ def test_parquet_storage_save(temp_dir):
 
 def test_parquet_storage_context_manager(temp_dir):
     """Test using ParquetStorage with context manager."""
-    base_path = temp_dir / "test_parquet_storage_context_manager"
+    base_path = temp_dir
     storage = ParquetStorage(base_path)
 
     # Create test data as RecordBatch
