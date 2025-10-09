@@ -15,7 +15,6 @@
 
 from pathlib import Path
 from dataclasses import dataclass
-from typing import Optional
 import pyarrow as pa
 import pyarrow.parquet as pq
 
@@ -25,19 +24,17 @@ class ProjectWriter:
     """Tracks the state of a parquet writer for a specific project."""
 
     project_id: str
+    writer: pq.ParquetWriter
+    current_file_path: Path
     current_part: int = 0
-    writer: Optional[pq.ParquetWriter] = None
-    current_file_path: Optional[Path] = None
 
     def close(self) -> None:
-        """Close the writer if it exists."""
-        if self.writer is not None:
-            self.writer.close()
-            self.writer = None
+        """Close the writer."""
+        self.writer.close()
 
     def get_compressed_size(self) -> int:
         """Get the current compressed file size."""
-        if self.current_file_path and self.current_file_path.exists():
+        if self.current_file_path.exists():
             return self.current_file_path.stat().st_size
         return 0
 
@@ -77,34 +74,21 @@ class ParquetStorage:
     def save(self, project_id: str, data: pa.RecordBatch) -> None:
         """Stream data to current part, creating new part when compressed size limit reached."""
         if project_id not in self._project_writers:
-            self._project_writers[project_id] = ProjectWriter(project_id=project_id)
+            # Create first part for new project
+            self._create_new_part(project_id, data)
+            return
 
         writer_state = self._project_writers[project_id]
 
-        # If no writer exists or current part is too large, start new part
-        if (
-            writer_state.writer is None
-            or writer_state.get_compressed_size() > self._target_part_size_bytes
-        ):
-            # Close current writer if it exists
+        # If current part is too large, start new part
+        if writer_state.get_compressed_size() > self._target_part_size_bytes:
+            # Close current writer
             writer_state.close()
-
-            # Start new part
-            writer_state.current_part += 1
-
-            table_path = (
-                self.base_path
-                / f"{project_id}/part_{writer_state.current_part}.parquet"
-            )
-            table_path.parent.mkdir(parents=True, exist_ok=True)
-            writer_state.current_file_path = table_path
-
-            writer_state.writer = pq.ParquetWriter(
-                table_path, data.schema, compression="snappy"
-            )
-
-        # Write batch to current part
-        writer_state.writer.write_batch(data)
+            # Create new part
+            self._create_new_part(project_id, data)
+        else:
+            # Write batch to current part
+            writer_state.writer.write_batch(data)
 
     def project_writer(self, project_id: str) -> ProjectWriterContext:
         """Get a context manager for writing to a specific project."""
@@ -114,6 +98,31 @@ class ParquetStorage:
         """Close the writer for a specific project."""
         if project_id in self._project_writers:
             self._project_writers[project_id].close()
+
+    def _create_new_part(self, project_id: str, data: pa.RecordBatch) -> None:
+        """Create a new part for the given project."""
+        if project_id not in self._project_writers:
+            # New project - start with part 0
+            current_part = 0
+        else:
+            # Existing project - increment part number
+            current_part = self._project_writers[project_id].current_part + 1
+
+        table_path = self.base_path / f"{project_id}/part_{current_part}.parquet"
+        table_path.parent.mkdir(parents=True, exist_ok=True)
+
+        writer = pq.ParquetWriter(table_path, data.schema, compression="snappy")
+
+        # Create or update ProjectWriter
+        self._project_writers[project_id] = ProjectWriter(
+            project_id=project_id,
+            writer=writer,
+            current_file_path=table_path,
+            current_part=current_part,
+        )
+
+        # Write the data to the new part
+        writer.write_batch(data)
 
     def close_all(self) -> None:
         """Close all open writers."""
