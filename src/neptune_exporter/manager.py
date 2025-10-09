@@ -14,6 +14,7 @@
 # limitations under the License.
 
 
+from typing import Iterable, Literal
 from tqdm import tqdm
 from neptune_exporter.exporters.exporter import NeptuneExporter
 from neptune_exporter.storage import ParquetStorage
@@ -33,6 +34,9 @@ class ExportManager:
         project_ids: list[str],
         runs: None | str = None,
         attributes: None | str | list[str] = None,
+        export_classes: Iterable[
+            Literal["parameters", "metrics", "series", "files"]
+        ] = {"parameters", "metrics", "series", "files"},
     ) -> None:
         # Step 1: List all runs for all projects
         project_runs = {}
@@ -53,45 +57,50 @@ class ExportManager:
                     unit="run",
                     leave=False,
                 ):
-                    # Stream all RecordBatches directly to storage
-                    with tqdm(
-                        desc=f"  Parameters for {run_id}",
-                        unit="B",
-                        unit_scale=True,
-                        leave=False,
-                    ) as pbar:
-                        for batch in self.exporter.download_parameters(
-                            project_id=project_id,
-                            run_ids=[run_id],
-                            attributes=attributes,
-                        ):
-                            writer.save(batch)
-                            pbar.update(batch.nbytes)
+                    if "parameters" in export_classes:
+                        with tqdm(
+                            desc=f"  Parameters for {run_id}",
+                            unit="B",
+                            unit_scale=True,
+                            leave=False,
+                        ) as pbar:
+                            for batch in self.exporter.download_parameters(
+                                project_id=project_id,
+                                run_ids=[run_id],
+                                attributes=attributes,
+                            ):
+                                writer.save(batch)
+                                pbar.update(batch.nbytes)
 
-                    with tqdm(
-                        desc=f"  Metrics for {run_id}",
-                        unit="B",
-                        unit_scale=True,
-                        leave=False,
-                    ) as pbar:
-                        for batch in self.exporter.download_metrics(
-                            project_id=project_id,
-                            run_ids=[run_id],
-                            attributes=attributes,
-                        ):
-                            writer.save(batch)
-                            pbar.update(batch.nbytes)
+                    if "metrics" in export_classes:
+                        with tqdm(
+                            desc=f"  Metrics for {run_id}",
+                            unit="B",
+                            unit_scale=True,
+                            leave=False,
+                        ) as pbar:
+                            for batch in self.exporter.download_metrics(
+                                project_id=project_id,
+                                run_ids=[run_id],
+                                attributes=attributes,
+                            ):
+                                writer.save(batch)
+                                pbar.update(batch.nbytes)
 
-                    with tqdm(
-                        desc=f"  Series for {run_id}",
-                        unit="B",
-                        unit_scale=True,
-                        leave=False,
-                    ) as pbar:
-                        for batch in self.exporter.download_series(
-                            project_id=project_id,
-                            run_ids=[run_id],
-                            attributes=attributes,
-                        ):
-                            writer.save(batch)
-                            pbar.update(batch.nbytes)
+                    if "series" in export_classes:
+                        with tqdm(
+                            desc=f"  Series for {run_id}",
+                            unit="B",
+                            unit_scale=True,
+                            leave=False,
+                        ) as pbar:
+                            for batch in self.exporter.download_series(
+                                project_id=project_id,
+                                run_ids=[run_id],
+                                attributes=attributes,
+                            ):
+                                writer.save(batch)
+                                pbar.update(batch.nbytes)
+
+                    if "files" in export_classes:
+                        pass  # TODO: Implement files export
