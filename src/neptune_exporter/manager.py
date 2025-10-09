@@ -108,7 +108,7 @@ class ExportManager:
                     if "files" in export_classes:
                         with tqdm(
                             desc=f"  Files for {run_id}",
-                            unit="files",
+                            unit=" files",
                             leave=False,
                         ) as pbar:
                             for batch in self._exporter.download_files(

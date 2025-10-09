@@ -351,6 +351,8 @@ class Neptune3Exporter:
         attributes: None | str | Sequence[str],
         destination: Path,
     ) -> Generator[pa.RecordBatch, None, None]:
+        destination = destination.resolve()
+
         # Get list of file attributes to batch
         file_attributes = nq_runs.list_attributes(
             project=project_id,
@@ -389,7 +391,11 @@ class Neptune3Exporter:
 
             # Convert to schema
             converted_df = self._convert_files_to_schema(
-                file_paths_df, project_id, "file", None
+                downloaded_files_df=file_paths_df,
+                project_id=project_id,
+                attribute_type="file",
+                file_series_df=None,
+                destination=destination,
             )
 
             return pa.RecordBatch.from_pandas(converted_df, schema=model.SCHEMA)
@@ -420,7 +426,11 @@ class Neptune3Exporter:
 
             # Convert to schema
             converted_df = self._convert_files_to_schema(
-                file_series_paths_df, project_id, "file_series", files_series_df
+                downloaded_files_df=file_series_paths_df,
+                project_id=project_id,
+                attribute_type="file_series",
+                file_series_df=files_series_df,
+                destination=destination,
             )
 
             return pa.RecordBatch.from_pandas(converted_df, schema=model.SCHEMA)
@@ -467,6 +477,7 @@ class Neptune3Exporter:
         project_id: str,
         attribute_type: Literal["file", "file_series"],
         file_series_df: Optional[pd.DataFrame],
+        destination: Path,
     ) -> pd.DataFrame:
         """Convert downloaded files DataFrame to long format matching model.SCHEMA."""
         # Reset index to make 'run' a column
@@ -511,7 +522,9 @@ class Neptune3Exporter:
                 "datetime_value": None,
                 "string_set_value": None,
                 "file_value": melted_df["file_path"].map(
-                    lambda x: {"path": x} if pd.notna(x) else None
+                    lambda x: {"path": str(Path(x).relative_to(destination))}
+                    if pd.notna(x)
+                    else None
                 ),
                 "histogram_value": None,
             }
