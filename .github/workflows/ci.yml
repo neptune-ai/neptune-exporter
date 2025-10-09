@@ -8,7 +8,8 @@ on:
 
 jobs:
   test:
-    runs-on: tools-gha-latest
+    runs-on: ubuntu-latest  # TODO: configure tools-gha-latest
+    timeout-minutes: 30
     strategy:
       matrix:
         python-version: ["3.13"]
@@ -40,7 +41,8 @@ jobs:
 
     - name: Run integration tests
       run: |
-        uv run pytest tests/integration -v --junitxml=test-results/integration-results.xml
+        # uv run pytest tests/integration -v --junitxml=test-results/integration-results.xml
+        echo "TODO: Run integration tests on tools-gha-latest"
       env:
         NEPTUNE_E2E_API_TOKEN: ${{ secrets.NEPTUNE_E2E_API_TOKEN }}
         NEPTUNE_E2E_PROJECT: ${{ secrets.NEPTUNE_E2E_PROJECT }}
