@@ -241,36 +241,46 @@ class Neptune3Exporter:
         run_ids: list[RunId],
         attributes: None | str | Sequence[str],
     ) -> Generator[pa.RecordBatch, None, None]:
-        attributes_list = nq_runs.list_attributes(
+        attributes_df = nq_runs.fetch_runs_table(
             project=project_id,
             runs=run_ids,
             attributes=AttributeFilter(name=attributes, type=_SERIES_TYPES),
+            sort_by=Attribute(name="sys/id", type="string"),
+            sort_direction="asc",
+            type_suffix_in_column_names=True,
         )
+        attribute_path_types = [
+            attr.rsplit(":", maxsplit=1) for attr in attributes_df.columns
+        ]
 
-        def fetch_and_convert_batch(batch_attributes):
+        def fetch_and_convert_batch(attributes_batch):
             series_df = nq_runs.fetch_series(
                 project=project_id,
                 runs=run_ids,
-                attributes=batch_attributes,
+                attributes=[name for name, _ in attributes_batch],
                 include_time="absolute",
                 lineage_to_the_root=False,
             )
 
             if not series_df.empty:
-                converted_df = self._convert_series_to_schema(series_df, project_id)
+                converted_df = self._convert_series_to_schema(
+                    series_df=series_df,
+                    project_id=project_id,
+                    attribute_path_types=attributes_batch,
+                )
                 return pa.RecordBatch.from_pandas(converted_df, schema=model.SCHEMA)
             return None
 
         # Create batches of attributes
         attribute_batches = [
-            attributes_list[i : i + self._attribute_batch_size]
-            for i in range(0, len(attributes_list), self._attribute_batch_size)
+            attribute_path_types[i : i + self._attribute_batch_size]
+            for i in range(0, len(attribute_path_types), self._attribute_batch_size)
         ]
 
         # Submit all batches to the executor
         futures = [
-            self._executor.submit(fetch_and_convert_batch, batch_attributes)
-            for batch_attributes in attribute_batches
+            self._executor.submit(fetch_and_convert_batch, attributes_batch)
+            for attributes_batch in attribute_batches
         ]
 
         # Yield results as they complete
@@ -280,7 +290,10 @@ class Neptune3Exporter:
                 yield result
 
     def _convert_series_to_schema(
-        self, series_df: pd.DataFrame, project_id: str
+        self,
+        series_df: pd.DataFrame,
+        project_id: str,
+        attribute_path_types: list[tuple[str, str]],
     ) -> pd.DataFrame:
         """Convert series DataFrame with multiindex to long format matching model.SCHEMA."""
         stacked_df = series_df.stack(
@@ -289,8 +302,9 @@ class Neptune3Exporter:
         stacked_df.index.names = ["run", "step", "attribute_path"]
         stacked_df = stacked_df.reset_index()
 
-        stacked_df["attribute_type"] = stacked_df["value"].map(
-            lambda x: "string_series" if isinstance(x, str) else "histogram_series"
+        attribute_type_map = {name: typ for name, typ in attribute_path_types}
+        stacked_df["attribute_type"] = stacked_df["attribute_path"].map(
+            attribute_type_map
         )
 
         result_df = pd.DataFrame(
