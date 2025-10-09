@@ -22,6 +22,7 @@ from pathlib import Path
 import neptune_query as nq
 from neptune_query import runs as nq_runs
 from neptune_query.filters import Attribute, AttributeFilter
+from concurrent.futures import ThreadPoolExecutor
 
 from neptune_exporter import model
 from neptune_exporter.exporters.exporter import ProjectId, RunId
@@ -45,8 +46,15 @@ _FILE_SERIES_TYPES: Sequence[str] = ("file_series",)
 
 
 class Neptune3Exporter:
-    def __init__(self, api_token: Optional[str] = None):
+    def __init__(
+        self,
+        api_token: Optional[str] = None,
+        attribute_batch_size: int = 128,
+        max_workers: int = 16,
+    ):
         self._initialize_client(api_token=api_token)
+        self._attribute_batch_size = attribute_batch_size
+        self._executor = ThreadPoolExecutor(max_workers=max_workers)
 
     def _initialize_client(self, api_token: Optional[str]) -> None:
         if api_token is not None:
@@ -154,22 +162,45 @@ class Neptune3Exporter:
         run_ids: list[RunId],
         attributes: None | str | Sequence[str],
     ) -> Generator[pa.RecordBatch, None, None]:
-        metrics_df = nq_runs.fetch_metrics(  # index=["run", "step"], column lvl1="path" lvl2=["value", "absolute_time"]
+        attributes_list = nq_runs.list_attributes(
             project=project_id,
             runs=run_ids,
             attributes=AttributeFilter(name=attributes, type=_METRIC_TYPES),
-            include_time="absolute",
-            include_point_previews=False,
-            lineage_to_the_root=False,
-            type_suffix_in_column_names=True,
         )
 
-        if metrics_df.empty:
-            yield pa.RecordBatch.from_pylist([], schema=model.SCHEMA)
-            return
+        def fetch_and_convert_batch(batch_attributes):
+            metrics_df = nq_runs.fetch_metrics(
+                project=project_id,
+                runs=run_ids,
+                attributes=batch_attributes,
+                include_time="absolute",
+                include_point_previews=False,
+                lineage_to_the_root=False,
+                type_suffix_in_column_names=True,
+            )
 
-        converted_df = self._convert_metrics_to_schema(metrics_df, project_id)
-        yield pa.RecordBatch.from_pandas(converted_df, schema=model.SCHEMA)
+            if not metrics_df.empty:
+                converted_df = self._convert_metrics_to_schema(metrics_df, project_id)
+                return pa.RecordBatch.from_pandas(converted_df, schema=model.SCHEMA)
+            return None
+
+        # Create batches of attributes
+        attribute_batches = [
+            attributes_list[i : i + self._attribute_batch_size]
+            for i in range(0, len(attributes_list), self._attribute_batch_size)
+        ]
+
+        # Submit all batches to the executor
+        futures = [
+            self._executor.submit(fetch_and_convert_batch, batch_attributes)
+            for batch_attributes in attribute_batches
+        ]
+
+        # Yield results as they complete
+        for future in futures:
+            result = future.result()
+            if result is not None:
+                yield result
 
     def _convert_metrics_to_schema(
         self, series_df: pd.DataFrame, project_id: str
@@ -210,20 +241,43 @@ class Neptune3Exporter:
         run_ids: list[RunId],
         attributes: None | str | Sequence[str],
     ) -> Generator[pa.RecordBatch, None, None]:
-        series_df = nq_runs.fetch_series(  # index=["run", "step"], column lvl1="path" lvl2=["value", "absolute_time"]
+        attributes_list = nq_runs.list_attributes(
             project=project_id,
             runs=run_ids,
             attributes=AttributeFilter(name=attributes, type=_SERIES_TYPES),
-            include_time="absolute",
-            lineage_to_the_root=False,
         )
 
-        if series_df.empty:
-            yield pa.RecordBatch.from_pylist([], schema=model.SCHEMA)
-            return
+        def fetch_and_convert_batch(batch_attributes):
+            series_df = nq_runs.fetch_series(
+                project=project_id,
+                runs=run_ids,
+                attributes=batch_attributes,
+                include_time="absolute",
+                lineage_to_the_root=False,
+            )
 
-        converted_df = self._convert_series_to_schema(series_df, project_id)
-        yield pa.RecordBatch.from_pandas(converted_df, schema=model.SCHEMA)
+            if not series_df.empty:
+                converted_df = self._convert_series_to_schema(series_df, project_id)
+                return pa.RecordBatch.from_pandas(converted_df, schema=model.SCHEMA)
+            return None
+
+        # Create batches of attributes
+        attribute_batches = [
+            attributes_list[i : i + self._attribute_batch_size]
+            for i in range(0, len(attributes_list), self._attribute_batch_size)
+        ]
+
+        # Submit all batches to the executor
+        futures = [
+            self._executor.submit(fetch_and_convert_batch, batch_attributes)
+            for batch_attributes in attribute_batches
+        ]
+
+        # Yield results as they complete
+        for future in futures:
+            result = future.result()
+            if result is not None:
+                yield result
 
     def _convert_series_to_schema(
         self, series_df: pd.DataFrame, project_id: str

@@ -26,7 +26,7 @@ def main() -> None:
         storage=ParquetStorage(base_path=Path("./examples")),
     )
     export_manager.run(
-        project_ids=["michal.sosnicki/earth"],
+        project_ids=["examples/LLM-Pretraining"],
     )
 
 

@@ -14,16 +14,19 @@
 # limitations under the License.
 
 
-import pyarrow as pa
 from tqdm import tqdm
 from neptune_exporter.exporters.exporter import NeptuneExporter
 from neptune_exporter.storage import ParquetStorage
 
 
 class ExportManager:
-    def __init__(self, exporter: NeptuneExporter, storage: ParquetStorage):
+    def __init__(
+        self,
+        exporter: NeptuneExporter,
+        storage: ParquetStorage,
+    ):
         self.exporter = exporter
-        self.storage = storage
+        self._storage = storage
 
     def run(
         self,
@@ -31,43 +34,64 @@ class ExportManager:
         runs: None | str = None,
         attributes: None | str | list[str] = None,
     ) -> None:
-        project_run_ids = []
+        # Step 1: List all runs for all projects
+        project_runs = {}
         for project_id in tqdm(
             project_ids, desc="Listing runs in projects", unit="project"
         ):
             run_ids = self.exporter.list_runs(project_id, runs)
-            project_run_ids.extend([(project_id, run_id) for run_id in run_ids])
+            project_runs[project_id] = run_ids
 
-        # Accumulate RecordBatches for each project
-        project_batches: dict[str, list[pa.RecordBatch]] = {}
-        for project_id, run_id in tqdm(
-            project_run_ids, desc="Exporting runs", unit="run"
+        # Step 2: Process each project's runs
+        for project_id, run_ids in tqdm(
+            project_runs.items(), desc="Exporting projects", unit="project"
         ):
-            if project_id not in project_batches:
-                project_batches[project_id] = []
+            with self._storage.project_writer(project_id) as writer:
+                for run_id in tqdm(
+                    run_ids,
+                    desc=f"Exporting runs from {project_id}",
+                    unit="run",
+                    leave=False,
+                ):
+                    # Stream all RecordBatches directly to storage
+                    with tqdm(
+                        desc=f"  Parameters for {run_id}",
+                        unit="B",
+                        unit_scale=True,
+                        leave=False,
+                    ) as pbar:
+                        for batch in self.exporter.download_parameters(
+                            project_id=project_id,
+                            run_ids=[run_id],
+                            attributes=attributes,
+                        ):
+                            writer.save(batch)
+                            pbar.update(batch.nbytes)
 
-            # Collect all RecordBatches for this run
-            for batch in self.exporter.download_parameters(
-                project_id=project_id, run_ids=[run_id], attributes=attributes
-            ):
-                project_batches[project_id].append(batch)
-            for batch in self.exporter.download_metrics(
-                project_id=project_id, run_ids=[run_id], attributes=attributes
-            ):
-                project_batches[project_id].append(batch)
-            for batch in self.exporter.download_series(
-                project_id=project_id, run_ids=[run_id], attributes=attributes
-            ):
-                project_batches[project_id].append(batch)
+                    with tqdm(
+                        desc=f"  Metrics for {run_id}",
+                        unit="B",
+                        unit_scale=True,
+                        leave=False,
+                    ) as pbar:
+                        for batch in self.exporter.download_metrics(
+                            project_id=project_id,
+                            run_ids=[run_id],
+                            attributes=attributes,
+                        ):
+                            writer.save(batch)
+                            pbar.update(batch.nbytes)
 
-            # for batch in self.exporter.download_files(
-            #     project_id=project_id, run_ids=[run_id], attributes=attributes
-            # ):
-            #     project_batches[project_id].append(batch)
-
-        # Convert accumulated batches to tables and save
-        for project_id, batches in project_batches.items():
-            if batches:
-                # Combine all RecordBatches into a single table
-                table = pa.Table.from_batches(batches)
-                self.storage.save(project_id, table)
+                    with tqdm(
+                        desc=f"  Series for {run_id}",
+                        unit="B",
+                        unit_scale=True,
+                        leave=False,
+                    ) as pbar:
+                        for batch in self.exporter.download_series(
+                            project_id=project_id,
+                            run_ids=[run_id],
+                            attributes=attributes,
+                        ):
+                            writer.save(batch)
+                            pbar.update(batch.nbytes)
