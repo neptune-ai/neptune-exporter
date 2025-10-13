@@ -19,7 +19,7 @@ from neptune_query.internal.context import (
 )
 from neptune_query.internal.filters import _Filter
 from neptune_query.internal.retrieval.search import fetch_experiment_sys_attrs
-from integration.data import (
+from .data import (
     TEST_DATA,
     TEST_NOW,
 )
@@ -67,12 +67,10 @@ def test_runs(project, api_token, client) -> None:
     runs = {}
 
     for experiment in TEST_DATA:
-        project_id = project
-
         # Create new experiment with all data
         run = Run(
             api_token=api_token,
-            project=project_id,
+            project=project,
             run_id=experiment.run_id,
             experiment_name=experiment.name,
             source_tracking_config=None,
