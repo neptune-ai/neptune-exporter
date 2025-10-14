@@ -13,7 +13,6 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
-import dataclasses
 from decimal import Decimal
 from neptune.attributes.attribute import Attribute
 from neptune import attributes
@@ -89,10 +88,10 @@ class Neptune2Exporter:
         attributes: None | str | Sequence[str],
     ) -> Generator[pa.RecordBatch, None, None]:
         """Download parameters from Neptune runs."""
-        all_data: list[dict[str, Any]] = []
-
         for run_id in run_ids:
             try:
+                all_data: list[dict[str, Any]] = []
+
                 with neptune.init_run(
                     api_token=self._api_token,
                     project=project_id,
@@ -128,14 +127,14 @@ class Neptune2Exporter:
                                 "value": value,
                             }
                         )
-            except neptune.exceptions.MetadataContainerNotFound:
-                continue
+                if all_data:
+                    converted_df = self._convert_parameters_to_schema(
+                        all_data, project_id
+                    )
+                    yield pa.RecordBatch.from_pandas(converted_df, schema=model.SCHEMA)
 
-        if all_data:
-            converted_df = self._convert_parameters_to_schema(all_data, project_id)
-            yield pa.RecordBatch.from_pandas(converted_df, schema=model.SCHEMA)
-        else:
-            yield pa.RecordBatch.from_pylist([], schema=model.SCHEMA)
+            except neptune.exceptions.MetadataContainerNotFound:
+                pass
 
     def _convert_parameters_to_schema(
         self, all_data: list[dict[str, Any]], project_id: ProjectId
@@ -193,10 +192,10 @@ class Neptune2Exporter:
         attributes: None | str | Sequence[str],
     ) -> Generator[pa.RecordBatch, None, None]:
         """Download metrics from Neptune runs."""
-        all_data_dfs: list[pd.DataFrame] = []
-
         for run_id in run_ids:
             try:
+                all_data_dfs: list[pd.DataFrame] = []
+
                 with neptune.init_run(
                     api_token=self._api_token,
                     project=project_id,
@@ -221,14 +220,15 @@ class Neptune2Exporter:
                         series_df["attribute_type"] = attribute_type
 
                         all_data_dfs.append(series_df)
-            except neptune.exceptions.MetadataContainerNotFound:
-                continue
 
-        if all_data_dfs:
-            converted_df = self._convert_metrics_to_schema(all_data_dfs, project_id)
-            yield pa.RecordBatch.from_pandas(converted_df, schema=model.SCHEMA)
-        else:
-            yield pa.RecordBatch.from_pylist([], schema=model.SCHEMA)
+                if all_data_dfs:
+                    converted_df = self._convert_metrics_to_schema(
+                        all_data_dfs, project_id
+                    )
+                    yield pa.RecordBatch.from_pandas(converted_df, schema=model.SCHEMA)
+
+            except neptune.exceptions.MetadataContainerNotFound:
+                pass
 
     def _convert_metrics_to_schema(
         self, all_data_dfs: list[pd.DataFrame], project_id: ProjectId
@@ -263,87 +263,69 @@ class Neptune2Exporter:
         attributes: None | str | Sequence[str],
     ) -> Generator[pa.RecordBatch, None, None]:
         """Download series data from Neptune runs."""
-        if not run_ids:
-            yield pa.RecordBatch.from_pylist([], schema=model.SCHEMA)
-            return
-
-        all_data = []
-
         for run_id in run_ids:
-            with neptune.init_run(
-                api_token=self._api_token,
-                project=project_id,
-                with_id=run_id,
-                mode="read-only",
-            ) as run:
-                # Get run structure to find series attributes
-                # structure = run.get_structure()
-                namespaces: list[str] = []  # self._flatten_namespaces(structure)
+            try:
+                all_data_dfs: list[pd.DataFrame] = []
 
-                for namespace in namespaces:
-                    try:
-                        attr_obj = run[namespace]
-                        attr_type = self._get_attribute_type(attr_obj)
+                with neptune.init_run(
+                    api_token=self._api_token,
+                    project=project_id,
+                    with_id=run_id,
+                    mode="read-only",
+                ) as run:
+                    structure = run.get_structure()
 
-                        # Filter by attributes if specified
-                        if attributes is not None:
-                            if isinstance(attributes, str):
-                                if namespace != attributes:
-                                    continue
-                            else:
-                                if namespace not in attributes:
-                                    continue
+                    for attribute in self._iterate_attributes(structure):
+                        attribute_path = "/".join(attribute._path)
+                        # TODO: filter by attribute._path
 
-                        # Only process series types
-                        if attr_type in _SERIES_TYPES:
-                            # Fetch series values
-                            series_df = attr_obj.fetch_values()
+                        attribute_type = self._get_attribute_type(attribute)
+                        if attribute_type not in _SERIES_TYPES:
+                            continue
 
-                            for _, row in series_df.iterrows():
-                                value = row.get("value")
+                        series_attribute: FetchableSeries = attribute
+                        series_df = series_attribute.fetch_values()
 
-                                # Handle different series types
-                                if attr_type == "string_series":
-                                    string_value = value
-                                    histogram_value = None
-                                elif attr_type == "histogram_series":
-                                    string_value = None
-                                    # Convert histogram to dict format
-                                    if hasattr(value, "__dict__"):
-                                        histogram_value = dataclasses.asdict(value)
-                                    else:
-                                        histogram_value = value
-                                else:
-                                    string_value = None
-                                    histogram_value = None
+                        series_df["run_id"] = run_id
+                        series_df["attribute_path"] = attribute_path
+                        series_df["attribute_type"] = attribute_type
 
-                                all_data.append(
-                                    {
-                                        "project_id": project_id,
-                                        "run_id": run_id,
-                                        "attribute_path": namespace,
-                                        "attribute_type": attr_type,
-                                        "step": Decimal(str(row.get("step", 0))),
-                                        "timestamp": row.get("timestamp"),
-                                        "int_value": None,
-                                        "float_value": None,
-                                        "string_value": string_value,
-                                        "bool_value": None,
-                                        "datetime_value": None,
-                                        "string_set_value": None,
-                                        "file_value": None,
-                                        "histogram_value": histogram_value,
-                                    }
-                                )
-                    except Exception:
-                        # Skip attributes that can't be fetched
-                        continue
+                        all_data_dfs.append(series_df)
 
-        if all_data:
-            df = pd.DataFrame(all_data)
-            yield pa.RecordBatch.from_pandas(df, schema=model.SCHEMA)
-        else:
-            yield pa.RecordBatch.from_pylist([], schema=model.SCHEMA)
+                if all_data_dfs:
+                    converted_df = self._convert_series_to_schema(
+                        all_data_dfs, project_id
+                    )
+                    yield pa.RecordBatch.from_pandas(converted_df, schema=model.SCHEMA)
+
+            except neptune.exceptions.MetadataContainerNotFound:
+                pass
+
+    def _convert_series_to_schema(
+        self, all_data_dfs: list[pd.DataFrame], project_id: ProjectId
+    ) -> pd.DataFrame:
+        all_data_df = pd.concat(all_data_dfs)
+
+        result_df = pd.DataFrame(
+            {
+                "project_id": project_id,
+                "run_id": all_data_df["run_id"],
+                "attribute_path": all_data_df["attribute_path"],
+                "attribute_type": all_data_df["attribute_type"],
+                "step": all_data_df["step"].map(Decimal),
+                "timestamp": all_data_df["timestamp"],
+                "int_value": None,
+                "float_value": None,
+                "string_value": all_data_df["value"],
+                "bool_value": None,
+                "datetime_value": None,
+                "string_set_value": None,
+                "file_value": None,
+                "histogram_value": None,
+            }
+        )
+
+        return result_df
 
     def download_files(
         self,
