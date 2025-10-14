@@ -1,7 +1,8 @@
+from datetime import timedelta
 import os
 import pathlib
 import tempfile
-from .data import TEST_DATA
+from .data import TEST_DATA, TEST_NOW
 
 import pytest
 
@@ -35,7 +36,7 @@ def test_runs(project, api_token) -> None:
             project=project,
             name=experiment.name,
             custom_run_id=experiment.run_id,
-            mode="async",
+            mode="sync",
             capture_stdout=False,
             capture_stderr=False,
             capture_hardware_metrics=False,
@@ -44,25 +45,31 @@ def test_runs(project, api_token) -> None:
 
         run.assign(experiment.config)
 
-        # for key, values in experiment.string_sets.items():
-        #     run[key].add(values)
+        for key, values in experiment.string_sets.items():
+            run[key].add(values)
 
-        # for path, series in experiment.float_series.items():
-        #     run[path].extend(
-        #         values=[value for _, value in series],
-        #         steps=[step for step, _ in series],
-        #         timestamps=[(TEST_NOW + timedelta(seconds=step)).timestamp() * 1000.0 for step, _ in series],
-        #     )
+        for path, series in experiment.float_series.items():
+            run[path].extend(
+                values=[value for _, value in series],
+                steps=[step for step, _ in series],
+                timestamps=[
+                    (TEST_NOW + timedelta(seconds=step)).timestamp()
+                    for step, _ in series
+                ],
+            )
 
-        # for path, series in experiment.string_series.items():
-        #     run[path].extend(
-        #         values=[value for _, value in series],
-        #         steps=[step for step, _ in series],
-        #         timestamps=[(TEST_NOW + timedelta(seconds=step)).timestamp() * 1000.0 for step, _ in series],
-        #     )
+        for path, series in experiment.string_series.items():
+            run[path].extend(
+                values=[value for _, value in series],
+                steps=[step for step, _ in series],
+                timestamps=[
+                    (TEST_NOW + timedelta(seconds=step)).timestamp()
+                    for step, _ in series
+                ],
+            )
 
-        # for path, value in experiment.files.items():
-        # run[path].upload(value)
+        for path, value in experiment.files.items():
+            run[path].upload(value)
 
         # TODO: FileSeries supports only image files for now
         # for path, series in experiment.file_series.items():

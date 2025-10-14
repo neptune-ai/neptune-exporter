@@ -78,7 +78,7 @@ def test_runs(project, api_token, client) -> None:
         )
 
         run.log_configs(experiment.config)
-        # This is the only way neptune-scale allows setting string set values currently
+
         run.log(tags_add=experiment.string_sets)
 
         for path, series in experiment.float_series.items():

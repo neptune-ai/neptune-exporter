@@ -55,7 +55,7 @@ TEST_DATA = [
             ),
         },
         string_sets={
-            f"{TEST_PATH}/string-set-value": [f"string-set_{i}_{j}" for j in range(5)],
+            "sys/tags": [f"string-set_{i}_{j}" for j in range(5)],
         },
         float_series={
             f"{TEST_PATH}/float-series-value_{j}": [
