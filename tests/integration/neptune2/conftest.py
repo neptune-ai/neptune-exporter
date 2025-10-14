@@ -42,8 +42,7 @@ def test_runs(project, api_token) -> None:
             git_ref=False,
         )
 
-        for key, value in experiment.config.items():
-            run[key] = value
+        run.assign(experiment.config)
 
         # for key, values in experiment.string_sets.items():
         #     run[key].add(values)

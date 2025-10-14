@@ -15,10 +15,12 @@
 
 import dataclasses
 from decimal import Decimal
+from neptune.attributes.attribute import Attribute
+from neptune import attributes
 import pandas as pd
 import pyarrow as pa
 from pathlib import Path
-from typing import Generator, Optional, Sequence
+from typing import Any, Generator, Optional, Sequence
 
 import neptune
 import neptune.exceptions
@@ -27,6 +29,23 @@ from neptune import management
 from neptune_exporter import model
 from neptune_exporter.exporters.exporter import ProjectId, RunId
 
+_ATTRIBUTE_TYPE_MAP = {
+    attributes.String: "string",
+    attributes.Float: "float",
+    attributes.Integer: "int",
+    attributes.Datetime: "datetime",
+    attributes.Boolean: "bool",
+    attributes.Artifact: "artifact",
+    attributes.File: "file",
+    attributes.GitRef: "git_ref",
+    attributes.NotebookRef: "notebook_ref",
+    attributes.RunState: "run_state",
+    attributes.FileSet: "file_set",
+    attributes.FileSeries: "file_series",
+    attributes.FloatSeries: "float_series",
+    attributes.StringSeries: "string_series",
+    attributes.StringSet: "string_set",
+}
 
 _PARAMETER_TYPES: Sequence[str] = (
     "float",
@@ -37,10 +56,7 @@ _PARAMETER_TYPES: Sequence[str] = (
     "string_set",
 )
 _METRIC_TYPES: Sequence[str] = ("float_series",)
-_SERIES_TYPES: Sequence[str] = (
-    "string_series",
-    "histogram_series",
-)
+_SERIES_TYPES: Sequence[str] = ("string_series",)
 _FILE_TYPES: Sequence[str] = ("file",)
 _FILE_SERIES_TYPES: Sequence[str] = ("file_series",)
 
@@ -72,11 +88,7 @@ class Neptune2Exporter:
         attributes: None | str | Sequence[str],
     ) -> Generator[pa.RecordBatch, None, None]:
         """Download parameters from Neptune runs."""
-        if not run_ids:
-            yield pa.RecordBatch.from_pylist([], schema=model.SCHEMA)
-            return
-
-        all_data = []
+        all_data: list[dict[str, Any]] = []
 
         for run_id in run_ids:
             try:
@@ -86,69 +98,92 @@ class Neptune2Exporter:
                     with_id=run_id,
                     mode="read-only",
                 ) as run:
-                    # Get run structure to find parameter attributes
                     structure = run.get_structure()
-                    namespaces = self._flatten_namespaces(structure)
+                    all_parameter_values = run.fetch()
 
-                    for namespace in namespaces:
+                    def get_value(values: dict[str, Any], path: list[str]) -> Any:
                         try:
-                            attr_obj = run[namespace]
-                            attr_type = self._get_attribute_type(attr_obj)
+                            for part in path:
+                                values = values[part]
+                            return values
+                        except KeyError:
+                            return None
 
-                            # Filter by attributes if specified
-                            if attributes is not None:
-                                if isinstance(attributes, str):
-                                    if namespace != attributes:
-                                        continue
-                                else:
-                                    if namespace not in attributes:
-                                        continue
+                    for attribute in self._iterate_attributes(structure):
+                        attribute_path = "/".join(attribute._path)
+                        # TODO: filter by attribute._path
 
-                            # Only process parameter types
-                            if attr_type in _PARAMETER_TYPES:
-                                value = attr_obj.fetch()
-
-                                all_data.append(
-                                    {
-                                        "project_id": project_id,
-                                        "run_id": run_id,
-                                        "attribute_path": namespace,
-                                        "attribute_type": attr_type,
-                                        "step": None,
-                                        "timestamp": None,
-                                        "int_value": value
-                                        if attr_type == "int"
-                                        else None,
-                                        "float_value": value
-                                        if attr_type == "float"
-                                        else None,
-                                        "string_value": value
-                                        if attr_type == "string"
-                                        else None,
-                                        "bool_value": value
-                                        if attr_type == "bool"
-                                        else None,
-                                        "datetime_value": value
-                                        if attr_type == "datetime"
-                                        else None,
-                                        "string_set_value": value
-                                        if attr_type == "string_set"
-                                        else None,
-                                        "file_value": None,
-                                        "histogram_value": None,
-                                    }
-                                )
-                        except Exception:
-                            # Skip attributes that can't be fetched
+                        attribute_type = self._get_attribute_type(attribute)
+                        if attribute_type not in _PARAMETER_TYPES:
                             continue
+
+                        value = get_value(all_parameter_values, attribute._path)
+
+                        all_data.append(
+                            {
+                                "run_id": run_id,
+                                "attribute_path": attribute_path,
+                                "attribute_type": attribute_type,
+                                "value": value,
+                            }
+                        )
             except neptune.exceptions.MetadataContainerNotFound:
                 continue
 
         if all_data:
-            df = pd.DataFrame(all_data)
-            yield pa.RecordBatch.from_pandas(df, schema=model.SCHEMA)
+            converted_df = self._convert_parameters_to_schema(all_data, project_id)
+            yield pa.RecordBatch.from_pandas(converted_df, schema=model.SCHEMA)
         else:
             yield pa.RecordBatch.from_pylist([], schema=model.SCHEMA)
+
+    def _convert_parameters_to_schema(
+        self, all_data: list[dict[str, Any]], project_id: ProjectId
+    ) -> pd.DataFrame:
+        all_data_df = pd.DataFrame(all_data)
+
+        result_df = pd.DataFrame(
+            {
+                "project_id": project_id,
+                "run_id": all_data_df["run_id"],
+                "attribute_path": all_data_df["attribute_path"],
+                "attribute_type": all_data_df["attribute_type"],
+                "step": None,
+                "timestamp": None,
+                "value": all_data_df["value"],
+                "int_value": None,
+                "float_value": None,
+                "string_value": None,
+                "bool_value": None,
+                "datetime_value": None,
+                "string_set_value": None,
+                "file_value": None,
+                "histogram_value": None,
+            }
+        )
+
+        # Fill in the appropriate value column based on attribute_type
+        # Use vectorized operations for better performance
+        for attr_type in result_df["attribute_type"].unique():
+            mask = result_df["attribute_type"] == attr_type
+
+            if attr_type == "int":
+                result_df.loc[mask, "int_value"] = result_df.loc[mask, "value"]
+            elif attr_type == "float":
+                result_df.loc[mask, "float_value"] = result_df.loc[mask, "value"]
+            elif attr_type == "string":
+                result_df.loc[mask, "string_value"] = result_df.loc[mask, "value"]
+            elif attr_type == "bool":
+                result_df.loc[mask, "bool_value"] = result_df.loc[mask, "value"]
+            elif attr_type == "datetime":
+                result_df.loc[mask, "datetime_value"] = result_df.loc[mask, "value"]
+            elif attr_type == "string_set":
+                result_df.loc[mask, "string_set_value"] = result_df.loc[mask, "value"]
+            else:
+                raise ValueError(f"Unsupported parameter type: {attr_type}")
+
+        result_df = result_df.drop(columns=["value"])
+
+        return result_df
 
     def download_metrics(
         self,
@@ -171,8 +206,8 @@ class Neptune2Exporter:
                 mode="read-only",
             ) as run:
                 # Get run structure to find metric attributes
-                structure = run.get_structure()
-                namespaces = self._flatten_namespaces(structure)
+                # structure = run.get_structure()
+                namespaces: list[str] = []  # self._flatten_namespaces(structure)
 
                 for namespace in namespaces:
                     try:
@@ -243,8 +278,8 @@ class Neptune2Exporter:
                 mode="read-only",
             ) as run:
                 # Get run structure to find series attributes
-                structure = run.get_structure()
-                namespaces = self._flatten_namespaces(structure)
+                # structure = run.get_structure()
+                namespaces: list[str] = []  # self._flatten_namespaces(structure)
 
                 for namespace in namespaces:
                     try:
@@ -324,7 +359,7 @@ class Neptune2Exporter:
             return
 
         destination = destination.resolve()
-        all_data = []
+        all_data: list[dict[str, Any]] = []
 
         for run_id in run_ids:
             with neptune.init_run(
@@ -334,8 +369,8 @@ class Neptune2Exporter:
                 mode="read-only",
             ) as run:
                 # Get run structure to find file attributes
-                structure = run.get_structure()
-                namespaces = self._flatten_namespaces(structure)
+                # structure = run.get_structure()
+                namespaces: list[str] = []  # self._flatten_namespaces(structure)
 
                 for namespace in namespaces:
                     try:
@@ -448,47 +483,16 @@ class Neptune2Exporter:
         else:
             yield pa.RecordBatch.from_pylist([], schema=model.SCHEMA)
 
-    def _flatten_namespaces(
-        self,
-        dictionary: dict,
-        prefix: Optional[list] = None,
-        result: Optional[list] = None,
-    ) -> list:
+    def _iterate_attributes(
+        self, structure: dict[str, Any]
+    ) -> Generator[Attribute, None, None]:
         """Flatten nested namespace dictionary into list of paths."""
-        if prefix is None:
-            prefix = []
-        if result is None:
-            result = []
+        for value in structure.values():
+            if isinstance(value, dict):
+                yield from self._iterate_attributes(value)
+            elif isinstance(value, Attribute):
+                yield value
 
-        for k, v in dictionary.items():
-            if isinstance(v, dict):
-                self._flatten_namespaces(v, prefix + [k], result)
-            elif prefix_str := "/".join(prefix):
-                result.append(f"{prefix_str}/{k}")
-            else:
-                result.append(k)
-        return result
-
-    def _get_attribute_type(self, attr_obj) -> str:
-        """Get the type of a Neptune attribute object."""
-        attr_str = str(attr_obj).split()[0]
-
-        type_mapping = {
-            "<StringSet": "string_set",
-            "<FloatSeries": "float_series",
-            "<StringSeries": "string_series",
-            "<HistogramSeries": "histogram_series",
-            "<File": "file",
-            "<FileSeries": "file_series",
-            "<Float": "float",
-            "<Int": "int",
-            "<String": "string",
-            "<Bool": "bool",
-            "<DateTime": "datetime",
-        }
-
-        for prefix, attr_type in type_mapping.items():
-            if attr_str.startswith(prefix):
-                return attr_type
-
-        return "unknown"
+    def _get_attribute_type(self, attribute: Attribute) -> str:
+        attribute_class = type(attribute)
+        return _ATTRIBUTE_TYPE_MAP.get(attribute_class, "unknown")
