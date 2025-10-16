@@ -79,7 +79,12 @@ TEST_DATA = [
         },
         file_series={
             f"{TEST_PATH}/file-series-value_{j}": [
-                (k, NeptuneFile.from_content(f"file-series_{i}_{j}_{k}"))
+                (
+                    k,
+                    NeptuneFile.from_path(
+                        "tests/integration/neptune2/resources/1x1#000000.gif"
+                    ),
+                )
                 for k in range(3)
             ]
             for j in range(2)

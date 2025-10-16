@@ -15,7 +15,7 @@
 
 from decimal import Decimal
 from neptune.attributes.attribute import Attribute
-from neptune import attributes
+from neptune import attributes as na
 from neptune.attributes.series.fetchable_series import FetchableSeries
 import pandas as pd
 import pyarrow as pa
@@ -30,21 +30,21 @@ from neptune_exporter import model
 from neptune_exporter.exporters.exporter import ProjectId, RunId
 
 _ATTRIBUTE_TYPE_MAP = {
-    attributes.String: "string",
-    attributes.Float: "float",
-    attributes.Integer: "int",
-    attributes.Datetime: "datetime",
-    attributes.Boolean: "bool",
-    attributes.Artifact: "artifact",
-    attributes.File: "file",
-    attributes.GitRef: "git_ref",
-    attributes.NotebookRef: "notebook_ref",
-    attributes.RunState: "run_state",
-    attributes.FileSet: "file_set",
-    attributes.FileSeries: "file_series",
-    attributes.FloatSeries: "float_series",
-    attributes.StringSeries: "string_series",
-    attributes.StringSet: "string_set",
+    na.String: "string",
+    na.Float: "float",
+    na.Integer: "int",
+    na.Datetime: "datetime",
+    na.Boolean: "bool",
+    na.Artifact: "artifact",  #
+    na.File: "file",
+    na.GitRef: "git_ref",  #
+    na.NotebookRef: "notebook_ref",  #
+    na.RunState: "run_state",  #
+    na.FileSet: "file_set",  #
+    na.FileSeries: "file_series",
+    na.FloatSeries: "float_series",
+    na.StringSeries: "string_series",
+    na.StringSet: "string_set",
 }
 
 _PARAMETER_TYPES: Sequence[str] = (
@@ -335,134 +335,106 @@ class Neptune2Exporter:
         destination: Path,
     ) -> Generator[pa.RecordBatch, None, None]:
         """Download files from Neptune runs."""
-        if not run_ids:
-            yield pa.RecordBatch.from_pylist([], schema=model.SCHEMA)
-            return
-
         destination = destination.resolve()
-        all_data: list[dict[str, Any]] = []
+        destination.mkdir(parents=True, exist_ok=True)
 
         for run_id in run_ids:
-            with neptune.init_run(
-                api_token=self._api_token,
-                project=project_id,
-                with_id=run_id,
-                mode="read-only",
-            ) as run:
-                # Get run structure to find file attributes
-                # structure = run.get_structure()
-                namespaces: list[str] = []  # self._flatten_namespaces(structure)
+            try:
+                all_data_dfs: list[dict[str, Any]] = []
 
-                for namespace in namespaces:
-                    try:
-                        attr_obj = run[namespace]
-                        attr_type = self._get_attribute_type(attr_obj)
+                with neptune.init_run(
+                    api_token=self._api_token,
+                    project=project_id,
+                    with_id=run_id,
+                    mode="read-only",
+                ) as run:
+                    structure = run.get_structure()
 
-                        # Filter by attributes if specified
-                        if attributes is not None:
-                            if isinstance(attributes, str):
-                                if namespace != attributes:
-                                    continue
-                            else:
-                                if namespace not in attributes:
-                                    continue
+                    for attribute in self._iterate_attributes(structure):
+                        attribute_path = "/".join(attribute._path)
+                        # TODO: filter by attribute._path
 
-                        # Only process file types
-                        if attr_type in _FILE_TYPES:
-                            # Download single file
+                        attribute_type = self._get_attribute_type(attribute)
+                        if attribute_type in _FILE_TYPES:
+                            file_attribute: na.File = attribute
+
                             file_path = (
-                                destination / f"{run_id}_{namespace.replace('/', '_')}"
+                                destination / project_id / run_id / attribute_path
                             )
-                            attr_obj.download(str(file_path))
+                            file_path.parent.mkdir(parents=True, exist_ok=True)
+                            file_attribute.download(str(file_path))
 
-                            all_data.append(
+                            all_data_dfs.append(
                                 {
-                                    "project_id": project_id,
                                     "run_id": run_id,
-                                    "attribute_path": namespace,
-                                    "attribute_type": "file",
                                     "step": None,
-                                    "timestamp": None,
-                                    "int_value": None,
-                                    "float_value": None,
-                                    "string_value": None,
-                                    "bool_value": None,
-                                    "datetime_value": None,
-                                    "string_set_value": None,
+                                    "attribute_path": attribute_path,
+                                    "attribute_type": attribute_type,
                                     "file_value": {
                                         "path": str(file_path.relative_to(destination))
                                     },
-                                    "histogram_value": None,
                                 }
                             )
+                        elif attribute_type in _FILE_SERIES_TYPES:
+                            file_series_attribute: na.FileSeries = attribute
 
-                        elif attr_type in _FILE_SERIES_TYPES:
-                            # Download file series
-                            series_dir = (
-                                destination / f"{run_id}_{namespace.replace('/', '_')}"
+                            file_series_path = (
+                                destination / project_id / run_id / attribute_path
                             )
-                            series_dir.mkdir(parents=True, exist_ok=True)
-                            attr_obj.download(str(series_dir))
+                            file_series_attribute.download(str(file_series_path))
+                            file_paths = [
+                                p for p in file_series_path.iterdir() if p.is_file()
+                            ]
 
-                            # Get series values to extract step and timestamp info
-                            try:
-                                series_df = attr_obj.fetch_values()
-                                for _, row in series_df.iterrows():
-                                    all_data.append(
-                                        {
-                                            "project_id": project_id,
-                                            "run_id": run_id,
-                                            "attribute_path": namespace,
-                                            "attribute_type": "file_series",
-                                            "step": Decimal(str(row.get("step", 0))),
-                                            "timestamp": row.get("timestamp"),
-                                            "int_value": None,
-                                            "float_value": None,
-                                            "string_value": None,
-                                            "bool_value": None,
-                                            "datetime_value": None,
-                                            "string_set_value": None,
-                                            "file_value": {
-                                                "path": str(
-                                                    series_dir.relative_to(destination)
-                                                )
-                                            },
-                                            "histogram_value": None,
-                                        }
-                                    )
-                            except Exception:
-                                # If we can't get series info, just add one entry
-                                all_data.append(
+                            all_data_dfs.extend(
+                                [
                                     {
-                                        "project_id": project_id,
                                         "run_id": run_id,
-                                        "attribute_path": namespace,
-                                        "attribute_type": "file_series",
-                                        "step": None,
-                                        "timestamp": None,
-                                        "int_value": None,
-                                        "float_value": None,
-                                        "string_value": None,
-                                        "bool_value": None,
-                                        "datetime_value": None,
-                                        "string_set_value": None,
+                                        "step": Decimal(file_path.stem),
+                                        "attribute_path": attribute_path,
+                                        "attribute_type": attribute_type,
                                         "file_value": {
                                             "path": str(
-                                                series_dir.relative_to(destination)
+                                                file_path.relative_to(destination)
                                             )
                                         },
-                                        "histogram_value": None,
                                     }
-                                )
-                    except Exception:
-                        # Skip attributes that can't be fetched
-                        continue
+                                    for file_path in file_paths
+                                ]
+                            )
 
-        if all_data:
-            df = pd.DataFrame(all_data)
-            yield pa.RecordBatch.from_pandas(df, schema=model.SCHEMA)
-        else:
-            yield pa.RecordBatch.from_pylist([], schema=model.SCHEMA)
+                if all_data_dfs:
+                    converted_df = self._convert_files_to_schema(
+                        all_data_dfs, project_id
+                    )
+                    yield pa.RecordBatch.from_pandas(converted_df, schema=model.SCHEMA)
+
+            except neptune.exceptions.MetadataContainerNotFound:
+                pass
+
+    def _convert_files_to_schema(
+        self, all_data_dfs: list[dict[str, Any]], project_id: ProjectId
+    ) -> pd.DataFrame:
+        all_data_df = pd.DataFrame(all_data_dfs)
+        result_df = pd.DataFrame(
+            {
+                "project_id": project_id,
+                "run_id": all_data_df["run_id"],
+                "attribute_path": all_data_df["attribute_path"],
+                "attribute_type": all_data_df["attribute_type"],
+                "step": all_data_df["step"],
+                "timestamp": None,
+                "int_value": None,
+                "float_value": None,
+                "string_value": None,
+                "bool_value": None,
+                "datetime_value": None,
+                "string_set_value": None,
+                "file_value": all_data_df["file_value"],
+                "histogram_value": None,
+            }
+        )
+        return result_df
 
     def _iterate_attributes(
         self, structure: dict[str, Any]

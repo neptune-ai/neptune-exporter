@@ -122,5 +122,46 @@ def test_neptune2_download_series(api_token, project, test_runs):
     assert expected_paths.issubset(actual_paths)
 
 
+def test_neptune2_download_files_empty(api_token, project, test_runs, temp_dir):
+    exporter = Neptune2Exporter(api_token=api_token)
+    files = _to_table(
+        exporter.download_files(
+            project_id=project,
+            run_ids=["does-not-exist"],
+            attributes=None,
+            destination=temp_dir,
+        )
+    )
+    assert files.num_rows == 0
+
+
+def test_neptune2_download_files(api_token, project, test_runs, temp_dir):
+    exporter = Neptune2Exporter(api_token=api_token)
+    files = _to_table(
+        exporter.download_files(
+            project_id=project,
+            run_ids=test_runs,
+            attributes=None,
+            destination=temp_dir,
+        )
+    )
+
+    # Verify we have data for all test runs
+    expected_run_ids = {run_id for run_id in test_runs}
+    actual_run_ids = set(files.column("run_id").to_pylist())
+    assert expected_run_ids == actual_run_ids
+
+    # Verify all expected file paths are present
+    expected_paths = set()
+    for item in TEST_DATA:
+        for path in item.files.keys():
+            expected_paths.add(path)
+        for path in item.file_series.keys():
+            expected_paths.add(path)
+
+    actual_paths = set(files.column("attribute_path").to_pylist())
+    assert expected_paths.issubset(actual_paths)
+
+
 def _to_table(parameters: Generator[pa.RecordBatch, None, None]) -> pa.Table:
     return pa.Table.from_batches(parameters, schema=model.SCHEMA)

@@ -71,13 +71,15 @@ def test_runs(project, api_token) -> None:
         for path, value in experiment.files.items():
             run[path].upload(value)
 
-        # TODO: FileSeries supports only image files for now
-        # for path, series in experiment.file_series.items():
-        #     run[path].extend(
-        #         values=[value for _, value in series],
-        #         steps=[step for step, _ in series],
-        #         timestamps=[(TEST_NOW + timedelta(seconds=step)).timestamp() * 1000.0 for step, _ in series],
-        #     )
+        for path, series in experiment.file_series.items():
+            run[path].extend(
+                values=[value for _, value in series],
+                steps=[step for step, _ in series],
+                timestamps=[
+                    (TEST_NOW + timedelta(seconds=step)).timestamp()
+                    for step, _ in series
+                ],
+            )
 
         runs[experiment.name] = run
 
