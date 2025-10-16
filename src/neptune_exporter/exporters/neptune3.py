@@ -64,6 +64,9 @@ class Neptune3Exporter:
         if api_token is not None:
             nq.set_api_token(api_token)
 
+    def close(self) -> None:
+        self._executor.shutdown(wait=True)
+
     def list_projects(self) -> list[ProjectId]:
         raise NotImplementedError(
             "Listing projects is not implemented in neptune 3 client, list projects manually"
