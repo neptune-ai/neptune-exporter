@@ -119,3 +119,35 @@ def test_parquet_storage_part_splitting(temp_dir):
     for file_path in parquet_files:
         assert file_path.exists()
         assert file_path.stat().st_size > 0, f"Part file {file_path} is empty"
+
+
+def test_parquet_storage_sanitizes_project_id(temp_dir):
+    """Test that ParquetStorage sanitizes project IDs with special characters."""
+    base_path = temp_dir
+    storage = ParquetStorage(base_path)
+
+    # Create test data
+    data = pa.record_batch(
+        {
+            "project_id": ["test-project"],
+            "run_id": ["test-run"],
+            "attribute_path": ["test/attribute"],
+            "attribute_type": ["string"],
+            "string_value": ["test-value"],
+        }
+    )
+
+    # Use a project ID with special characters that need sanitization
+    project_id_with_slashes = "org/project"
+    storage.save(project_id_with_slashes, data)
+    storage.close_all()
+
+    # The file should be created with sanitized project ID
+    expected_file = base_path / "org_project" / "part_0.parquet"
+    assert expected_file.exists(), (
+        f"Expected file at {expected_file}, but it doesn't exist"
+    )
+
+    # Verify the original project ID directory was not created
+    original_path = base_path / "org" / "project" / "part_0.parquet"
+    assert not original_path.exists(), f"Original path {original_path} should not exist"

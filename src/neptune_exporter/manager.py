@@ -19,6 +19,7 @@ from click import Path
 from tqdm import tqdm
 from neptune_exporter.exporters.exporter import NeptuneExporter
 from neptune_exporter.storage import ParquetStorage
+from neptune_exporter.utils import sanitize_path_part
 
 
 class ExportManager:
@@ -116,11 +117,7 @@ class ExportManager:
                                 run_ids=[run_id],
                                 attributes=attributes,
                                 destination=self._files_destination
-                                / _sanitize_path_part(project_id),
+                                / sanitize_path_part(project_id),
                             ):
                                 writer.save(batch)
                                 pbar.update(batch.num_rows)
-
-
-def _sanitize_path_part(part: str) -> str:
-    return "".join(c if c.isalnum() or c in ("_", "-") else "_" for c in part)

@@ -17,6 +17,7 @@ from pathlib import Path
 from dataclasses import dataclass
 import pyarrow as pa
 import pyarrow.parquet as pq
+from neptune_exporter.utils import sanitize_path_part
 
 
 @dataclass
@@ -108,7 +109,11 @@ class ParquetStorage:
             # Existing project - increment part number
             current_part = self._project_writers[project_id].current_part + 1
 
-        table_path = self.base_path / f"{project_id}/part_{current_part}.parquet"
+        # Sanitize project_id for safe file path usage
+        sanitized_project_id = sanitize_path_part(project_id)
+        table_path = (
+            self.base_path / f"{sanitized_project_id}/part_{current_part}.parquet"
+        )
         table_path.parent.mkdir(parents=True, exist_ok=True)
 
         writer = pq.ParquetWriter(table_path, data.schema, compression="snappy")

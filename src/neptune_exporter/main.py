@@ -112,6 +112,13 @@ def main(
     attributes_list = list(attributes) if attributes else None
     export_classes_list = list(export_classes)
 
+    # Validate project IDs are not empty
+    for project_id in project_ids_list:
+        if not project_id.strip():
+            raise click.BadParameter(
+                "Project ID cannot be empty. Please provide a valid project ID."
+            )
+
     # Validate export classes
     valid_export_classes = {"parameters", "metrics", "series", "files"}
     export_classes_set = set(export_classes_list)
