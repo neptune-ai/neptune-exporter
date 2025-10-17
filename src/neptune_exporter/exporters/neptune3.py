@@ -15,6 +15,7 @@
 
 import dataclasses
 from decimal import Decimal
+from neptune_query.exceptions import NeptuneError, NeptuneWarning
 import pyarrow as pa
 import pandas as pd
 from typing import Generator, Literal, Optional, Sequence
@@ -23,6 +24,7 @@ import neptune_query as nq
 from neptune_query import runs as nq_runs
 from neptune_query.filters import Attribute, AttributeFilter
 from concurrent.futures import ThreadPoolExecutor, as_completed
+import logging
 
 from neptune_exporter import model
 from neptune_exporter.exporters.exporter import ProjectId, RunId
@@ -59,6 +61,7 @@ class Neptune3Exporter:
         self._file_attribute_batch_size = file_attribute_batch_size
         self._file_series_attribute_batch_size = file_series_attribute_batch_size
         self._executor = ThreadPoolExecutor(max_workers=max_workers)
+        self._logger = logging.getLogger(__name__)
 
     def _initialize_client(self, api_token: Optional[str]) -> None:
         if api_token is not None:
@@ -83,22 +86,27 @@ class Neptune3Exporter:
         run_ids: list[RunId],
         attributes: None | str | Sequence[str],
     ) -> Generator[pa.RecordBatch, None, None]:
-        parameters_df = (
-            nq_runs.fetch_runs_table(  # index="run", cols="attribute" (=path)
-                project=project_id,
-                runs=run_ids,
-                attributes=AttributeFilter(name=attributes, type=_PARAMETER_TYPES),
-                sort_by=Attribute(name="sys/id", type="string"),
-                sort_direction="asc",
-                type_suffix_in_column_names=True,
+        try:
+            parameters_df = (
+                nq_runs.fetch_runs_table(  # index="run", cols="attribute" (=path)
+                    project=project_id,
+                    runs=run_ids,
+                    attributes=AttributeFilter(name=attributes, type=_PARAMETER_TYPES),
+                    sort_by=Attribute(name="sys/id", type="string"),
+                    sort_direction="asc",
+                    type_suffix_in_column_names=True,
+                )
             )
-        )
-        if parameters_df.empty:
-            yield pa.RecordBatch.from_pylist([], schema=model.SCHEMA)
-            return
+            if parameters_df.empty:
+                yield pa.RecordBatch.from_pylist([], schema=model.SCHEMA)
+                return
 
-        converted_df = self._convert_parameters_to_schema(parameters_df, project_id)
-        yield pa.RecordBatch.from_pandas(converted_df, schema=model.SCHEMA)
+            converted_df = self._convert_parameters_to_schema(parameters_df, project_id)
+            yield pa.RecordBatch.from_pandas(converted_df, schema=model.SCHEMA)
+        except Exception as e:
+            self._handle_batch_exception(f"parameters for project {project_id}", e)
+            # Yield empty batch to maintain interface contract
+            yield pa.RecordBatch.from_pylist([], schema=model.SCHEMA)
 
     def _convert_parameters_to_schema(
         self, parameters_df: pd.DataFrame, project_id: str
@@ -204,10 +212,15 @@ class Neptune3Exporter:
         ]
 
         # Yield results as they complete
-        for future in as_completed(futures):
-            result = future.result()
-            if result is not None:
-                yield result
+        for i, future in enumerate(as_completed(futures)):
+            try:
+                result = future.result()
+                if result is not None:
+                    yield result
+            except Exception as e:
+                self._handle_batch_exception(
+                    f"metrics batch {i} for project {project_id}", e
+                )
 
     def _convert_metrics_to_schema(
         self, series_df: pd.DataFrame, project_id: str
@@ -289,10 +302,15 @@ class Neptune3Exporter:
         ]
 
         # Yield results as they complete
-        for future in as_completed(futures):
-            result = future.result()
-            if result is not None:
-                yield result
+        for i, future in enumerate(as_completed(futures)):
+            try:
+                result = future.result()
+                if result is not None:
+                    yield result
+            except Exception as e:
+                self._handle_batch_exception(
+                    f"series batch {i} for project {project_id}", e
+                )
 
     def _convert_series_to_schema(
         self,
@@ -469,10 +487,15 @@ class Neptune3Exporter:
             )
 
         # Yield results as they complete
-        for future in as_completed(futures):
-            result = future.result()
-            if result is not None:
-                yield result
+        for i, future in enumerate(as_completed(futures)):
+            try:
+                result = future.result()
+                if result is not None:
+                    yield result
+            except Exception as e:
+                self._handle_batch_exception(
+                    f"files batch {i} for project {project_id}", e
+                )
 
     def _convert_files_to_schema(
         self,
@@ -532,3 +555,37 @@ class Neptune3Exporter:
                 "histogram_value": None,
             }
         )
+
+    def _handle_batch_exception(self, batch_info: str, exception: Exception) -> None:
+        """Handle exceptions that occur during batch processing."""
+        if isinstance(exception, PermissionError):
+            # Permission issues - user needs to fix their setup
+            self._logger.error(
+                f"Permission denied processing batch {batch_info}: {exception}"
+            )
+        elif isinstance(exception, FileNotFoundError):
+            # File not found - could be user error or system issue
+            self._logger.error(
+                f"File not found processing batch {batch_info}: {exception}"
+            )
+        elif (
+            isinstance(exception, OSError) and exception.errno == 28
+        ):  # No space left on device
+            # Critical system issue
+            self._logger.critical(
+                f"Disk full processing batch {batch_info}: {exception}"
+            )
+        elif isinstance(exception, (OSError, IOError)):
+            # Other I/O errors - could be temporary or permanent
+            self._logger.error(f"I/O error processing batch {batch_info}: {exception}")
+        elif isinstance(exception, (NeptuneError, NeptuneWarning)):
+            # Neptune-related errors
+            self._logger.error(
+                f"Neptune error processing batch {batch_info}: {exception}"
+            )
+        else:
+            # Unexpected errors - definitely need investigation
+            self._logger.error(
+                f"Unexpected error processing batch {batch_info}: {exception}",
+                exc_info=True,
+            )

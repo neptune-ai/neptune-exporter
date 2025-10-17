@@ -158,6 +158,8 @@ def test_neptune2_download_files(api_token, project, test_runs, temp_dir):
             expected_paths.add(path)
         for path in item.file_series.keys():
             expected_paths.add(path)
+        for path in item.file_sets.keys():
+            expected_paths.add(path)
 
     actual_paths = set(files.column("attribute_path").to_pylist())
     assert expected_paths.issubset(actual_paths)

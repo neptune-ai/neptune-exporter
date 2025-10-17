@@ -23,6 +23,7 @@ import pyarrow as pa
 from pathlib import Path
 from typing import Any, Generator, Optional, Sequence
 import re
+import logging
 
 import neptune
 import neptune.exceptions
@@ -37,12 +38,12 @@ _ATTRIBUTE_TYPE_MAP = {
     na.Integer: "int",
     na.Datetime: "datetime",
     na.Boolean: "bool",
-    na.Artifact: "artifact",  #
+    na.Artifact: "artifact",  # TODO? seems like the only usable type that's missing
     na.File: "file",
-    na.GitRef: "git_ref",  #
-    na.NotebookRef: "notebook_ref",  #
-    na.RunState: "run_state",  #
-    na.FileSet: "file_set",  #
+    na.GitRef: "git_ref",  # ignore, seems not to be implemented
+    na.NotebookRef: "notebook_ref",  # ignore, not implemented
+    na.RunState: "run_state",  # ignore, just transient metadata
+    na.FileSet: "file_set",
     na.FileSeries: "file_series",
     na.FloatSeries: "float_series",
     na.StringSeries: "string_series",
@@ -61,6 +62,7 @@ _METRIC_TYPES: Sequence[str] = ("float_series",)
 _SERIES_TYPES: Sequence[str] = ("string_series",)
 _FILE_TYPES: Sequence[str] = ("file",)
 _FILE_SERIES_TYPES: Sequence[str] = ("file_series",)
+_FILE_SET_TYPES: Sequence[str] = ("file_set",)
 
 
 class Neptune2Exporter:
@@ -72,6 +74,7 @@ class Neptune2Exporter:
         self._api_token = api_token
         self._max_workers = max_workers
         self._executor = ThreadPoolExecutor(max_workers=max_workers)
+        self._logger = logging.getLogger(__name__)
 
     def close(self) -> None:
         self._executor.shutdown(wait=True)
@@ -109,17 +112,13 @@ class Neptune2Exporter:
 
         # Yield results as they complete
         for future in as_completed(future_to_run_id):
+            run_id = future_to_run_id[future]
             try:
                 result = future.result()
                 if result is not None:
                     yield result
-            except neptune.exceptions.MetadataContainerNotFound:
-                # Skip runs that don't exist
-                pass
-            except Exception:
-                # Log or handle other exceptions as needed
-                # For now, we'll skip failed runs to maintain the original behavior
-                pass
+            except Exception as e:
+                self._handle_run_exception(run_id, e)
 
     def _process_run_parameters(
         self,
@@ -240,17 +239,13 @@ class Neptune2Exporter:
 
         # Yield results as they complete
         for future in as_completed(future_to_run_id):
+            run_id = future_to_run_id[future]
             try:
                 result = future.result()
                 if result is not None:
                     yield result
-            except neptune.exceptions.MetadataContainerNotFound:
-                # Skip runs that don't exist
-                pass
-            except Exception:
-                # Log or handle other exceptions as needed
-                # For now, we'll skip failed runs to maintain the original behavior
-                pass
+            except Exception as e:
+                self._handle_run_exception(run_id, e)
 
     def _process_run_metrics(
         self,
@@ -337,17 +332,13 @@ class Neptune2Exporter:
 
         # Yield results as they complete
         for future in as_completed(future_to_run_id):
+            run_id = future_to_run_id[future]
             try:
                 result = future.result()
                 if result is not None:
                     yield result
-            except neptune.exceptions.MetadataContainerNotFound:
-                # Skip runs that don't exist
-                pass
-            except Exception:
-                # Log or handle other exceptions as needed
-                # For now, we'll skip failed runs to maintain the original behavior
-                pass
+            except Exception as e:
+                self._handle_run_exception(run_id, e)
 
     def _process_run_series(
         self,
@@ -438,17 +429,13 @@ class Neptune2Exporter:
 
         # Yield results as they complete
         for future in as_completed(future_to_run_id):
+            run_id = future_to_run_id[future]
             try:
                 result = future.result()
                 if result is not None:
                     yield result
-            except neptune.exceptions.MetadataContainerNotFound:
-                # Skip runs that don't exist
-                pass
-            except Exception:
-                # Log or handle other exceptions as needed
-                # For now, we'll skip failed runs to maintain the original behavior
-                pass
+            except Exception as e:
+                self._handle_run_exception(run_id, e)
 
     def _process_run_files(
         self,
@@ -517,6 +504,24 @@ class Neptune2Exporter:
                             for file_path in file_paths
                         ]
                     )
+                elif attribute_type in _FILE_SET_TYPES:
+                    file_set_attribute: na.FileSet = attribute
+
+                    file_set_path = destination / project_id / run_id / attribute_path
+                    file_set_path.mkdir(parents=True, exist_ok=True)
+                    file_set_attribute.download(str(file_set_path))
+
+                    all_data_dfs.append(
+                        {
+                            "run_id": run_id,
+                            "step": None,
+                            "attribute_path": attribute_path,
+                            "attribute_type": attribute_type,
+                            "file_set_value": {
+                                "path": str(file_set_path.relative_to(destination))
+                            },
+                        }
+                    )
 
         if all_data_dfs:
             converted_df = self._convert_files_to_schema(all_data_dfs, project_id)
@@ -576,3 +581,41 @@ class Neptune2Exporter:
             return attribute_path in attributes
 
         return True
+
+    def _handle_run_exception(self, run_id: RunId, exception: Exception) -> None:
+        """Handle exceptions that occur during run processing."""
+        if isinstance(exception, neptune.exceptions.MetadataContainerNotFound):
+            # Expected: Run doesn't exist, just skip it
+            self._logger.debug(f"Run {run_id} not found, skipping")
+        elif isinstance(exception, neptune.exceptions.NeptuneConnectionLost):
+            # Network issues - might be temporary, user should retry
+            self._logger.warning(
+                f"Connection lost processing run {run_id}: {exception}"
+            )
+        elif isinstance(exception, neptune.exceptions.NeptuneApiException):
+            # API errors - could be rate limiting, auth issues, etc.
+            self._logger.warning(f"API error processing run {run_id}: {exception}")
+        elif isinstance(exception, neptune.exceptions.NeptuneException):
+            # Other Neptune-specific errors
+            self._logger.error(f"Neptune error processing run {run_id}: {exception}")
+        elif isinstance(exception, PermissionError):
+            # Permission issues - user needs to fix their setup
+            self._logger.error(
+                f"Permission denied processing run {run_id}: {exception}"
+            )
+        elif isinstance(exception, FileNotFoundError):
+            # File not found - could be user error or system issue
+            self._logger.error(f"File not found processing run {run_id}: {exception}")
+        elif (
+            isinstance(exception, OSError) and exception.errno == 28
+        ):  # No space left on device
+            # Critical system issue
+            self._logger.critical(f"Disk full processing run {run_id}: {exception}")
+        elif isinstance(exception, (OSError, IOError)):
+            # Other I/O errors - could be temporary or permanent
+            self._logger.error(f"I/O error processing run {run_id}: {exception}")
+        else:
+            # Unexpected errors - definitely need investigation
+            self._logger.error(
+                f"Unexpected error processing run {run_id}: {exception}", exc_info=True
+            )

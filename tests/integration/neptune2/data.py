@@ -22,6 +22,7 @@ class ExperimentData:
     string_series: dict[str, list[tuple[float, str]]]
     files: dict[str, NeptuneFile]
     file_series: dict[str, list[tuple[float, NeptuneFile]]]
+    file_sets: dict[str, list[str]]  # just file globs, not NeptuneFile objects
 
     @property
     def all_attribute_names(self) -> set[str]:
@@ -33,6 +34,7 @@ class ExperimentData:
                 self.string_series.keys(),
                 self.files.keys(),
                 self.file_series.keys(),
+                self.file_sets.keys(),
             )
         )
 
@@ -86,6 +88,12 @@ TEST_DATA = [
                     ),
                 )
                 for k in range(3)
+            ]
+            for j in range(2)
+        },
+        file_sets={
+            f"{TEST_PATH}/file-sets/file-set-value_{j}": [
+                "tests/integration/neptune2/resources/1x1#000000.gif"
             ]
             for j in range(2)
         },
