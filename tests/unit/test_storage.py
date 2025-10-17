@@ -1,12 +1,12 @@
 import pyarrow as pa
 from pathlib import Path
-from neptune_exporter.storage.parquet import ParquetStorage
+from neptune_exporter.storage.parquet_writer import ParquetWriter
 
 
 def test_parquet_storage_init():
-    """Test ParquetStorage initialization."""
+    """Test ParquetWriter initialization."""
     base_path = Path("./test_output")
-    storage = ParquetStorage(base_path)
+    storage = ParquetWriter(base_path)
     assert storage.base_path == base_path
     assert base_path.exists()
 
@@ -14,7 +14,7 @@ def test_parquet_storage_init():
 def test_parquet_storage_save(temp_dir):
     """Test saving data to Parquet file."""
     base_path = temp_dir
-    storage = ParquetStorage(base_path)
+    storage = ParquetWriter(base_path)
 
     # Create test data as RecordBatch
     data = pa.record_batch(
@@ -37,9 +37,9 @@ def test_parquet_storage_save(temp_dir):
 
 
 def test_parquet_storage_context_manager(temp_dir):
-    """Test using ParquetStorage with context manager."""
+    """Test using ParquetWriter with context manager."""
     base_path = temp_dir
-    storage = ParquetStorage(base_path)
+    storage = ParquetWriter(base_path)
 
     # Create test data as RecordBatch
     data = pa.record_batch(
@@ -70,7 +70,7 @@ def test_parquet_storage_part_splitting(temp_dir):
     """Test that data is split into multiple parts when size limit is reached."""
     base_path = temp_dir
     # Use a very small size limit to force part splitting
-    storage = ParquetStorage(base_path, target_part_size_bytes=1024)  # 1KB limit
+    storage = ParquetWriter(base_path, target_part_size_bytes=1024)  # 1KB limit
 
     # Create test data that will exceed the size limit
     large_data = pa.record_batch(
@@ -122,9 +122,9 @@ def test_parquet_storage_part_splitting(temp_dir):
 
 
 def test_parquet_storage_sanitizes_project_id(temp_dir):
-    """Test that ParquetStorage sanitizes project IDs with special characters."""
+    """Test that ParquetWriter sanitizes project IDs with special characters."""
     base_path = temp_dir
-    storage = ParquetStorage(base_path)
+    storage = ParquetWriter(base_path)
 
     # Create test data
     data = pa.record_batch(

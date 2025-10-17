@@ -18,7 +18,7 @@ from typing import Iterable, Literal
 from click import Path
 from tqdm import tqdm
 from neptune_exporter.exporters.exporter import NeptuneExporter
-from neptune_exporter.storage import ParquetStorage
+from neptune_exporter.storage.parquet_writer import ParquetWriter
 from neptune_exporter.utils import sanitize_path_part
 
 
@@ -26,7 +26,7 @@ class ExportManager:
     def __init__(
         self,
         exporter: NeptuneExporter,
-        storage: ParquetStorage,
+        storage: ParquetWriter,
         files_destination: Path,
     ):
         self._exporter = exporter

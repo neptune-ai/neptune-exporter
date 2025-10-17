@@ -13,8 +13,8 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
-"""Loaders package for uploading data to target platforms."""
+"""Validation package for analyzing and reporting on exported Neptune data."""
 
-from .mlflow import MLflowLoader
+from .report_formatter import ReportFormatter
 
-__all__ = ["MLflowLoader"]
+__all__ = ["ReportFormatter"]

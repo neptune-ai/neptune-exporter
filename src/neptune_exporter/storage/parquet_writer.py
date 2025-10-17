@@ -43,7 +43,7 @@ class ProjectWriter:
 class ProjectWriterContext:
     """Context manager for writing to a specific project."""
 
-    def __init__(self, storage: "ParquetStorage", project_id: str):
+    def __init__(self, storage: "ParquetWriter", project_id: str):
         self.storage = storage
         self.project_id = project_id
 
@@ -58,7 +58,7 @@ class ProjectWriterContext:
         self.storage.save(self.project_id, data)
 
 
-class ParquetStorage:
+class ParquetWriter:
     def __init__(
         self, base_path: Path, target_part_size_bytes: int = 200 * 1024 * 1024
     ):

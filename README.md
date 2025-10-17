@@ -49,35 +49,91 @@ uv run pre-commit install
 
 ## Usage
 
+The Neptune Exporter provides a complete migration pipeline from Neptune to other platforms like MLflow.
+
+### Export Data from Neptune
+
+Export Neptune experiment data to parquet files:
+
 ```bash
 # Export all data from a project
-neptune-exporter -p "my-org/my-project"
+neptune-exporter export -p "my-org/my-project"
 
 # Export only parameters and metrics from specific runs
-neptune-exporter -p "my-org/my-project" -r "RUN-*" -e parameters -e metrics
+neptune-exporter export -p "my-org/my-project" -r "RUN-*" -e parameters -e metrics
 
 # Export specific attributes only (exact match)
-neptune-exporter -p "my-org/my-project" -a "learning_rate" -a "batch_size"
+neptune-exporter export -p "my-org/my-project" -a "learning_rate" -a "batch_size"
 
 # Export attributes matching a pattern (regex)
-neptune-exporter -p "my-org/my-project" -a "config/.*"
+neptune-exporter export -p "my-org/my-project" -a "config/.*"
 
 # Use Neptune 2.x exporter
-neptune-exporter -p "my-org/my-project" --exporter neptune2
-
-# Export to custom output directory
-neptune-exporter -p "my-org/my-project" -o "/path/to/output"
-
-# Export multiple projects
-neptune-exporter -p "my-org/project1" -p "my-org/project2"
+neptune-exporter export -p "my-org/my-project" --exporter neptune2
 ```
 
-### Command Options
+### Load Data to MLflow
 
-- `-p, --project-ids`: Neptune project IDs to export (required, can be specified multiple times)
-- `-r, --runs`: Filter runs by pattern (e.g., 'RUN-*' or specific run ID)
-- `-a, --attributes`: Filter attributes by name (can be specified multiple times)
-- `-e, --export-classes`: Types of data to export (parameters, metrics, series, files)
-- `--exporter`: Neptune exporter to use (neptune2, neptune3)
-- `-o, --output-path`: Base path for exported data (default: ./exports)
-- `--api-token`: Neptune API token (or use NEPTUNE_API_TOKEN environment variable)
+Load exported parquet data to MLflow:
+
+```bash
+# Load all data from exported parquet files
+neptune-exporter load
+
+# Load specific projects
+neptune-exporter load -p "my-org/my-project1" -p "my-org/my-project2"
+
+# Load specific runs
+neptune-exporter load -r "RUN-123" -r "RUN-456"
+
+# Load only parameters and metrics
+neptune-exporter load -t parameters -t float_series
+
+# Load to specific MLflow tracking URI
+neptune-exporter load --mlflow-tracking-uri "http://localhost:5000"
+```
+
+### View Data Summary
+
+Get a summary of exported data:
+
+```bash
+# Show summary of all exported data
+neptune-exporter summary
+
+# Show summary from specific path
+neptune-exporter summary -i ./my_exports
+```
+
+### Complete Migration Example
+
+```bash
+# Step 1: Export data from Neptune
+neptune-exporter export -p "my-org/my-project" -o ./exports
+
+# Step 2: View what was exported
+neptune-exporter summary -i ./exports
+
+# Step 3: Load to MLflow
+neptune-exporter load -i ./exports --mlflow-tracking-uri "http://localhost:5000"
+```
+
+## Data Type Mappings
+
+### Neptune to MLflow
+
+| Neptune Type | MLflow Type | Notes |
+|--------------|-------------|-------|
+| Parameters (float, int, string, bool, datetime, string_set) | Parameters | All values converted to strings |
+| Float Series | Metrics | Steps converted from decimal to integer |
+| String Series | Artifacts | Saved as text files |
+| Histogram Series | Artifacts | Saved as CSV tables |
+| Files | Artifacts | Direct file upload |
+| File Series | Artifacts | Files with step information in path |
+
+### Key Considerations
+
+- **Step Conversion**: Neptune uses decimal steps, MLflow uses integer steps. Default multiplier is 1,000,000 (configurable with `--step-multiplier`)
+- **Attribute Names**: Neptune attribute paths are sanitized to meet MLflow key constraints (max 250 chars, alphanumeric + special chars)
+- **Experiment Names**: Neptune project IDs become MLflow experiment names (with optional prefix)
+- **File Artifacts**: Files are uploaded as MLflow artifacts with preserved directory structure

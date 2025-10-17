@@ -15,6 +15,7 @@
 
 """Storage package for different output formats."""
 
-from .parquet import ParquetStorage
+from .parquet_writer import ParquetWriter
+from .parquet_reader import ParquetReader
 
-__all__ = ["ParquetStorage"]
+__all__ = ["ParquetWriter", "ParquetReader"]

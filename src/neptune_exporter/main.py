@@ -19,11 +19,22 @@ from pathlib import Path
 from neptune_exporter.exporters.exporter import NeptuneExporter
 from neptune_exporter.exporters.neptune2 import Neptune2Exporter
 from neptune_exporter.exporters.neptune3 import Neptune3Exporter
-from neptune_exporter.manager import ExportManager
-from neptune_exporter.storage.parquet import ParquetStorage
+from neptune_exporter.export_manager import ExportManager
+from neptune_exporter.storage.parquet_writer import ParquetWriter
+from neptune_exporter.storage.parquet_reader import ParquetReader
+from neptune_exporter.loaders.mlflow import MLflowLoader
+from neptune_exporter.loader_manager import LoaderManager
+from neptune_exporter.summary_manager import SummaryManager
+from neptune_exporter.validation import ReportFormatter
 
 
-@click.command()
+@click.group()
+def cli():
+    """Neptune Exporter - Export and migrate Neptune experiment data."""
+    pass
+
+
+@cli.command()
 @click.option(
     "--project-ids",
     "-p",
@@ -71,7 +82,7 @@ from neptune_exporter.storage.parquet import ParquetStorage
     "--api-token",
     help="Neptune API token. If not provided, will use environment variable NEPTUNE_API_TOKEN.",
 )
-def main(
+def export(
     project_ids: tuple[str, ...],
     runs: str | None,
     attributes: tuple[str, ...],
@@ -135,7 +146,7 @@ def main(
         raise click.BadParameter(f"Unknown exporter: {exporter}")
 
     # Create storage instance
-    storage = ParquetStorage(base_path=output_path)
+    storage = ParquetWriter(base_path=output_path)
 
     # Create and run export manager
     export_manager = ExportManager(
@@ -159,6 +170,191 @@ def main(
     except Exception as e:
         click.echo(f"Export failed: {e}", err=True)
         raise click.Abort()
+
+
+@cli.command()
+@click.option(
+    "--input-path",
+    "-i",
+    type=click.Path(path_type=Path),
+    default="./exports",
+    help="Base path for exported parquet data. Default: ./exports",
+)
+@click.option(
+    "--project-ids",
+    "-p",
+    multiple=True,
+    help="Project IDs to load. If not specified, loads all available projects.",
+)
+@click.option(
+    "--runs",
+    "-r",
+    multiple=True,
+    help="Run IDs to filter by. Can be specified multiple times.",
+)
+@click.option(
+    "--attribute-types",
+    "-t",
+    multiple=True,
+    type=click.Choice(
+        [
+            "float",
+            "int",
+            "string",
+            "bool",
+            "datetime",
+            "string_set",
+            "float_series",
+            "string_series",
+            "histogram_series",
+            "file",
+            "file_series",
+        ],
+        case_sensitive=False,
+    ),
+    help="Attribute types to load. Can be specified multiple times.",
+)
+@click.option(
+    "--mlflow-tracking-uri",
+    help="MLflow tracking URI. If not provided, uses default MLflow tracking URI.",
+)
+@click.option(
+    "--experiment-name-prefix",
+    help="Optional prefix for MLflow experiment names (to handle org/project structure).",
+)
+@click.option(
+    "--step-multiplier",
+    type=int,
+    default=1_000_000,
+    help="Multiplier to convert Neptune decimal steps to MLflow integer steps. Default: 1,000,000",
+)
+@click.option(
+    "--files-base-path",
+    type=click.Path(path_type=Path),
+    help="Base path for exported files. If not provided, uses input-path/files.",
+)
+def load(
+    input_path: Path,
+    project_ids: tuple[str, ...],
+    runs: tuple[str, ...],
+    attribute_types: tuple[str, ...],
+    mlflow_tracking_uri: str | None,
+    experiment_name_prefix: str | None,
+    step_multiplier: int,
+    files_base_path: Path | None,
+) -> None:
+    """Load exported Neptune data from parquet files to MLflow.
+
+    This tool loads previously exported Neptune data from parquet files
+    and uploads it to MLflow for further analysis and tracking.
+
+    Examples:
+
+    \b
+    # Load all data from exported parquet files
+    neptune-exporter load
+
+    \b
+    # Load specific projects
+    neptune-exporter load -p "my-org/my-project1" -p "my-org/my-project2"
+
+    \b
+    # Load specific runs
+    neptune-exporter load -r "RUN-123" -r "RUN-456"
+
+    \b
+    # Load only parameters and metrics
+    neptune-exporter load -t parameters -t float_series
+
+    \b
+    # Load to specific MLflow tracking URI
+    neptune-exporter load --mlflow-tracking-uri "http://localhost:5000"
+    """
+    # Convert tuples to lists and handle None values
+    project_ids_list = list(project_ids) if project_ids else None
+    runs_set = set(runs) if runs else None
+    attribute_types_set = set(attribute_types) if attribute_types else None
+
+    # Set files base path
+    if files_base_path is None:
+        files_base_path = input_path / "files"
+
+    # Validate input path exists
+    if not input_path.exists():
+        raise click.BadParameter(f"Input path does not exist: {input_path}")
+
+    # Create parquet reader
+    parquet_reader = ParquetReader(base_path=input_path)
+
+    # Create MLflow loader
+    mlflow_loader = MLflowLoader(
+        tracking_uri=mlflow_tracking_uri,
+        experiment_name_prefix=experiment_name_prefix,
+        step_multiplier=step_multiplier,
+    )
+
+    # Create loader manager
+    loader_manager = LoaderManager(
+        parquet_reader=parquet_reader,
+        mlflow_loader=mlflow_loader,
+        files_base_path=files_base_path,
+    )
+
+    click.echo(f"Starting MLflow loading from {input_path.absolute()}")
+    if project_ids_list:
+        click.echo(f"Project IDs: {', '.join(project_ids_list)}")
+    if runs_set:
+        click.echo(f"Run IDs: {', '.join(sorted(runs_set))}")
+    if attribute_types_set:
+        click.echo(f"Attribute types: {', '.join(sorted(attribute_types_set))}")
+
+    try:
+        loader_manager.load_to_mlflow(
+            project_ids=project_ids_list,
+            runs=runs_set,
+            attribute_types=attribute_types_set,
+        )
+        click.echo("MLflow loading completed successfully!")
+    except Exception as e:
+        click.echo(f"MLflow loading failed: {e}", err=True)
+        raise click.Abort()
+
+
+@cli.command()
+@click.option(
+    "--input-path",
+    "-i",
+    type=click.Path(path_type=Path),
+    default="./exports",
+    help="Base path for exported parquet data. Default: ./exports",
+)
+def summary(input_path: Path) -> None:
+    """Show summary of exported Neptune data.
+
+    This command shows a summary of available data in the exported parquet files,
+    including project counts, run counts, and attribute types.
+    """
+    # Validate input path exists
+    if not input_path.exists():
+        raise click.BadParameter(f"Input path does not exist: {input_path}")
+
+    # Create parquet reader and summary manager
+    parquet_reader = ParquetReader(base_path=input_path)
+    summary_manager = SummaryManager(parquet_reader=parquet_reader)
+
+    try:
+        # Show general data summary
+        summary_data = summary_manager.get_data_summary()
+        ReportFormatter.print_data_summary(summary_data, input_path)
+
+    except Exception as e:
+        click.echo(f"Failed to generate summary: {e}", err=True)
+        raise click.Abort()
+
+
+def main():
+    """Main entry point for the CLI."""
+    cli()
 
 
 if __name__ == "__main__":
