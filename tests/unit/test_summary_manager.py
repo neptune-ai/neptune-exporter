@@ -106,6 +106,11 @@ def test_get_project_summary_success():
     assert result["total_runs"] == 2
     assert set(result["attribute_types"]) == {"float", "string"}
     assert set(result["runs"]) == {"run1", "run2"}
+    assert result["total_records"] == 3
+    assert "attribute_breakdown" in result
+    assert "run_breakdown" in result
+    assert "file_info" in result
+    assert "step_statistics" in result
 
     mock_reader.read_project_data.assert_called_once_with(project_dir)
 
@@ -127,6 +132,10 @@ def test_get_project_summary_empty_data():
         "total_runs": 0,
         "attribute_types": [],
         "runs": [],
+        "total_records": 0,
+        "attribute_breakdown": {},
+        "run_breakdown": {},
+        "file_info": {},
     }
 
 
