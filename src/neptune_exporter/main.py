@@ -40,7 +40,9 @@ from neptune_exporter.storage.parquet import ParquetStorage
     "--attributes",
     "-a",
     multiple=True,
-    help="Filter attributes by name. Can be specified multiple times.",
+    help="Filter attributes by name. Can be specified multiple times. "
+    "If a single string is provided, it's treated as a regex pattern. "
+    "If multiple strings are provided, they're treated as exact attribute names to match.",
 )
 @click.option(
     "--export-classes",
@@ -94,8 +96,12 @@ def main(
     neptune-exporter -p "my-org/my-project" -r "RUN-*" -e parameters -e metrics
 
     \b
-    # Export specific attributes only
+    # Export specific attributes only (exact match)
     neptune-exporter -p "my-org/my-project" -a "learning_rate" -a "batch_size"
+
+    \b
+    # Export attributes matching a pattern (regex)
+    neptune-exporter -p "my-org/my-project" -a "config/.*"
 
     \b
     # Use Neptune 2.x exporter
@@ -114,10 +120,8 @@ def main(
         raise click.BadParameter(f"Invalid export classes: {', '.join(invalid)}")
 
     # Create exporter instance
-    if (
-        exporter == "neptune2"
-    ):  # TODO: reenable type checking after Neptune2Exporter is implemented
-        exporter_instance: NeptuneExporter = Neptune2Exporter(api_token=api_token)  # type: ignore
+    if exporter == "neptune2":
+        exporter_instance: NeptuneExporter = Neptune2Exporter(api_token=api_token)
     elif exporter == "neptune3":
         exporter_instance = Neptune3Exporter(api_token=api_token)
     else:
