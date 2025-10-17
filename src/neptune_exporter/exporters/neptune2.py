@@ -38,7 +38,7 @@ _ATTRIBUTE_TYPE_MAP = {
     na.Integer: "int",
     na.Datetime: "datetime",
     na.Boolean: "bool",
-    na.Artifact: "artifact",  # TODO? seems like the only usable type that's missing
+    na.Artifact: "artifact",  # could add a separate column
     na.File: "file",
     na.GitRef: "git_ref",  # ignore, seems not to be implemented
     na.NotebookRef: "notebook_ref",  # ignore, not implemented
@@ -47,7 +47,7 @@ _ATTRIBUTE_TYPE_MAP = {
     na.FileSeries: "file_series",
     na.FloatSeries: "float_series",
     na.StringSeries: "string_series",
-    na.StringSet: "string_set",
+    na.StringSet: "string_set",  # could add a separate column
 }
 
 _PARAMETER_TYPES: Sequence[str] = (
@@ -57,6 +57,7 @@ _PARAMETER_TYPES: Sequence[str] = (
     "bool",
     "datetime",
     "string_set",
+    "artifact",
 )
 _METRIC_TYPES: Sequence[str] = ("float_series",)
 _SERIES_TYPES: Sequence[str] = ("string_series",)
@@ -90,7 +91,7 @@ class Neptune2Exporter:
         with neptune.init_project(
             api_token=self._api_token, project=project_id, mode="read-only"
         ) as project:
-            runs_table = project.fetch_runs_table(columns=[]).to_pandas()
+            runs_table = project.fetch_runs_table(id=runs, columns=[]).to_pandas()
             if len(runs_table):
                 return list(runs_table["sys/id"])
             return []
@@ -157,7 +158,12 @@ class Neptune2Exporter:
                 if attribute_type not in _PARAMETER_TYPES:
                     continue
 
-                value = get_value(all_parameter_values, attribute._path)
+                if attribute_type == "string_set":
+                    value = attribute.fetch()
+                elif attribute_type == "artifact":
+                    value = attribute.fetch().hash
+                else:
+                    value = get_value(all_parameter_values, attribute._path)
 
                 all_data.append(
                     {
@@ -215,6 +221,8 @@ class Neptune2Exporter:
                 result_df.loc[mask, "datetime_value"] = result_df.loc[mask, "value"]
             elif attr_type == "string_set":
                 result_df.loc[mask, "string_set_value"] = result_df.loc[mask, "value"]
+            elif attr_type == "artifact":
+                result_df.loc[mask, "string_value"] = result_df.loc[mask, "value"]
             else:
                 raise ValueError(f"Unsupported parameter type: {attr_type}")
 
@@ -517,7 +525,7 @@ class Neptune2Exporter:
                             "step": None,
                             "attribute_path": attribute_path,
                             "attribute_type": attribute_type,
-                            "file_set_value": {
+                            "file_value": {
                                 "path": str(file_set_path.relative_to(destination))
                             },
                         }
@@ -587,7 +595,7 @@ class Neptune2Exporter:
         if isinstance(exception, neptune.exceptions.MetadataContainerNotFound):
             # Expected: Run doesn't exist, just skip it
             self._logger.debug(f"Run {run_id} not found, skipping")
-        elif isinstance(exception, neptune.exceptions.NeptuneConnectionLost):
+        elif isinstance(exception, neptune.exceptions.NeptuneConnectionLostException):
             # Network issues - might be temporary, user should retry
             self._logger.warning(
                 f"Connection lost processing run {run_id}: {exception}"

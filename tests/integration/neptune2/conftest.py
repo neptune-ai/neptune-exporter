@@ -84,6 +84,9 @@ def test_runs(project, api_token) -> None:
         for path, value in experiment.file_sets.items():
             run[path].upload_files(value)
 
+        for path, value in experiment.artifacts.items():
+            run[path].track_files(value)
+
         runs[experiment.name] = run
 
     for run in runs.values():

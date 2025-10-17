@@ -40,6 +40,10 @@ def test_neptune2_download_parameters(api_token, project, test_runs):
     for item in TEST_DATA:
         for path in item.config.keys():
             expected_paths.add(path)
+        for path in item.string_sets.keys():
+            expected_paths.add(path)
+        for path in item.artifacts.keys():
+            expected_paths.add(path)
 
     actual_paths = set(parameters.column("attribute_path").to_pylist())
     assert expected_paths.issubset(actual_paths)
