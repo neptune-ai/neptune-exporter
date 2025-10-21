@@ -11,17 +11,17 @@ import neptune
 
 @pytest.fixture(scope="session")
 def api_token() -> str:
-    api_token = os.getenv("NEPTUNE_E2E_API_TOKEN")
+    api_token = os.getenv("NEPTUNE2_E2E_API_TOKEN")
     if api_token is None:
-        raise RuntimeError("NEPTUNE_E2E_API_TOKEN environment variable is not set")
+        raise RuntimeError("NEPTUNE2_E2E_API_TOKEN environment variable is not set")
     return api_token
 
 
 @pytest.fixture(scope="session")
 def project() -> str:
-    project_identifier = os.getenv("NEPTUNE_E2E_PROJECT")
+    project_identifier = os.getenv("NEPTUNE2_E2E_PROJECT")
     if project_identifier is None:
-        raise RuntimeError("NEPTUNE_E2E_PROJECT environment variable is not set")
+        raise RuntimeError("NEPTUNE2_E2E_PROJECT environment variable is not set")
     return project_identifier
 
 
