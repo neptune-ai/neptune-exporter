@@ -8,7 +8,7 @@ on:
 
 jobs:
   test:
-    runs-on: ubuntu-latest  # TODO: configure tools-gha-latest
+    runs-on: tools-gha-runners
     timeout-minutes: 30
     strategy:
       matrix:
@@ -39,13 +39,19 @@ jobs:
       run: |
         uv run pytest tests/unit -v --junitxml=test-results/unit-results.xml
 
-    - name: Run integration tests
+    - name: Run integration tests - neptune3
       run: |
-        # uv run pytest tests/integration -v --junitxml=test-results/integration-results.xml
-        echo "TODO: Run integration tests on tools-gha-latest"
+        uv run pytest tests/integration/neptune3 -v --junitxml=test-results/integration-neptune3-results.xml
       env:
-        NEPTUNE_E2E_API_TOKEN: ${{ secrets.NEPTUNE_E2E_API_TOKEN }}
-        NEPTUNE_E2E_PROJECT: ${{ secrets.NEPTUNE_E2E_PROJECT }}
+        NEPTUNE_E2E_API_TOKEN: ${{ secrets.NEPTUNE3_E2E_API_TOKEN }}
+        NEPTUNE_E2E_PROJECT: ${{ secrets.NEPTUNE3_E2E_PROJECT }}
+
+    - name: Run integration tests - neptune2
+      run: |
+        uv run pytest tests/integration/neptune2 -v --junitxml=test-results/integration-neptune2-results.xml
+      env:
+        NEPTUNE_E2E_API_TOKEN: ${{ secrets.NEPTUNE2_E2E_API_TOKEN }}
+        NEPTUNE_E2E_PROJECT: ${{ secrets.NEPTUNE2_E2E_PROJECT }}
 
     - name: Publish Unit Test Results
       uses: mikepenz/action-junit-report@v4
@@ -55,10 +61,18 @@ jobs:
         check_name: 'Unit Tests'
         fail_on_failure: true
 
-    - name: Publish Integration Test Results
+    - name: Publish Integration Test Results - neptune3
       uses: mikepenz/action-junit-report@v4
       if: always()
       with:
-        report_paths: 'test-results/integration-results.xml'
-        check_name: 'Integration Tests'
+        report_paths: 'test-results/integration-neptune3-results.xml'
+        check_name: 'Integration Tests - Neptune 3'
+        fail_on_failure: true
+
+    - name: Publish Integration Test Results - neptune2
+      uses: mikepenz/action-junit-report@v4
+      if: always()
+      with:
+        report_paths: 'test-results/integration-neptune2-results.xml'
+        check_name: 'Integration Tests - Neptune 2'
         fail_on_failure: true
