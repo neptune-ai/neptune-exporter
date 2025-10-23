@@ -13,8 +13,10 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
+import pyarrow as pa
+import pyarrow.compute as pc
 from pathlib import Path
-from typing import Optional, Set
+from typing import Generator, Optional
 from tqdm import tqdm
 import logging
 
@@ -28,27 +30,25 @@ class LoaderManager:
     def __init__(
         self,
         parquet_reader: ParquetReader,
-        mlflow_loader: MLflowLoader,
-        files_base_path: Path,
+        data_loader: MLflowLoader,
+        files_directory: Path,
     ):
         self._parquet_reader = parquet_reader
-        self._mlflow_loader = mlflow_loader
-        self._files_base_path = files_base_path
+        self._data_loader = data_loader
+        self._files_directory = files_directory
         self._logger = logging.getLogger(__name__)
 
-    def load_to_mlflow(
+    def load(
         self,
         project_ids: Optional[list[str]] = None,
-        runs: Optional[Set[str]] = None,
-        attribute_types: Optional[Set[str]] = None,
+        runs: Optional[list[str]] = None,
     ) -> None:
         """
-        Load Neptune data from parquet files to MLflow.
+        Load Neptune data from files to target platforms (e.g. MLflow).
 
         Args:
             project_ids: List of project IDs to load. If None, loads all available projects.
             runs: Set of run IDs to filter by. If None, loads all runs.
-            attribute_types: Set of attribute types to load. If None, loads all types.
         """
         # Get projects to process
         project_directories = self._parquet_reader.list_project_directories()
@@ -58,17 +58,19 @@ class LoaderManager:
             return
 
         self._logger.info(
-            f"Starting MLflow loading for {len(project_directories)} project(s)"
+            f"Starting data loading for {len(project_directories)} project(s)"
         )
 
         # Process each project
         for project_directory in tqdm(
-            project_directories, desc="Loading projects to MLflow", unit="project"
+            project_directories, desc="Loading projects", unit="project"
         ):
             try:
-                self._load_project(project_directory, runs, attribute_types)
-            except Exception as e:
-                self._logger.error(f"Error loading project {project_directory}: {e}")
+                self._load_project(project_directory, project_ids, runs)
+            except Exception:
+                self._logger.error(
+                    f"Error loading project {project_directory}", exc_info=True
+                )
                 continue
 
         self._logger.info("MLflow loading completed")
@@ -76,56 +78,70 @@ class LoaderManager:
     def _load_project(
         self,
         project_directory: Path,
-        runs: Optional[Set[str]] = None,
-        attribute_types: Optional[Set[str]] = None,
+        project_ids: Optional[list[str]] = None,
+        runs: Optional[list[str]] = None,
     ) -> None:
-        """Load a single project to MLflow."""
-        self._logger.info(f"Loading project {project_directory} to MLflow")
+        """Load a single project to target platform."""
+        self._logger.info(f"Loading data from {project_directory} to target platform")
 
-        # Create MLflow experiment
-        project_id = project_directory.name  # TODO: wrong
-        experiment_id = self._mlflow_loader.create_experiment(project_id)
+        project_data_generator: Generator[pa.Table, None, None] = (
+            self._parquet_reader.read_project_data(project_directory, project_ids, runs)
+        )
 
-        # Get runs to process
-        # if runs is None:
-        #     runs = self._parquet_reader.get_unique_runs(project_id)
+        run_id_to_target_run_id: dict[str, str] = {}
 
-        if not runs:
-            self._logger.warning(f"No runs found for project {project_id}")
-            return
+        for project_data in project_data_generator:
+            project_id = project_data["project_id"].to_pylist()[0]
+            run_ids = pc.unique(project_data["run_id"]).to_pylist()
 
-        # Process each run
-        for run_id in tqdm(
-            runs, desc=f"Loading runs from {project_id}", unit="run", leave=False
-        ):
-            try:
-                self._load_run(project_id, run_id, experiment_id, attribute_types)
-            except Exception as e:
-                self._logger.error(
-                    f"Error loading run {run_id} from project {project_id}: {e}"
-                )
-                continue
+            for source_run_id in run_ids:
+                try:
+                    run_mask = pc.equal(project_data["run_id"], source_run_id)
+                    run_data = project_data.filter(run_mask)
 
-    def _load_run(
-        self,
-        project_id: str,
-        run_id: str,
-        experiment_id: str,
-        attribute_types: Optional[Set[str]] = None,
-    ) -> None:
-        """Load a single run to MLflow."""
-        # Read run data from parquet
-        # run_data = self._parquet_reader.read_run_data(project_id, run_id, attribute_types)
+                    if source_run_id in run_id_to_target_run_id:
+                        target_run_id = run_id_to_target_run_id[source_run_id]
+                    else:
+                        custom_run_id = (
+                            self._get_attribute_value(run_data, "sys/custom_run_id")
+                            or source_run_id
+                        )
+                        experiment_name = self._get_attribute_value(
+                            run_data, "sys/experiment/name"
+                        )
+                        # parent_run_id = self._get_attribute_value(run_table, "sys/forking/parent")
 
-        # if len(run_data) == 0:
-        #     self._logger.warning(f"No data found for run {run_id} in project {project_id}")
-        #     return
+                        if experiment_name is not None:
+                            target_experiment_id = self._data_loader.create_experiment(
+                                project_id=project_id, experiment_name=experiment_name
+                            )
+                        else:
+                            target_experiment_id = None
 
-        # # Upload to MLflow
-        # files_base_path = self._files_base_path / project_id
-        # self._mlflow_loader.upload_run_data(
-        #     run_data=run_data,
-        #     run_id=run_id,
-        #     experiment_id=experiment_id,
-        #     files_base_path=files_base_path,
-        # )
+                        target_run_id = self._data_loader.create_run(
+                            project_id=project_id,
+                            run_name=custom_run_id,
+                            experiment_id=target_experiment_id,
+                        )
+                        run_id_to_target_run_id[source_run_id] = target_run_id
+
+                    self._data_loader.upload_run_data(
+                        run_data=run_data,
+                        run_id=target_run_id,
+                        files_directory=self._files_directory,
+                    )
+                except Exception:
+                    self._logger.error(
+                        f"Error loading project data for run {source_run_id}",
+                        exc_info=True,
+                    )
+                    continue
+
+    @staticmethod
+    def _get_attribute_value(
+        table: pa.Table, attribute_path: str, attribute_type: str = "string_value"
+    ) -> Optional[str]:
+        mask = pc.equal(table["attribute_path"], attribute_path)
+        if pc.sum(mask).as_py() > 0:
+            return table.filter(mask)[attribute_type].take([0]).to_pylist()[0]
+        return None

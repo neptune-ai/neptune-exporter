@@ -193,55 +193,19 @@ def export(
     help="Run IDs to filter by. Can be specified multiple times.",
 )
 @click.option(
-    "--attribute-types",
-    "-t",
-    multiple=True,
-    type=click.Choice(
-        [
-            "float",
-            "int",
-            "string",
-            "bool",
-            "datetime",
-            "string_set",
-            "float_series",
-            "string_series",
-            "histogram_series",
-            "file",
-            "file_series",
-        ],
-        case_sensitive=False,
-    ),
-    help="Attribute types to load. Can be specified multiple times.",
-)
-@click.option(
     "--mlflow-tracking-uri",
     help="MLflow tracking URI. If not provided, uses default MLflow tracking URI.",
 )
 @click.option(
-    "--experiment-name-prefix",
-    help="Optional prefix for MLflow experiment names (to handle org/project structure).",
-)
-@click.option(
-    "--step-multiplier",
-    type=int,
-    default=1_000_000,
-    help="Multiplier to convert Neptune decimal steps to MLflow integer steps. Default: 1,000,000",
-)
-@click.option(
-    "--files-base-path",
-    type=click.Path(path_type=Path),
-    help="Base path for exported files. If not provided, uses input-path/files.",
+    "--name-prefix",
+    help="Optional prefix for MLflow experiment and run names (to handle org/project structure).",
 )
 def load(
     input_path: Path,
     project_ids: tuple[str, ...],
     runs: tuple[str, ...],
-    attribute_types: tuple[str, ...],
     mlflow_tracking_uri: str | None,
-    experiment_name_prefix: str | None,
-    step_multiplier: int,
-    files_base_path: Path | None,
+    name_prefix: str | None,
 ) -> None:
     """Load exported Neptune data from parquet files to MLflow.
 
@@ -272,12 +236,7 @@ def load(
     """
     # Convert tuples to lists and handle None values
     project_ids_list = list(project_ids) if project_ids else None
-    runs_set = set(runs) if runs else None
-    attribute_types_set = set(attribute_types) if attribute_types else None
-
-    # Set files base path
-    if files_base_path is None:
-        files_base_path = input_path / "files"
+    runs_list = list(runs) if runs else None
 
     # Validate input path exists
     if not input_path.exists():
@@ -287,32 +246,28 @@ def load(
     parquet_reader = ParquetReader(base_path=input_path)
 
     # Create MLflow loader
-    mlflow_loader = MLflowLoader(
+    data_loader = MLflowLoader(
         tracking_uri=mlflow_tracking_uri,
-        experiment_name_prefix=experiment_name_prefix,
-        step_multiplier=step_multiplier,
+        name_prefix=name_prefix,
     )
 
     # Create loader manager
     loader_manager = LoaderManager(
         parquet_reader=parquet_reader,
-        mlflow_loader=mlflow_loader,
-        files_base_path=files_base_path,
+        data_loader=data_loader,
+        files_directory=input_path / "files",
     )
 
     click.echo(f"Starting MLflow loading from {input_path.absolute()}")
     if project_ids_list:
         click.echo(f"Project IDs: {', '.join(project_ids_list)}")
-    if runs_set:
-        click.echo(f"Run IDs: {', '.join(sorted(runs_set))}")
-    if attribute_types_set:
-        click.echo(f"Attribute types: {', '.join(sorted(attribute_types_set))}")
+    if runs_list:
+        click.echo(f"Run IDs: {', '.join(runs_list)}")
 
     try:
-        loader_manager.load_to_mlflow(
+        loader_manager.load(
             project_ids=project_ids_list,
-            runs=runs_set,
-            attribute_types=attribute_types_set,
+            runs=runs_list,
         )
         click.echo("MLflow loading completed successfully!")
     except Exception as e:

@@ -17,7 +17,7 @@ import pyarrow as pa
 import pyarrow.parquet as pq
 import pyarrow.compute as pc
 from pathlib import Path
-from typing import Generator, Optional, Set
+from typing import Generator, Optional
 import logging
 
 from neptune_exporter import model
@@ -44,10 +44,11 @@ class ParquetReader:
     def read_project_data(
         self,
         project_directory: Path,
-        runs: Optional[Set[str]] = None,
-        attribute_types: Optional[Set[str]] = None,
+        project_ids: Optional[list[str]] = None,
+        runs: Optional[list[str]] = None,
+        attribute_types: Optional[list[str]] = None,
     ) -> Generator[pa.Table, None, None]:
-        """Read all data for a project, optionally filtered by runs and attribute types."""
+        """Read all data for a project, optionally filtered by project ids, runs and attribute types."""
         parquet_files = self._list_parquet_files_in_project(project_directory)
 
         if not parquet_files:
@@ -60,14 +61,16 @@ class ParquetReader:
                 table = pq.read_table(file_path, schema=model.SCHEMA)
 
                 # Apply filters using PyArrow compute functions
+                if project_ids is not None:
+                    mask = pc.is_in(table["project_id"], pa.array(project_ids))
+                    table = table.filter(mask)
+
                 if runs is not None:
-                    mask = pc.is_in(table["run_id"], pa.array(list(runs)))
+                    mask = pc.is_in(table["run_id"], pa.array(runs))
                     table = table.filter(mask)
 
                 if attribute_types is not None:
-                    mask = pc.is_in(
-                        table["attribute_type"], pa.array(list(attribute_types))
-                    )
+                    mask = pc.is_in(table["attribute_type"], pa.array(attribute_types))
                     table = table.filter(mask)
 
                 if len(table) > 0:

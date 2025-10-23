@@ -17,7 +17,7 @@ import re
 import logging
 from decimal import Decimal
 from pathlib import Path
-from typing import Optional, Union
+from typing import Optional
 import pandas as pd
 import pyarrow as pa
 import mlflow
@@ -31,20 +31,17 @@ class MLflowLoader:
     def __init__(
         self,
         tracking_uri: Optional[str] = None,
-        experiment_name_prefix: Optional[str] = None,
-        step_multiplier: int = 1_000_000,
+        name_prefix: Optional[str] = None,
     ):
         """
         Initialize MLflow loader.
 
         Args:
             tracking_uri: MLflow tracking URI
-            experiment_name_prefix: Optional prefix for experiment names (to handle org/project structure)
-            step_multiplier: Multiplier to convert Neptune decimal steps to MLflow integer steps
+            name_prefix: Optional prefix for experiment and run names (to handle org/project structure)
         """
         self.tracking_uri = tracking_uri
-        self.experiment_name_prefix = experiment_name_prefix
-        self.step_multiplier = step_multiplier
+        self.name_prefix = name_prefix
         self._logger = logging.getLogger(__name__)
 
         if tracking_uri:
@@ -70,61 +67,120 @@ class MLflowLoader:
 
         return sanitized
 
-    def _convert_step_to_int(self, step: Decimal) -> int:
+    def _get_experiment_name(self, project_id: str, experiment_name: str) -> str:
+        """Get MLflow experiment name from Neptune project ID."""
+        name = f"{project_id}/{experiment_name}"
+
+        if self.name_prefix:
+            name = f"{self.name_prefix}/{name}"
+
+        return name
+
+    def _get_run_name(self, project_id: str, run_id: str) -> str:
+        """Get MLflow run name from Neptune run ID."""
+        name = f"{project_id}/{run_id}"
+
+        if self.name_prefix:
+            name = f"{self.name_prefix}/{name}"
+
+        return name
+
+    def _convert_step_to_int(self, step: Decimal, step_multiplier: int) -> int:
         """Convert Neptune decimal step to MLflow integer step."""
         if step is None:
             return 0
-        return int(float(step) * self.step_multiplier)
+        return int(float(step) * step_multiplier)
 
-    def _get_experiment_name(self, project_id: str) -> str:
-        """Get MLflow experiment name from Neptune project ID."""
-        if self.experiment_name_prefix:
-            return f"{self.experiment_name_prefix}/{project_id}"
-        return project_id
+    def _determine_step_multiplier(self, steps: pd.Series) -> int:
+        """
+        Determine step multiplier based on actual data precision.
 
-    def create_experiment(self, project_id: str) -> str:
+        Since the data comes from decimal(18, 6) schema, we analyze the actual
+        precision used in the data to determine the appropriate multiplier.
+        """
+        valid_steps = steps.dropna()
+        if valid_steps.empty:
+            return 1
+
+        # Get decimal places for each step (only count negative exponents)
+        decimal_places = valid_steps.map(
+            lambda step: -step.as_tuple()[2] if step.as_tuple()[2] < 0 else 0
+        )
+
+        max_decimal_places = decimal_places.max()
+
+        return 10**max_decimal_places
+
+    def create_experiment(self, project_id: str, experiment_name: str) -> str:
         """Create or get MLflow experiment for a Neptune project."""
-        experiment_name = self._get_experiment_name(project_id)
+        target_experiment_name = self._get_experiment_name(project_id, experiment_name)
 
         try:
-            experiment = mlflow.get_experiment_by_name(experiment_name)
+            experiment = mlflow.get_experiment_by_name(target_experiment_name)
             if experiment is None:
-                experiment_id = mlflow.create_experiment(experiment_name)
+                experiment_id = mlflow.create_experiment(target_experiment_name)
                 self._logger.info(
-                    f"Created experiment '{experiment_name}' with ID {experiment_id}"
+                    f"Created experiment '{target_experiment_name}' with ID {experiment_id}"
                 )
             else:
                 experiment_id = experiment.experiment_id
                 self._logger.info(
-                    f"Using existing experiment '{experiment_name}' with ID {experiment_id}"
+                    f"Using existing experiment '{target_experiment_name}' with ID {experiment_id}"
                 )
 
             return experiment_id
         except Exception as e:
             self._logger.error(
-                f"Error creating/getting experiment '{experiment_name}': {e}"
+                f"Error creating/getting experiment '{target_experiment_name}': {e}"
             )
             raise
 
     def create_run(
-        self, experiment_id: str, run_id: str, parent_run_id: Optional[str] = None
+        self,
+        project_id: str,
+        run_name: str,
+        experiment_id: Optional[str] = None,
+        parent_run_id: Optional[str] = None,
     ) -> str:
         """Create MLflow run."""
+        target_run_name = self._get_run_name(project_id, run_name)
+
         tags = {}
         if parent_run_id:
             tags[MLFLOW_PARENT_RUN_ID] = parent_run_id
 
         try:
             with mlflow.start_run(
-                experiment_id=experiment_id, run_name=run_id, tags=tags
+                experiment_id=experiment_id, run_name=target_run_name, tags=tags
             ):
                 mlflow_run_id = mlflow.active_run().info.run_id
                 self._logger.info(
-                    f"Created run '{run_id}' with MLflow ID {mlflow_run_id}"
+                    f"Created run '{target_run_name}' with MLflow ID {mlflow_run_id}"
                 )
                 return mlflow_run_id
         except Exception as e:
-            self._logger.error(f"Error creating run '{run_id}': {e}")
+            self._logger.error(f"Error creating run '{target_run_name}': {e}")
+            raise
+
+    def upload_run_data(
+        self,
+        run_data: pa.Table,
+        run_id: str,
+        files_directory: Path,
+    ) -> None:
+        """Upload all data for a single run to MLflow."""
+        try:
+            with mlflow.start_run(run_id=run_id):
+                run_df = run_data.to_pandas()
+
+                self.upload_parameters(run_df, run_id)
+                self.upload_metrics(run_df, run_id)
+                # self.upload_artifacts(run_data, run_id, files_directory)
+
+                self._logger.info(f"Successfully uploaded run {run_id} to MLflow")
+
+        except Exception as e:
+            self._logger.error(f"Error uploading run {run_id}: {e}")
             raise
 
     def upload_parameters(self, run_data: pd.DataFrame, run_id: str) -> None:
@@ -153,15 +209,11 @@ class MLflowLoader:
                 row["datetime_value"]
             ):
                 params[attr_name] = str(row["datetime_value"])
-            elif row["attribute_type"] == "string_set" and pd.notna(
-                row["string_set_value"]
+            elif (
+                row["attribute_type"] == "string_set"
+                and row["string_set_value"] is not None
             ):
-                # Convert list to comma-separated string
-                string_set = row["string_set_value"]
-                if isinstance(string_set, list):
-                    params[attr_name] = ",".join(str(x) for x in string_set)
-                else:
-                    params[attr_name] = str(string_set)
+                params[attr_name] = ",".join(row["string_set_value"])
 
         if params:
             mlflow.log_params(params)
@@ -175,6 +227,9 @@ class MLflowLoader:
         if metrics_data.empty:
             return
 
+        # Determine step multiplier from actual data
+        step_multiplier = self._determine_step_multiplier(metrics_data["step"])
+
         # Group by attribute path and log metrics
         for attr_path, group in metrics_data.groupby("attribute_path"):
             attr_name = self._sanitize_attribute_name(attr_path)
@@ -184,7 +239,9 @@ class MLflowLoader:
 
             for _, row in group.iterrows():
                 if pd.notna(row["float_value"]) and pd.notna(row["step"]):
-                    step = self._convert_step_to_int(row["step"])
+                    step = self._convert_step_to_int(
+                        row["step"], step_multiplier=step_multiplier
+                    )
                     mlflow.log_metric(attr_name, row["float_value"], step=step)
 
         self._logger.info(f"Uploaded metrics for run {run_id}")
@@ -194,129 +251,93 @@ class MLflowLoader:
     ) -> None:
         """Upload files and series as artifacts to MLflow run."""
         # Handle regular files
-        file_data = run_data[run_data["attribute_type"] == "file"]
-        for _, row in file_data.iterrows():
-            if pd.notna(row["file_value"]) and isinstance(row["file_value"], dict):
-                file_path = files_base_path / row["file_value"]["path"]
-                if file_path.exists():
-                    attr_name = self._sanitize_attribute_name(row["attribute_path"])
-                    mlflow.log_artifact(str(file_path), artifact_path=attr_name)
-                else:
-                    self._logger.warning(f"File not found: {file_path}")
+        # file_data = run_data[run_data["attribute_type"] == "file"]
+        # for _, row in file_data.iterrows():
+        #     if pd.notna(row["file_value"]) and isinstance(row["file_value"], dict):
+        #         file_path = files_base_path / row["file_value"]["path"]
+        #         if file_path.exists():
+        #             attr_name = self._sanitize_attribute_name(row["attribute_path"])
+        #             mlflow.log_artifact(str(file_path), artifact_path=attr_name)
+        #         else:
+        #             self._logger.warning(f"File not found: {file_path}")
 
-        # Handle file series
-        file_series_data = run_data[run_data["attribute_type"] == "file_series"]
-        for attr_path, group in file_series_data.groupby("attribute_path"):
-            attr_name = self._sanitize_attribute_name(attr_path)
+        # # Handle file series
+        # file_series_data = run_data[run_data["attribute_type"] == "file_series"]
+        # for attr_path, group in file_series_data.groupby("attribute_path"):
+        #     attr_name = self._sanitize_attribute_name(attr_path)
 
-            for _, row in group.iterrows():
-                if pd.notna(row["file_value"]) and isinstance(row["file_value"], dict):
-                    file_path = files_base_path / row["file_value"]["path"]
-                    if file_path.exists():
-                        # Include step in artifact name for file series
-                        step = (
-                            self._convert_step_to_int(row["step"])
-                            if pd.notna(row["step"])
-                            else 0
-                        )
-                        artifact_path = f"{attr_name}/step_{step}"
-                        mlflow.log_artifact(str(file_path), artifact_path=artifact_path)
-                    else:
-                        self._logger.warning(f"File not found: {file_path}")
+        #     for _, row in group.iterrows():
+        #         if pd.notna(row["file_value"]) and isinstance(row["file_value"], dict):
+        #             file_path = files_base_path / row["file_value"]["path"]
+        #             if file_path.exists():
+        #                 # Include step in artifact name for file series
+        #                 step = (
+        #                     self._convert_step_to_int(row["step"])
+        #                     if pd.notna(row["step"])
+        #                     else 0
+        #                 )
+        #                 artifact_path = f"{attr_name}/step_{step}"
+        #                 mlflow.log_artifact(str(file_path), artifact_path=artifact_path)
+        #             else:
+        #                 self._logger.warning(f"File not found: {file_path}")
 
-        # Handle string series as text artifacts
-        string_series_data = run_data[run_data["attribute_type"] == "string_series"]
-        for attr_path, group in string_series_data.groupby("attribute_path"):
-            attr_name = self._sanitize_attribute_name(attr_path)
+        # # Handle string series as text artifacts
+        # string_series_data = run_data[run_data["attribute_type"] == "string_series"]
+        # for attr_path, group in string_series_data.groupby("attribute_path"):
+        #     attr_name = self._sanitize_attribute_name(attr_path)
 
-            # Create a table-like structure
-            series_text = []
-            for _, row in group.iterrows():
-                if pd.notna(row["string_value"]) and pd.notna(row["step"]):
-                    step = self._convert_step_to_int(row["step"])
-                    series_text.append(f"Step {step}: {row['string_value']}")
+        #     # Create a table-like structure
+        #     series_text = []
+        #     for _, row in group.iterrows():
+        #         if pd.notna(row["string_value"]) and pd.notna(row["step"]):
+        #             step = self._convert_step_to_int(row["step"])
+        #             series_text.append(f"Step {step}: {row['string_value']}")
 
-            if series_text:
-                # Log as text artifact
-                import tempfile
+        #     if series_text:
+        #         # Log as text artifact
+        #         import tempfile
 
-                with tempfile.NamedTemporaryFile(
-                    mode="w", suffix=".txt", delete=False
-                ) as f:
-                    f.write("\n".join(series_text))
-                    mlflow.log_artifact(f.name, artifact_path=f"{attr_name}/series.txt")
-                    Path(f.name).unlink()  # Clean up temp file
+        #         with tempfile.NamedTemporaryFile(
+        #             mode="w", suffix=".txt", delete=False
+        #         ) as f:
+        #             f.write("\n".join(series_text))
+        #             mlflow.log_artifact(f.name, artifact_path=f"{attr_name}/series.txt")
+        #             Path(f.name).unlink()  # Clean up temp file
 
-        # Handle histogram series as table artifacts
-        histogram_series_data = run_data[
-            run_data["attribute_type"] == "histogram_series"
-        ]
-        for attr_path, group in histogram_series_data.groupby("attribute_path"):
-            attr_name = self._sanitize_attribute_name(attr_path)
+        # # Handle histogram series as table artifacts
+        # histogram_series_data = run_data[
+        #     run_data["attribute_type"] == "histogram_series"
+        # ]
+        # for attr_path, group in histogram_series_data.groupby("attribute_path"):
+        #     attr_name = self._sanitize_attribute_name(attr_path)
 
-            # Create CSV table
-            import tempfile
-            import csv
+        #     # Create CSV table
+        #     import tempfile
+        #     import csv
 
-            with tempfile.NamedTemporaryFile(
-                mode="w", suffix=".csv", delete=False, newline=""
-            ) as f:
-                writer = csv.writer(f)
-                writer.writerow(["step", "type", "edges", "values"])
+        #     with tempfile.NamedTemporaryFile(
+        #         mode="w", suffix=".csv", delete=False, newline=""
+        #     ) as f:
+        #         writer = csv.writer(f)
+        #         writer.writerow(["step", "type", "edges", "values"])
 
-                for _, row in group.iterrows():
-                    if pd.notna(row["histogram_value"]) and isinstance(
-                        row["histogram_value"], dict
-                    ):
-                        step = (
-                            self._convert_step_to_int(row["step"])
-                            if pd.notna(row["step"])
-                            else 0
-                        )
-                        hist = row["histogram_value"]
-                        edges_str = ",".join(str(x) for x in hist.get("edges", []))
-                        values_str = ",".join(str(x) for x in hist.get("values", []))
-                        writer.writerow(
-                            [step, hist.get("type", ""), edges_str, values_str]
-                        )
+        #         for _, row in group.iterrows():
+        #             if pd.notna(row["histogram_value"]) and isinstance(
+        #                 row["histogram_value"], dict
+        #             ):
+        #                 step = (
+        #                     self._convert_step_to_int(row["step"])
+        #                     if pd.notna(row["step"])
+        #                     else 0
+        #                 )
+        #                 hist = row["histogram_value"]
+        #                 edges_str = ",".join(str(x) for x in hist.get("edges", []))
+        #                 values_str = ",".join(str(x) for x in hist.get("values", []))
+        #                 writer.writerow(
+        #                     [step, hist.get("type", ""), edges_str, values_str]
+        #                 )
 
-                mlflow.log_artifact(f.name, artifact_path=f"{attr_name}/histograms.csv")
-                Path(f.name).unlink()  # Clean up temp file
+        #         mlflow.log_artifact(f.name, artifact_path=f"{attr_name}/histograms.csv")
+        #         Path(f.name).unlink()  # Clean up temp file
 
-        self._logger.info(f"Uploaded artifacts for run {run_id}")
-
-    def upload_run_data(
-        self,
-        run_data: Union[pd.DataFrame, pa.Table],
-        run_id: str,
-        experiment_id: str,
-        files_base_path: Path,
-        parent_run_id: Optional[str] = None,
-    ) -> str:
-        """Upload all data for a single run to MLflow."""
-        # Convert PyArrow Table to pandas DataFrame if needed
-        if isinstance(run_data, pa.Table):
-            if len(run_data) == 0:
-                # Handle empty table case
-                run_data = pd.DataFrame()
-            else:
-                run_data = run_data.to_pandas()
-
-        try:
-            with mlflow.start_run(experiment_id=experiment_id, run_name=run_id):
-                # Set parent run if specified
-                if parent_run_id:
-                    mlflow.set_tag(MLFLOW_PARENT_RUN_ID, parent_run_id)
-
-                # Upload different data types
-                self.upload_parameters(run_data, run_id)
-                self.upload_metrics(run_data, run_id)
-                self.upload_artifacts(run_data, run_id, files_base_path)
-
-                mlflow_run_id = mlflow.active_run().info.run_id
-                self._logger.info(f"Successfully uploaded run {run_id} to MLflow")
-                return mlflow_run_id
-
-        except Exception as e:
-            self._logger.error(f"Error uploading run {run_id}: {e}")
-            raise
+        # self._logger.info(f"Uploaded artifacts for run {run_id}")
