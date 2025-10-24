@@ -13,6 +13,7 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
+import os
 import click
 from pathlib import Path
 
@@ -39,8 +40,7 @@ def cli():
     "--project-ids",
     "-p",
     multiple=True,
-    required=True,
-    help="Neptune project IDs to export. Can be specified multiple times.",
+    help="Neptune project IDs to export. Can be specified multiple times. If not provided, reads from NEPTUNE_PROJECT environment variable.",
 )
 @click.option(
     "--runs",
@@ -117,9 +117,24 @@ def export(
     \b
     # Use Neptune 2.x exporter
     neptune-exporter -p "my-org/my-project" --exporter neptune2
+
+    \b
+    # Use environment variable for project ID
+    NEPTUNE_PROJECT="my-org/my-project" neptune-exporter
     """
     # Convert tuples to lists and handle None values
     project_ids_list = list(project_ids)
+
+    # If no project IDs provided, try to read from environment variable
+    if not project_ids_list:
+        env_project = os.getenv("NEPTUNE_PROJECT")
+        if env_project:
+            project_ids_list = [env_project]
+        else:
+            raise click.BadParameter(
+                "No project IDs provided. Either use --project-ids/-p option or set NEPTUNE_PROJECT environment variable."
+            )
+
     attributes_list = list(attributes) if attributes else None
     export_classes_list = list(export_classes)
 
