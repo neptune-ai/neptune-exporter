@@ -41,7 +41,7 @@ class ExportManager:
         export_classes: Iterable[
             Literal["parameters", "metrics", "series", "files"]
         ] = {"parameters", "metrics", "series", "files"},
-    ) -> None:
+    ) -> int:
         # Step 1: List all runs for all projects
         project_runs = {}
         for project_id in tqdm(
@@ -49,6 +49,11 @@ class ExportManager:
         ):
             run_ids = self._exporter.list_runs(project_id, runs)
             project_runs[project_id] = run_ids
+
+        # Check if any runs were found
+        total_runs = sum(len(run_ids) for run_ids in project_runs.values())
+        if total_runs == 0:
+            return 0
 
         # Step 2: Process each project's runs
         for project_id, run_ids in tqdm(
@@ -121,3 +126,5 @@ class ExportManager:
                             ):
                                 writer.save(batch)
                                 pbar.update(batch.num_rows)
+
+        return total_runs

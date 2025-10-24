@@ -56,14 +56,21 @@ def cli():
     "If multiple strings are provided, they're treated as exact attribute names to match.",
 )
 @click.option(
-    "--export-classes",
-    "-e",
+    "--classes",
+    "-c",
     type=click.Choice(
         ["parameters", "metrics", "series", "files"], case_sensitive=False
     ),
     multiple=True,
-    default=["parameters", "metrics", "series", "files"],
-    help="Types of data to export. Default: all types.",
+    help="Types of data to include in export. Can be specified multiple times.",
+)
+@click.option(
+    "--exclude",
+    type=click.Choice(
+        ["parameters", "metrics", "series", "files"], case_sensitive=False
+    ),
+    multiple=True,
+    help="Types of data to exclude from export. Can be specified multiple times.",
 )
 @click.option(
     "--exporter",
@@ -86,7 +93,8 @@ def export(
     project_ids: tuple[str, ...],
     runs: str | None,
     attributes: tuple[str, ...],
-    export_classes: tuple[str, ...],
+    classes: tuple[str, ...],
+    exclude: tuple[str, ...],
     exporter: str,
     output_path: Path,
     api_token: str | None,
@@ -104,7 +112,11 @@ def export(
 
     \b
     # Export only parameters and metrics from specific runs
-    neptune-exporter -p "my-org/my-project" -r "RUN-*" -e parameters -e metrics
+    neptune-exporter -p "my-org/my-project" -r "RUN-*" -c parameters -c metrics
+
+    \b
+    # Export everything except files
+    neptune-exporter -p "my-org/my-project" --exclude files
 
     \b
     # Export specific attributes only (exact match)
@@ -136,7 +148,26 @@ def export(
             )
 
     attributes_list = list(attributes) if attributes else None
-    export_classes_list = list(export_classes)
+
+    # Determine export classes based on include/exclude logic
+    all_classes = {"parameters", "metrics", "series", "files"}
+    classes_set = set(classes) if classes else set()
+    exclude_set = set(exclude) if exclude else set()
+
+    # Validate that both classes and exclude are not specified
+    if classes_set and exclude_set:
+        raise click.BadParameter(
+            "Cannot specify both --classes and --exclude. Use --classes to include specific types or --exclude to exclude specific types."
+        )
+
+    # Determine export classes based on include/exclude logic
+    if classes_set:
+        export_classes_list = list(classes_set)
+    elif exclude_set:
+        export_classes_list = list(all_classes - exclude_set)
+    else:
+        # Default to all classes if neither is specified
+        export_classes_list = list(all_classes)
 
     # Validate project IDs are not empty
     for project_id in project_ids_list:
@@ -175,13 +206,22 @@ def export(
     click.echo(f"Output path: {output_path.absolute()}")
 
     try:
-        export_manager.run(
+        runs_exported = export_manager.run(
             project_ids=project_ids_list,
             runs=runs,
             attributes=attributes_list,
             export_classes=export_classes_set,  # type: ignore
         )
-        click.echo("Export completed successfully!")
+
+        if runs_exported == 0:
+            click.echo("ℹ️  No runs found matching the specified criteria.")
+            if runs:
+                click.echo(f"   Filter: {runs}")
+            click.echo(
+                "   Try adjusting your run filter or check if the project contains any runs."
+            )
+        else:
+            click.echo("Export completed successfully!")
     except Exception as e:
         click.echo(f"Export failed: {e}", err=True)
         raise click.Abort()
