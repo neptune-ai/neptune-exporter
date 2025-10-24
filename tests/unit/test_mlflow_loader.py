@@ -290,11 +290,12 @@ def test_upload_run_data():
     # Create test data
     test_data = pd.DataFrame(
         {
-            "attribute_path": ["test/param", "test/metric"],
-            "attribute_type": ["string", "float_series"],
-            "string_value": ["test_value", None],
-            "float_value": [None, 0.5],
-            "step": [None, Decimal("1.0")],
+            "attribute_path": ["test/param", "test/metric", "test/file"],
+            "attribute_type": ["string", "float_series", "file"],
+            "step": [None, Decimal("1.0"), None],
+            "string_value": ["test_value", None, None],
+            "float_value": [None, 0.5, None],
+            "file_value": [None, None, {"path": "file.txt"}],
         }
     )
 
@@ -302,6 +303,8 @@ def test_upload_run_data():
         patch("mlflow.start_run") as mock_start_run,
         patch("mlflow.log_params") as mock_log_params,
         patch("mlflow.log_metric") as mock_log_metric,
+        patch("mlflow.log_artifact") as mock_log_artifact,
+        patch("pathlib.Path.exists", return_value=True),
     ):
         mock_start_run.return_value.__enter__.return_value = None
 
@@ -316,3 +319,154 @@ def test_upload_run_data():
         mock_start_run.assert_called_once()
         mock_log_params.assert_called_once()
         mock_log_metric.assert_called_once()
+        mock_log_artifact.assert_called_once()
+
+
+def test_upload_artifacts_files():
+    """Test file artifact upload."""
+    loader = MLflowLoader()
+
+    # Create test data
+    test_data = pd.DataFrame(
+        {
+            "attribute_path": ["test/file1", "test/file2"],
+            "attribute_type": ["file", "file"],
+            "file_value": [{"path": "file1.txt"}, {"path": "file2.txt"}],
+        }
+    )
+
+    with (
+        patch("mlflow.log_artifact") as mock_log_artifact,
+        patch("pathlib.Path.exists", return_value=True),
+    ):
+        files_base_path = Path("/test/files")
+        loader.upload_artifacts(test_data, "RUN-123", files_base_path)
+
+        # Verify artifacts were logged
+        assert mock_log_artifact.call_count == 2
+
+        calls = mock_log_artifact.call_args_list
+        file_paths = [call[1]["local_path"] for call in calls]
+        artifact_paths = [call[1]["artifact_path"] for call in calls]
+
+        assert "/test/files/file1.txt" in file_paths
+        assert "/test/files/file2.txt" in file_paths
+        assert "test/file1" in artifact_paths
+        assert "test/file2" in artifact_paths
+
+
+def test_upload_artifacts_file_series():
+    """Test file series artifact upload."""
+    loader = MLflowLoader()
+
+    # Create test data
+    test_data = pd.DataFrame(
+        {
+            "attribute_path": ["test/file_series", "test/file_series"],
+            "attribute_type": ["file_series", "file_series"],
+            "step": [Decimal("1.0"), Decimal("2.0")],
+            "file_value": [{"path": "file1.txt"}, {"path": "file2.txt"}],
+        }
+    )
+
+    with (
+        patch("mlflow.log_artifact") as mock_log_artifact,
+        patch("pathlib.Path.exists", return_value=True),
+    ):
+        files_base_path = Path("/test/files")
+        loader.upload_artifacts(test_data, "RUN-123", files_base_path)
+
+        # Verify artifacts were logged with step information
+        assert mock_log_artifact.call_count == 2
+
+        calls = mock_log_artifact.call_args_list
+        artifact_paths = [call[1]["artifact_path"] for call in calls]
+
+        # Steps should be converted using determined multiplier
+        assert any("test/file_series/step_" in path for path in artifact_paths)
+
+
+def test_upload_artifacts_string_series():
+    """Test string series artifact upload."""
+    loader = MLflowLoader()
+
+    # Create test data
+    test_data = pd.DataFrame(
+        {
+            "attribute_path": ["test/string_series", "test/string_series"],
+            "attribute_type": ["string_series", "string_series"],
+            "step": [Decimal("1.0"), Decimal("2.0")],
+            "string_value": ["value1", "value2"],
+        }
+    )
+
+    with (
+        patch("mlflow.log_artifact") as mock_log_artifact,
+        patch("tempfile.NamedTemporaryFile") as mock_temp_file,
+    ):
+        # Mock temporary file
+        mock_file = Mock()
+        mock_file.name = "/tmp/test.txt"
+        mock_file.write = Mock()
+        mock_file.flush = Mock()
+        mock_temp_file.return_value.__enter__.return_value = mock_file
+
+        files_base_path = Path("/test/files")
+        loader.upload_artifacts(test_data, "RUN-123", files_base_path)
+
+        # Verify artifact was logged
+        mock_log_artifact.assert_called_once()
+        call_args = mock_log_artifact.call_args
+        assert call_args[1]["artifact_path"] == "test/string_series/series.txt"
+
+        # Verify file content was written
+        mock_file.write.assert_called_once()
+        written_content = mock_file.write.call_args[0][0]
+        assert "Step" in written_content
+        assert "value1" in written_content
+        assert "value2" in written_content
+
+
+def test_upload_artifacts_histogram_series():
+    """Test histogram series artifact upload."""
+    loader = MLflowLoader()
+
+    # Create test data
+    test_data = pd.DataFrame(
+        {
+            "attribute_path": ["test/hist_series"],
+            "attribute_type": ["histogram_series"],
+            "step": [Decimal("1.0")],
+            "histogram_value": [
+                {"type": "histogram", "edges": [0.0, 1.0, 2.0], "values": [10, 20]}
+            ],
+        }
+    )
+
+    with (
+        patch("mlflow.log_artifact") as mock_log_artifact,
+        patch("tempfile.NamedTemporaryFile") as mock_temp_file,
+    ):
+        # Mock temporary file
+        mock_file = Mock()
+        mock_file.name = "/tmp/test.csv"
+        mock_file.write = Mock()
+        mock_file.flush = Mock()
+        mock_temp_file.return_value.__enter__.return_value = mock_file
+
+        files_base_path = Path("/test/files")
+        loader.upload_artifacts(test_data, "RUN-123", files_base_path)
+
+        # Verify artifact was logged
+        mock_log_artifact.assert_called_once()
+        call_args = mock_log_artifact.call_args
+        assert call_args[1]["artifact_path"] == "test/hist_series/histograms.csv"
+
+        # Verify CSV content was written
+        assert mock_file.write.call_count == 2  # Header + data row
+        calls = mock_file.write.call_args_list
+        written_content = "".join(call[0][0] for call in calls)
+        assert "step,type,edges,values" in written_content
+        assert "histogram" in written_content
+        assert "0.0,1.0,2.0" in written_content
+        assert "10,20" in written_content

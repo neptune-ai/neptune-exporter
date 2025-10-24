@@ -22,6 +22,7 @@ import logging
 
 from neptune_exporter.storage.parquet_reader import ParquetReader
 from neptune_exporter.loaders.mlflow import MLflowLoader
+from neptune_exporter.utils import sanitize_path_part
 
 
 class LoaderManager:
@@ -128,7 +129,8 @@ class LoaderManager:
                     self._data_loader.upload_run_data(
                         run_data=run_data,
                         run_id=target_run_id,
-                        files_directory=self._files_directory,
+                        files_directory=self._files_directory
+                        / sanitize_path_part(project_id),
                     )
                 except Exception:
                     self._logger.error(
