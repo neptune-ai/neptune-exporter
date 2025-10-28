@@ -47,7 +47,7 @@ _ATTRIBUTE_TYPE_MAP = {
     na.FileSeries: "file_series",
     na.FloatSeries: "float_series",
     na.StringSeries: "string_series",
-    na.StringSet: "string_set",  # could add a separate column
+    na.StringSet: "string_set",
 }
 
 _PARAMETER_TYPES: Sequence[str] = (
@@ -70,12 +70,22 @@ class Neptune2Exporter:
     def __init__(
         self,
         api_token: Optional[str] = None,
+        verbose: bool = False,
         max_workers: int = 16,
     ):
         self._api_token = api_token
         self._max_workers = max_workers
         self._executor = ThreadPoolExecutor(max_workers=max_workers)
+        self._verbose = verbose
         self._logger = logging.getLogger(__name__)
+        self._logger.setLevel(logging.INFO if verbose else logging.ERROR)
+        self._initialize_client(verbose=verbose)
+
+    def _initialize_client(self, verbose: bool) -> None:
+        if verbose:
+            logging.getLogger("neptune").setLevel(logging.INFO)
+        else:
+            logging.getLogger("neptune").setLevel(logging.ERROR)
 
     def close(self) -> None:
         self._executor.shutdown(wait=True)

@@ -16,7 +16,6 @@
 import os
 import click
 from pathlib import Path
-
 from neptune_exporter.exporters.exporter import NeptuneExporter
 from neptune_exporter.exporters.neptune2 import Neptune2Exporter
 from neptune_exporter.exporters.neptune3 import Neptune3Exporter
@@ -89,6 +88,12 @@ def cli():
     "--api-token",
     help="Neptune API token. If not provided, will use environment variable NEPTUNE_API_TOKEN.",
 )
+@click.option(
+    "--verbose",
+    "-v",
+    is_flag=True,
+    help="Enable verbose logging including Neptune internal logs.",
+)
 def export(
     project_ids: tuple[str, ...],
     runs: str | None,
@@ -98,6 +103,7 @@ def export(
     exporter: str,
     output_path: Path,
     api_token: str | None,
+    verbose: bool,
 ) -> None:
     """Export Neptune experiment data to parquet files.
 
@@ -185,9 +191,11 @@ def export(
 
     # Create exporter instance
     if exporter == "neptune2":
-        exporter_instance: NeptuneExporter = Neptune2Exporter(api_token=api_token)
+        exporter_instance: NeptuneExporter = Neptune2Exporter(
+            api_token=api_token, verbose=verbose
+        )
     elif exporter == "neptune3":
-        exporter_instance = Neptune3Exporter(api_token=api_token)
+        exporter_instance = Neptune3Exporter(api_token=api_token, verbose=verbose)
     else:
         raise click.BadParameter(f"Unknown exporter: {exporter}")
 
@@ -255,12 +263,19 @@ def export(
     "--name-prefix",
     help="Optional prefix for MLflow experiment and run names (to handle org/project structure).",
 )
+@click.option(
+    "--verbose",
+    "-v",
+    is_flag=True,
+    help="Enable verbose logging including Neptune internal logs.",
+)
 def load(
     input_path: Path,
     project_ids: tuple[str, ...],
     runs: tuple[str, ...],
     mlflow_tracking_uri: str | None,
     name_prefix: str | None,
+    verbose: bool,
 ) -> None:
     """Load exported Neptune data from parquet files to MLflow.
 
@@ -304,6 +319,7 @@ def load(
     data_loader = MLflowLoader(
         tracking_uri=mlflow_tracking_uri,
         name_prefix=name_prefix,
+        verbose=verbose,
     )
 
     # Create loader manager

@@ -13,6 +13,7 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
+import os
 import re
 import logging
 from decimal import Decimal
@@ -32,6 +33,7 @@ class MLflowLoader:
         self,
         tracking_uri: Optional[str] = None,
         name_prefix: Optional[str] = None,
+        verbose: bool = False,
     ):
         """
         Initialize MLflow loader.
@@ -39,13 +41,23 @@ class MLflowLoader:
         Args:
             tracking_uri: MLflow tracking URI
             name_prefix: Optional prefix for experiment and run names (to handle org/project structure)
+            verbose: Enable verbose logging
         """
         self.tracking_uri = tracking_uri
         self.name_prefix = name_prefix
         self._logger = logging.getLogger(__name__)
+        self._logger.setLevel(logging.INFO if verbose else logging.ERROR)
+        self._verbose = verbose
 
         if tracking_uri:
             mlflow.set_tracking_uri(tracking_uri)
+
+        # Configure MLflow logging
+        if verbose:
+            logging.getLogger("mlflow").setLevel(logging.INFO)
+        else:
+            logging.getLogger("mlflow").setLevel(logging.ERROR)
+            os.environ["MLFLOW_SUPPRESS_PRINTING_URL_TO_STDOUT"] = "1"
 
     def _sanitize_attribute_name(self, attribute_path: str) -> str:
         """

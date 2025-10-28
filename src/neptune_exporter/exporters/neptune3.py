@@ -55,17 +55,25 @@ class Neptune3Exporter:
         file_attribute_batch_size: int = 16,
         file_series_attribute_batch_size: int = 8,
         max_workers: int = 16,
+        verbose: bool = False,
     ):
-        self._initialize_client(api_token=api_token)
         self._series_attribute_batch_size = series_attribute_batch_size
         self._file_attribute_batch_size = file_attribute_batch_size
         self._file_series_attribute_batch_size = file_series_attribute_batch_size
         self._executor = ThreadPoolExecutor(max_workers=max_workers)
+        self._verbose = verbose
         self._logger = logging.getLogger(__name__)
+        self._logger.setLevel(logging.INFO if verbose else logging.ERROR)
+        self._initialize_client(api_token=api_token, verbose=verbose)
 
-    def _initialize_client(self, api_token: Optional[str]) -> None:
+    def _initialize_client(self, api_token: Optional[str], verbose: bool) -> None:
         if api_token is not None:
             nq.set_api_token(api_token)
+
+        if verbose:
+            logging.getLogger("neptune").setLevel(logging.INFO)
+        else:
+            logging.getLogger("neptune").setLevel(logging.ERROR)
 
     def close(self) -> None:
         self._executor.shutdown(wait=True)
