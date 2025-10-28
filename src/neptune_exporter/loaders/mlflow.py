@@ -22,7 +22,8 @@ from typing import Optional
 import pandas as pd
 import pyarrow as pa
 import mlflow
-import mlflow.tracking
+from mlflow.tracking import MlflowClient
+from mlflow.entities import Metric
 from mlflow.utils.mlflow_tags import MLFLOW_PARENT_RUN_ID
 
 
@@ -252,6 +253,8 @@ class MLflowLoader:
         # Determine step multiplier from actual data
         step_multiplier = self._determine_step_multiplier(metrics_data["step"])
 
+        mlflow_client = MlflowClient()
+
         # Group by attribute path and log metrics
         for attr_path, group in metrics_data.groupby("attribute_path"):
             attr_name = self._sanitize_attribute_name(attr_path)
@@ -259,6 +262,7 @@ class MLflowLoader:
             # Sort by step
             group = group.sort_values("step")
 
+            metrics = []
             for _, row in group.iterrows():
                 if pd.notna(row["float_value"]) and pd.notna(row["step"]):
                     step = self._convert_step_to_int(
@@ -268,9 +272,19 @@ class MLflowLoader:
                     timestamp = None
                     if pd.notna(row["timestamp"]):
                         timestamp = int(row["timestamp"].timestamp() * 1000)
-                    mlflow.log_metric(
-                        attr_name, row["float_value"], step=step, timestamp=timestamp
+                    metrics.append(
+                        Metric(
+                            key=attr_name,
+                            value=row["float_value"],
+                            step=step,
+                            timestamp=timestamp,
+                        )
                     )
+
+            mlflow_client.log_batch(
+                run_id=run_id,
+                metrics=metrics,
+            )
 
         self._logger.info(f"Uploaded metrics for run {run_id}")
 

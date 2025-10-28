@@ -267,25 +267,33 @@ def test_upload_metrics():
         }
     )
 
-    with patch("mlflow.log_metric") as mock_log_metric:
+    with patch("neptune_exporter.loaders.mlflow.MlflowClient") as mock_client_class:
+        mock_client = Mock()
+        mock_client_class.return_value = mock_client
+
         loader.upload_metrics(test_data, "RUN-123")
 
-        # Verify metrics were logged
-        assert mock_log_metric.call_count == 3
+        # Verify log_batch was called twice (once for each metric group)
+        assert mock_client.log_batch.call_count == 2
 
-        # Check specific calls
-        calls = mock_log_metric.call_args_list
-        metric_names = [call[0][0] for call in calls]
-        values = [call[0][1] for call in calls]
-        steps = [call[1]["step"] for call in calls]
+        # Check the calls
+        calls = mock_client.log_batch.call_args_list
 
-        assert "test/metric1" in metric_names
-        assert "test/metric2" in metric_names
-        assert 0.5 in values
-        assert 0.7 in values
-        assert 0.3 in values
-        # Steps should be converted using determined multiplier
-        assert all(isinstance(step, int) for step in steps)
+        # First call should be for test/metric1 (2 metrics)
+        first_call = calls[0]
+        assert first_call[1]["run_id"] == "RUN-123"
+        metrics = first_call[1]["metrics"]
+        assert len(metrics) == 2
+        assert all(metric.key == "test/metric1" for metric in metrics)
+        assert all(isinstance(metric.step, int) for metric in metrics)
+
+        # Second call should be for test/metric2 (1 metric)
+        second_call = calls[1]
+        assert second_call[1]["run_id"] == "RUN-123"
+        metrics = second_call[1]["metrics"]
+        assert len(metrics) == 1
+        assert metrics[0].key == "test/metric2"
+        assert isinstance(metrics[0].step, int)
 
 
 def test_upload_run_data():
@@ -308,11 +316,13 @@ def test_upload_run_data():
     with (
         patch("mlflow.start_run") as mock_start_run,
         patch("mlflow.log_params") as mock_log_params,
-        patch("mlflow.log_metric") as mock_log_metric,
+        patch("neptune_exporter.loaders.mlflow.MlflowClient") as mock_client_class,
         patch("mlflow.log_artifact") as mock_log_artifact,
         patch("pathlib.Path.exists", return_value=True),
     ):
         mock_start_run.return_value.__enter__.return_value = None
+        mock_client = Mock()
+        mock_client_class.return_value = mock_client
 
         # Convert to PyArrow table
         import pyarrow as pa
@@ -324,7 +334,7 @@ def test_upload_run_data():
         # Verify methods were called
         mock_start_run.assert_called_once()
         mock_log_params.assert_called_once()
-        mock_log_metric.assert_called_once()
+        mock_client.log_batch.assert_called_once()  # For metrics
         mock_log_artifact.assert_called_once()
 
 
@@ -402,6 +412,7 @@ def test_upload_artifacts_string_series():
             "attribute_path": ["test/string_series", "test/string_series"],
             "attribute_type": ["string_series", "string_series"],
             "step": [Decimal("1.0"), Decimal("2.0")],
+            "timestamp": [pd.Timestamp("2023-01-01"), pd.Timestamp("2023-01-02")],
             "string_value": ["value1", "value2"],
         }
     )
