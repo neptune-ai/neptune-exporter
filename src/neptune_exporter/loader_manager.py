@@ -90,6 +90,9 @@ class LoaderManager:
         )
 
         run_id_to_target_run_id: dict[str, str] = {}
+        pending_parent_relationships: list[
+            tuple[str, str]
+        ] = []  # (child_target_run_id, parent_source_run_id)
 
         for project_data in project_data_generator:
             project_id = project_data["project_id"].to_pylist()[0]
@@ -110,7 +113,9 @@ class LoaderManager:
                         experiment_name = self._get_attribute_value(
                             run_data, "sys/experiment/name"
                         )
-                        # parent_run_id = self._get_attribute_value(run_table, "sys/forking/parent")
+                        parent_source_run_id = self._get_attribute_value(
+                            run_data, "sys/forking/parent"
+                        )
 
                         if experiment_name is not None:
                             target_experiment_id = self._data_loader.create_experiment(
@@ -119,12 +124,31 @@ class LoaderManager:
                         else:
                             target_experiment_id = None
 
+                        parent_target_run_id = None
+                        if (
+                            parent_source_run_id
+                            and parent_source_run_id in run_id_to_target_run_id
+                        ):
+                            parent_target_run_id = run_id_to_target_run_id[
+                                parent_source_run_id
+                            ]
+
                         target_run_id = self._data_loader.create_run(
                             project_id=project_id,
                             run_name=custom_run_id,
                             experiment_id=target_experiment_id,
+                            parent_run_id=parent_target_run_id,
                         )
                         run_id_to_target_run_id[source_run_id] = target_run_id
+
+                        # If parent doesn't exist yet, track this relationship for later resolution
+                        if (
+                            parent_source_run_id
+                            and parent_source_run_id not in run_id_to_target_run_id
+                        ):
+                            pending_parent_relationships.append(
+                                (target_run_id, parent_source_run_id)
+                            )
 
                     self._data_loader.upload_run_data(
                         run_data=run_data,
@@ -138,6 +162,36 @@ class LoaderManager:
                         exc_info=True,
                     )
                     continue
+
+        # Resolve any pending parent relationships
+        self._resolve_pending_parent_relationships(
+            pending_parent_relationships, run_id_to_target_run_id
+        )
+
+    def _resolve_pending_parent_relationships(
+        self,
+        pending_relationships: list[tuple[str, str]],
+        run_id_to_target_run_id: dict[str, str],
+    ) -> None:
+        """Resolve parent-child relationships that couldn't be set during initial run creation."""
+        for child_target_run_id, parent_source_run_id in pending_relationships:
+            try:
+                if parent_source_run_id in run_id_to_target_run_id:
+                    parent_target_run_id = run_id_to_target_run_id[parent_source_run_id]
+                    self._data_loader.update_run_parent(
+                        child_run_id=child_target_run_id,
+                        parent_run_id=parent_target_run_id,
+                    )
+                else:
+                    self._logger.warning(
+                        f"Could not resolve parent relationship for {child_target_run_id}: "
+                        f"parent source run {parent_source_run_id} not found"
+                    )
+            except Exception as e:
+                self._logger.error(
+                    f"Error updating parent relationship for {child_target_run_id}: {e}",
+                    exc_info=True,
+                )
 
     @staticmethod
     def _get_attribute_value(

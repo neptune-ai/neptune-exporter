@@ -161,7 +161,15 @@ def export(
                 "No project IDs provided. Either use --project-ids/-p option or set NEPTUNE_PROJECT environment variable."
             )
 
-    attributes_list = list(attributes) if attributes else None
+    # Handle attributes: single string = regex, multiple strings = exact matches
+    if not attributes:
+        attributes_list: list[str] | str | None = None
+    elif len(attributes) == 1:
+        # Single string - treat as regex pattern
+        attributes_list = attributes[0]
+    else:
+        # Multiple strings - treat as exact attribute names
+        attributes_list = list(attributes)
 
     # Determine export classes based on include/exclude logic
     all_classes = {"parameters", "metrics", "series", "files"}

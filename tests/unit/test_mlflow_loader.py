@@ -258,6 +258,11 @@ def test_upload_metrics():
             "attribute_path": ["test/metric1", "test/metric1", "test/metric2"],
             "attribute_type": ["float_series", "float_series", "float_series"],
             "step": [Decimal("1.0"), Decimal("2.0"), Decimal("1.0")],
+            "timestamp": [
+                pd.Timestamp("2023-01-01"),
+                pd.Timestamp("2023-01-02"),
+                pd.Timestamp("2023-01-01"),
+            ],
             "float_value": [0.5, 0.7, 0.3],
         }
     )
@@ -293,6 +298,7 @@ def test_upload_run_data():
             "attribute_path": ["test/param", "test/metric", "test/file"],
             "attribute_type": ["string", "float_series", "file"],
             "step": [None, Decimal("1.0"), None],
+            "timestamp": [None, pd.Timestamp("2023-01-01"), None],
             "string_value": ["test_value", None, None],
             "float_value": [None, 0.5, None],
             "file_value": [None, None, {"path": "file.txt"}],
@@ -401,7 +407,7 @@ def test_upload_artifacts_string_series():
     )
 
     with (
-        patch("mlflow.log_artifact") as mock_log_artifact,
+        patch("mlflow.log_text") as mock_log_text,
         patch("tempfile.NamedTemporaryFile") as mock_temp_file,
     ):
         # Mock temporary file
@@ -414,17 +420,15 @@ def test_upload_artifacts_string_series():
         files_base_path = Path("/test/files")
         loader.upload_artifacts(test_data, "RUN-123", files_base_path)
 
-        # Verify artifact was logged
-        mock_log_artifact.assert_called_once()
-        call_args = mock_log_artifact.call_args
-        assert call_args[1]["artifact_path"] == "test/string_series/series.txt"
+        # Verify text was logged
+        mock_log_text.assert_called_once()
+        call_args = mock_log_text.call_args
+        assert call_args[1]["artifact_file"] == "test/string_series/series.txt"
 
-        # Verify file content was written
-        mock_file.write.assert_called_once()
-        written_content = mock_file.write.call_args[0][0]
-        assert "Step" in written_content
-        assert "value1" in written_content
-        assert "value2" in written_content
+        # Verify text content
+        text_content = call_args[1]["text"]
+        assert "[1] value1" in text_content
+        assert "[2] value2" in text_content
 
 
 def test_upload_artifacts_histogram_series():
@@ -437,36 +441,26 @@ def test_upload_artifacts_histogram_series():
             "attribute_path": ["test/hist_series"],
             "attribute_type": ["histogram_series"],
             "step": [Decimal("1.0")],
+            "timestamp": [pd.Timestamp("2023-01-01")],
             "histogram_value": [
                 {"type": "histogram", "edges": [0.0, 1.0, 2.0], "values": [10, 20]}
             ],
         }
     )
 
-    with (
-        patch("mlflow.log_artifact") as mock_log_artifact,
-        patch("tempfile.NamedTemporaryFile") as mock_temp_file,
-    ):
-        # Mock temporary file
-        mock_file = Mock()
-        mock_file.name = "/tmp/test.csv"
-        mock_file.write = Mock()
-        mock_file.flush = Mock()
-        mock_temp_file.return_value.__enter__.return_value = mock_file
-
+    with patch("mlflow.log_dict") as mock_log_dict:
         files_base_path = Path("/test/files")
         loader.upload_artifacts(test_data, "RUN-123", files_base_path)
 
-        # Verify artifact was logged
-        mock_log_artifact.assert_called_once()
-        call_args = mock_log_artifact.call_args
-        assert call_args[1]["artifact_path"] == "test/hist_series/histograms.csv"
+        # Verify dict was logged
+        mock_log_dict.assert_called_once()
+        call_args = mock_log_dict.call_args
+        assert call_args[1]["artifact_file"] == "test/hist_series/histograms.json"
 
-        # Verify CSV content was written
-        assert mock_file.write.call_count == 2  # Header + data row
-        calls = mock_file.write.call_args_list
-        written_content = "".join(call[0][0] for call in calls)
-        assert "step,type,edges,values" in written_content
-        assert "histogram" in written_content
-        assert "0.0,1.0,2.0" in written_content
-        assert "10,20" in written_content
+        # Verify data content
+        data = call_args[1]["data"]
+        assert len(data) == 1
+        assert data[0]["step"] == 1
+        assert data[0]["type"] == "histogram"
+        assert data[0]["edges"] == [0.0, 1.0, 2.0]
+        assert data[0]["values"] == [10, 20]

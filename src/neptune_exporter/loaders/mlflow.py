@@ -172,6 +172,18 @@ class MLflowLoader:
             self._logger.error(f"Error creating run '{target_run_name}': {e}")
             raise
 
+    def update_run_parent(self, child_run_id: str, parent_run_id: str) -> None:
+        """Update the parent relationship of an existing MLflow run."""
+        try:
+            with mlflow.start_run(run_id=child_run_id):
+                mlflow.set_tag(MLFLOW_PARENT_RUN_ID, parent_run_id)
+                self._logger.info(
+                    f"Updated parent relationship for run {child_run_id} to {parent_run_id}"
+                )
+        except Exception as e:
+            self._logger.error(f"Error updating parent for run {child_run_id}: {e}")
+            raise
+
     def upload_run_data(
         self,
         run_data: pa.Table,
@@ -252,7 +264,13 @@ class MLflowLoader:
                     step = self._convert_step_to_int(
                         row["step"], step_multiplier=step_multiplier
                     )
-                    mlflow.log_metric(attr_name, row["float_value"], step=step)
+                    # Convert timestamp to milliseconds if available
+                    timestamp = None
+                    if pd.notna(row["timestamp"]):
+                        timestamp = int(row["timestamp"].timestamp() * 1000)
+                    mlflow.log_metric(
+                        attr_name, row["float_value"], step=step, timestamp=timestamp
+                    )
 
         self._logger.info(f"Uploaded metrics for run {run_id}")
 
@@ -309,22 +327,17 @@ class MLflowLoader:
                     step = self._convert_step_to_int(
                         row["step"], step_multiplier=step_multiplier
                     )
-                    series_text.append(f"Step {step}: {row['string_value']}")
+                    series_text.append(f"[{step}] {row['string_value']}")
 
             if series_text:
                 # Log as text artifact
-                import tempfile
+                mlflow.log_text(
+                    text="\n".join(series_text),
+                    artifact_file=f"{attr_name}/series.txt",
+                    run_id=run_id,
+                )
 
-                with tempfile.NamedTemporaryFile(
-                    mode="w", suffix=".txt", delete=True
-                ) as f:
-                    f.write("\n".join(series_text))
-                    f.flush()
-                    mlflow.log_artifact(
-                        local_path=f.name, artifact_path=f"{attr_name}/series.txt"
-                    )
-
-        # # Handle histogram series as table artifacts
+        # Handle histogram series as structured data
         histogram_series_data = run_data[
             run_data["attribute_type"] == "histogram_series"
         ]
@@ -332,37 +345,38 @@ class MLflowLoader:
             attr_name = self._sanitize_attribute_name(attr_path)
             step_multiplier = self._determine_step_multiplier(group["step"])
 
-            # Create CSV table
-            import tempfile
-            import csv
-
-            with tempfile.NamedTemporaryFile(
-                mode="w", suffix=".csv", delete=True, newline=""
-            ) as f:
-                writer = csv.writer(f)
-                writer.writerow(["step", "type", "edges", "values"])
-
-                for _, row in group.iterrows():
-                    if pd.notna(row["histogram_value"]) and isinstance(
-                        row["histogram_value"], dict
-                    ):
-                        step = (
-                            self._convert_step_to_int(
-                                row["step"], step_multiplier=step_multiplier
-                            )
-                            if pd.notna(row["step"])
-                            else None
+            # Prepare histogram data as JSON for better structure preservation
+            histogram_data = []
+            for _, row in group.iterrows():
+                if pd.notna(row["histogram_value"]) and isinstance(
+                    row["histogram_value"], dict
+                ):
+                    step = (
+                        self._convert_step_to_int(
+                            row["step"], step_multiplier=step_multiplier
                         )
-                        hist = row["histogram_value"]
-                        edges_str = ",".join(str(x) for x in hist.get("edges", []))
-                        values_str = ",".join(str(x) for x in hist.get("values", []))
-                        writer.writerow(
-                            [step, hist.get("type", ""), edges_str, values_str]
-                        )
+                        if pd.notna(row["step"])
+                        else None
+                    )
+                    hist = row["histogram_value"]
+                    histogram_data.append(
+                        {
+                            "step": step,
+                            "type": hist.get("type", ""),
+                            "edges": hist.get("edges", []),
+                            "values": hist.get("values", []),
+                            "timestamp": row["timestamp"].isoformat()
+                            if pd.notna(row["timestamp"])
+                            else None,
+                        }
+                    )
 
-                f.flush()
-                mlflow.log_artifact(
-                    local_path=f.name, artifact_path=f"{attr_name}/histograms.csv"
+            if histogram_data:
+                # Use MLflow's log_dict for structured data
+                mlflow.log_dict(
+                    data=histogram_data,
+                    artifact_file=f"{attr_name}/histograms.json",
+                    run_id=run_id,
                 )
 
         self._logger.info(f"Uploaded artifacts for run {run_id}")
