@@ -60,7 +60,7 @@ Export Neptune experiment data to parquet files:
 neptune-exporter export -p "my-org/my-project"
 
 # Export only parameters and metrics from specific runs
-neptune-exporter export -p "my-org/my-project" -r "RUN-*" -e parameters -e metrics
+neptune-exporter export -p "my-org/my-project" -r "RUN-*" --exclude files
 
 # Export specific attributes only (exact match)
 neptune-exporter export -p "my-org/my-project" -a "learning_rate" -a "batch_size"
@@ -70,6 +70,9 @@ neptune-exporter export -p "my-org/my-project" -a "config/.*"
 
 # Use Neptune 2.x exporter
 neptune-exporter export -p "my-org/my-project" --exporter neptune2
+
+# Export with custom paths
+neptune-exporter export -p "my-org/my-project" --data-path ./my-data --files-path ./my-files
 ```
 
 ### Load Data to MLflow
@@ -86,8 +89,8 @@ neptune-exporter load -p "my-org/my-project1" -p "my-org/my-project2"
 # Load specific runs
 neptune-exporter load -r "RUN-123" -r "RUN-456"
 
-# Load only parameters and metrics
-neptune-exporter load -t parameters -t float_series
+# Load with custom paths
+neptune-exporter load --data-path ./my-data --files-path ./my-files
 
 # Load to specific MLflow tracking URI
 neptune-exporter load --mlflow-tracking-uri "http://localhost:5000"
@@ -101,22 +104,23 @@ Get a summary of exported data:
 # Show summary of all exported data
 neptune-exporter summary
 
-# Show summary from specific path
-neptune-exporter summary -i ./my_exports
+# Show summary from custom data path
+neptune-exporter summary --data-path ./my-data
 ```
 
 ### Complete Migration Example
 
 ```bash
 # Step 1: Export data from Neptune
-neptune-exporter export -p "my-org/my-project" -o ./exports
+neptune-exporter export -p "my-org/my-project"
 
 # Step 2: View what was exported
-neptune-exporter summary -i ./exports
+neptune-exporter summary
 
 # Step 3: Load to MLflow
-neptune-exporter load -i ./exports --mlflow-tracking-uri "http://localhost:5000"
+neptune-exporter load --mlflow-tracking-uri "http://localhost:5000"
 ```
+
 
 ## Data Type Mappings
 

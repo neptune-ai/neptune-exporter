@@ -78,11 +78,18 @@ def cli():
     help="Neptune exporter to use. Default: neptune3.",
 )
 @click.option(
-    "--output-path",
-    "-o",
+    "--data-path",
+    "-d",
     type=click.Path(path_type=Path),
-    default="./exports",
-    help="Base path for exported data. Default: ./exports",
+    default="./exports/data",
+    help="Path for exported parquet data. Default: ./exports/data",
+)
+@click.option(
+    "--files-path",
+    "-f",
+    type=click.Path(path_type=Path),
+    default="./exports/files",
+    help="Path for downloaded files. Default: ./exports/files",
 )
 @click.option(
     "--api-token",
@@ -101,7 +108,8 @@ def export(
     classes: tuple[str, ...],
     exclude: tuple[str, ...],
     exporter: str,
-    output_path: Path,
+    data_path: Path,
+    files_path: Path,
     api_token: str | None,
     verbose: bool,
 ) -> None:
@@ -200,18 +208,19 @@ def export(
         raise click.BadParameter(f"Unknown exporter: {exporter}")
 
     # Create storage instance
-    storage = ParquetWriter(base_path=output_path)
+    storage = ParquetWriter(base_path=data_path)
 
     # Create and run export manager
     export_manager = ExportManager(
         exporter=exporter_instance,
         storage=storage,
-        files_destination=output_path / "files",
+        files_destination=files_path,
     )
 
     click.echo(f"Starting export of {len(project_ids_list)} project(s)...")
     click.echo(f"Export classes: {', '.join(export_classes_list)}")
-    click.echo(f"Output path: {output_path.absolute()}")
+    click.echo(f"Data path: {data_path.absolute()}")
+    click.echo(f"Files path: {files_path.absolute()}")
 
     try:
         runs_exported = export_manager.run(
@@ -237,11 +246,18 @@ def export(
 
 @cli.command()
 @click.option(
-    "--input-path",
-    "-i",
+    "--data-path",
+    "-d",
     type=click.Path(path_type=Path),
-    default="./exports",
-    help="Base path for exported parquet data. Default: ./exports",
+    default="./exports/data",
+    help="Path for exported parquet data. Default: ./exports/data",
+)
+@click.option(
+    "--files-path",
+    "-f",
+    type=click.Path(path_type=Path),
+    default="./exports/files",
+    help="Path for downloaded files. Default: ./exports/files",
 )
 @click.option(
     "--project-ids",
@@ -270,7 +286,8 @@ def export(
     help="Enable verbose logging including Neptune internal logs.",
 )
 def load(
-    input_path: Path,
+    data_path: Path,
+    files_path: Path,
     project_ids: tuple[str, ...],
     runs: tuple[str, ...],
     mlflow_tracking_uri: str | None,
@@ -308,12 +325,12 @@ def load(
     project_ids_list = list(project_ids) if project_ids else None
     runs_list = list(runs) if runs else None
 
-    # Validate input path exists
-    if not input_path.exists():
-        raise click.BadParameter(f"Input path does not exist: {input_path}")
+    # Validate data path exists
+    if not data_path.exists():
+        raise click.BadParameter(f"Data path does not exist: {data_path}")
 
     # Create parquet reader
-    parquet_reader = ParquetReader(base_path=input_path)
+    parquet_reader = ParquetReader(base_path=data_path)
 
     # Create MLflow loader
     data_loader = MLflowLoader(
@@ -326,10 +343,11 @@ def load(
     loader_manager = LoaderManager(
         parquet_reader=parquet_reader,
         data_loader=data_loader,
-        files_directory=input_path / "files",
+        files_directory=files_path,
     )
 
-    click.echo(f"Starting MLflow loading from {input_path.absolute()}")
+    click.echo(f"Starting MLflow loading from {data_path.absolute()}")
+    click.echo(f"Files directory: {files_path.absolute()}")
     if project_ids_list:
         click.echo(f"Project IDs: {', '.join(project_ids_list)}")
     if runs_list:
@@ -348,30 +366,30 @@ def load(
 
 @cli.command()
 @click.option(
-    "--input-path",
-    "-i",
+    "--data-path",
+    "-d",
     type=click.Path(path_type=Path),
-    default="./exports",
-    help="Base path for exported parquet data. Default: ./exports",
+    default="./exports/data",
+    help="Path for exported parquet data. Default: ./exports/data",
 )
-def summary(input_path: Path) -> None:
+def summary(data_path: Path) -> None:
     """Show summary of exported Neptune data.
 
     This command shows a summary of available data in the exported parquet files,
     including project counts, run counts, and attribute types.
     """
-    # Validate input path exists
-    if not input_path.exists():
-        raise click.BadParameter(f"Input path does not exist: {input_path}")
+    # Validate data path exists
+    if not data_path.exists():
+        raise click.BadParameter(f"Data path does not exist: {data_path}")
 
     # Create parquet reader and summary manager
-    parquet_reader = ParquetReader(base_path=input_path)
+    parquet_reader = ParquetReader(base_path=data_path)
     summary_manager = SummaryManager(parquet_reader=parquet_reader)
 
     try:
         # Show general data summary
         summary_data = summary_manager.get_data_summary()
-        ReportFormatter.print_data_summary(summary_data, input_path)
+        ReportFormatter.print_data_summary(summary_data, data_path)
 
     except Exception as e:
         click.echo(f"Failed to generate summary: {e}", err=True)
