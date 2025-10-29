@@ -141,6 +141,58 @@ def test_read_project_data():
         assert filtered_data[0]["run_id"][0].as_py() == "RUN-123"
 
 
+def test_get_unique_run_ids():
+    """Test getting unique run IDs from parquet files."""
+    with TemporaryDirectory() as temp_dir:
+        temp_path = Path(temp_dir)
+
+        # Create test data with multiple runs
+        test_data = pd.DataFrame(
+            {
+                "project_id": ["test-project", "test-project", "test-project"],
+                "run_id": ["RUN-123", "RUN-456", "RUN-123"],  # RUN-123 appears twice
+                "attribute_path": ["test/param1", "test/param2", "test/param3"],
+                "attribute_type": ["string", "float", "int"],
+                "step": [None, None, None],
+                "timestamp": [None, None, None],
+                "int_value": [None, None, 42],
+                "float_value": [None, 3.14, None],
+                "string_value": ["test_value", None, None],
+                "bool_value": [None, None, None],
+                "datetime_value": [None, None, None],
+                "string_set_value": [None, None, None],
+                "file_value": [None, None, None],
+                "histogram_value": [None, None, None],
+            }
+        )
+
+        # Create project directory and parquet file
+        project_dir = temp_path / "test-project"
+        project_dir.mkdir()
+        parquet_file = project_dir / "part_0.parquet"
+
+        table = pa.Table.from_pandas(test_data, schema=model.SCHEMA)
+        pq.write_table(table, parquet_file)
+
+        # Test reader
+        reader = ParquetReader(temp_path)
+
+        # Test with data
+        run_ids = reader.get_unique_run_ids(project_dir)
+        assert run_ids == {"RUN-123", "RUN-456"}
+
+        # Test with empty directory
+        empty_dir = temp_path / "empty-project"
+        empty_dir.mkdir()
+        run_ids = reader.get_unique_run_ids(empty_dir)
+        assert run_ids == set()
+
+        # Test with non-existent directory
+        non_existent_dir = temp_path / "non-existent"
+        run_ids = reader.get_unique_run_ids(non_existent_dir)
+        assert run_ids == set()
+
+
 def test_read_project_data_with_attribute_type_filter():
     """Test reading project data with attribute type filter."""
     with TemporaryDirectory() as temp_dir:

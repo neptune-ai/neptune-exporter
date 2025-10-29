@@ -1,6 +1,8 @@
 import pyarrow as pa
 from pathlib import Path
+from tempfile import TemporaryDirectory
 from neptune_exporter.storage.parquet_writer import ParquetWriter
+from neptune_exporter.utils import sanitize_path_part
 
 
 def test_parquet_storage_init():
@@ -151,3 +153,34 @@ def test_parquet_storage_sanitizes_project_id(temp_dir):
     # Verify the original project ID directory was not created
     original_path = base_path / "org" / "project" / "part_0.parquet"
     assert not original_path.exists(), f"Original path {original_path} should not exist"
+
+
+def test_delete_project_data():
+    """Test deleting project directory."""
+    with TemporaryDirectory() as temp_dir:
+        temp_path = Path(temp_dir)
+        storage = ParquetWriter(base_path=temp_path)
+
+        # Create a project directory with some files
+        project_id = "test-org/test-project"
+        sanitized_project_id = sanitize_path_part(project_id)
+        project_dir = temp_path / sanitized_project_id
+        project_dir.mkdir(parents=True)
+
+        # Create some dummy files
+        (project_dir / "part_0.parquet").touch()
+        (project_dir / "part_1.parquet").touch()
+        (project_dir / "other_file.txt").touch()
+
+        # Verify directory exists
+        assert project_dir.exists()
+        assert len(list(project_dir.iterdir())) == 3
+
+        # Delete project data
+        storage.delete_project_data(project_id)
+
+        # Verify directory is deleted
+        assert not project_dir.exists()
+
+        # Test deleting non-existent project (should not raise error)
+        storage.delete_project_data("non-existent-project")

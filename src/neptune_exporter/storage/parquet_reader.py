@@ -80,6 +80,31 @@ class ParquetReader:
                 self._logger.error(f"Error reading parquet file {file_path}: {e}")
                 continue
 
+    def get_unique_run_ids(self, project_directory: Path) -> set[str]:
+        """Get set of unique run_ids present in parquet files for a project directory.
+
+        Args:
+            project_directory: Path to the project directory containing parquet files
+
+        Returns:
+            Set of run_ids found in the parquet files, empty set if no files exist
+        """
+        parquet_files = self._list_parquet_files_in_project(project_directory)
+        if not parquet_files:
+            return set()
+
+        run_ids = set()
+        for file_path in parquet_files:
+            try:
+                # Read only run_id column for efficiency
+                table = pq.read_table(file_path, columns=["run_id"])
+                run_ids.update(pc.unique(table["run_id"]).to_pylist())
+            except Exception as e:
+                self._logger.warning(f"Could not read run_ids from {file_path}: {e}")
+                continue
+
+        return run_ids
+
     def _list_parquet_files_in_project(self, project_directory: Path) -> list[Path]:
         """List all parquet files for a given project."""
         if not project_directory.exists():

@@ -73,7 +73,26 @@ neptune-exporter export -p "my-org/my-project" --exporter neptune2
 
 # Export with custom paths
 neptune-exporter export -p "my-org/my-project" --data-path ./my-data --files-path ./my-files
+
+# Overwrite existing data (re-export all runs)
+neptune-exporter export -p "my-org/my-project" --overwrite
 ```
+
+#### Resume and Overwrite Behavior
+
+By default, the exporter will **resume** interrupted exports by skipping runs that have already been exported. This is useful when:
+
+- An export was interrupted and you want to continue from where it left off
+- You want to add new runs to an existing export
+- You want to avoid re-downloading large amounts of data
+
+Use the `--overwrite` flag to force re-export of all runs, which will:
+
+- Delete existing project data before starting the export
+- Re-export all runs from scratch
+- Ensure no mixing of old and new data
+
+**Note:** Resume works at the run level - if a run was partially exported, it will be skipped entirely and not resumed.
 
 ### Load Data to MLflow
 

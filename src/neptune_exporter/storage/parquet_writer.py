@@ -129,6 +129,15 @@ class ParquetWriter:
         # Write the data to the new part
         writer.write_batch(data)
 
+    def delete_project_data(self, project_id: str) -> None:
+        """Delete all existing data for a project (for overwrite mode)."""
+        import shutil
+
+        sanitized_project_id = sanitize_path_part(project_id)
+        project_dir = self.base_path / sanitized_project_id
+        if project_dir.exists():
+            shutil.rmtree(project_dir)
+
     def close_all(self) -> None:
         """Close all open writers."""
         for writer_state in self._project_writers.values():
