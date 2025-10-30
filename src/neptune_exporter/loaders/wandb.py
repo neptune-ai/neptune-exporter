@@ -1,0 +1,410 @@
+#
+# Copyright (c) 2025, Neptune Labs Sp. z o.o.
+#
+# Licensed under the Apache License, Version 2.0 (the "License");
+# you may not use this file except in compliance with the License.
+# You may obtain a copy of the License at
+#
+#     http://www.apache.org/licenses/LICENSE-2.0
+#
+# Unless required by applicable law or agreed to in writing, software
+# distributed under the License is distributed on an "AS IS" BASIS,
+# WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+# See the License for the specific language governing permissions and
+# limitations under the License.
+
+import os
+import re
+import logging
+from decimal import Decimal
+from pathlib import Path
+from typing import Optional
+import pandas as pd
+import pyarrow as pa
+import wandb
+
+
+class WandBLoader:
+    """Loads Neptune data from parquet files into Weights & Biases."""
+
+    def __init__(
+        self,
+        entity: Optional[str] = None,
+        api_key: Optional[str] = None,
+        name_prefix: Optional[str] = None,
+        verbose: bool = False,
+    ):
+        """
+        Initialize W&B loader.
+
+        Args:
+            entity: W&B entity (organization/username)
+            api_key: Optional W&B API key for authentication
+            name_prefix: Optional prefix for project and run names
+            verbose: Enable verbose logging
+        """
+        self.entity = entity
+        self.name_prefix = name_prefix
+        self._logger = logging.getLogger(__name__)
+        self._logger.setLevel(logging.INFO if verbose else logging.ERROR)
+        self._verbose = verbose
+        self._active_run: Optional[wandb.sdk.wandb_run.Run] = None
+        self._run_id_to_wandb_id: dict[str, str] = {}
+
+        # Authenticate with W&B if API key provided
+        if api_key:
+            wandb.login(key=api_key)
+
+        # Configure W&B logging
+        if not verbose:
+            os.environ["WANDB_SILENT"] = "true"
+
+    def _sanitize_attribute_name(self, attribute_path: str) -> str:
+        """
+        Sanitize Neptune attribute path to W&B-compatible key.
+
+        W&B key constraints:
+        - Must start with a letter or underscore
+        - Can only contain letters, numbers, and underscores
+        - Pattern: /^[_a-zA-Z][_a-zA-Z0-9]*$/
+        """
+        # Replace invalid characters with underscores
+        sanitized = re.sub(r"[^a-zA-Z0-9_]", "_", attribute_path)
+
+        # Ensure it starts with a letter or underscore
+        if sanitized and not sanitized[0].isalpha() and sanitized[0] != "_":
+            sanitized = "_" + sanitized
+
+        # Handle empty result
+        if not sanitized:
+            sanitized = "_attribute"
+
+        return sanitized
+
+    def _get_project_name(self, project_id: str, experiment_name: str) -> str:
+        """Get W&B project name from Neptune project ID and experiment."""
+        # W&B uses entity/project structure
+        # We combine Neptune project_id and experiment_name
+        name = f"{project_id}_{experiment_name}".replace("/", "_")
+
+        if self.name_prefix:
+            name = f"{self.name_prefix}_{name}"
+
+        # Sanitize for W&B project name (alphanumeric, hyphens, underscores)
+        name = re.sub(r"[^a-zA-Z0-9_-]", "_", name)
+
+        return name
+
+    def _get_run_name(self, project_id: str, run_id: str) -> str:
+        """Get W&B run name from Neptune run ID."""
+        name = f"{project_id}/{run_id}"
+
+        if self.name_prefix:
+            name = f"{self.name_prefix}/{name}"
+
+        return name
+
+    def _convert_step_to_int(self, step: Decimal, step_multiplier: int) -> int:
+        """Convert Neptune decimal step to W&B integer step."""
+        if step is None:
+            return 0
+        return int(float(step) * step_multiplier)
+
+    def _determine_step_multiplier(self, steps: pd.Series) -> int:
+        """
+        Determine step multiplier based on actual data precision.
+
+        Since the data comes from decimal(18, 6) schema, we analyze the actual
+        precision used in the data to determine the appropriate multiplier.
+        """
+        valid_steps = steps.dropna()
+        if valid_steps.empty:
+            return 1
+
+        # Get decimal places for each step (only count negative exponents)
+        decimal_places = valid_steps.map(lambda step: -step.normalize().as_tuple()[2])
+
+        max_decimal_places = max(decimal_places.max(), 0)
+
+        return 10**max_decimal_places
+
+    def create_experiment(self, project_id: str, experiment_name: str) -> str:
+        """
+        Create or get W&B project for a Neptune experiment.
+
+        In W&B, this corresponds to a project. We return the project name
+        as the experiment ID since W&B projects are created implicitly.
+        """
+        project_name = self._get_project_name(project_id, experiment_name)
+        self._logger.info(
+            f"Using W&B project '{project_name}' for Neptune experiment '{experiment_name}'"
+        )
+        return project_name
+
+    def create_run(
+        self,
+        project_id: str,
+        run_name: str,
+        experiment_id: Optional[str] = None,
+        parent_run_id: Optional[str] = None,
+    ) -> str:
+        """Create W&B run, with support for forked runs."""
+        target_run_name = self._get_run_name(project_id, run_name)
+
+        try:
+            # Prepare init arguments
+            init_kwargs = {
+                "entity": self.entity,
+                "project": experiment_id,
+                "name": target_run_name,
+            }
+
+            # Handle forking if parent exists
+            if parent_run_id and parent_run_id in self._run_id_to_wandb_id:
+                # W&B fork format: entity/project/run_id?_step=step
+                # We fork from step 0 since we're migrating historical data
+                parent_wandb_id = self._run_id_to_wandb_id[parent_run_id]
+                fork_from = f"{self.entity}/{experiment_id}/{parent_wandb_id}?_step=0"
+                init_kwargs["fork_from"] = fork_from
+                self._logger.info(
+                    f"Creating forked run '{target_run_name}' from parent {parent_run_id}"
+                )
+
+            # Initialize the run
+            run = wandb.init(**init_kwargs)
+            wandb_run_id = run.id
+
+            self._active_run = run
+            self._run_id_to_wandb_id[run_name] = wandb_run_id
+
+            self._logger.info(
+                f"Created run '{target_run_name}' with W&B ID {wandb_run_id}"
+            )
+            return wandb_run_id
+
+        except Exception as e:
+            self._logger.error(f"Error creating run '{target_run_name}': {e}")
+            raise
+
+    def update_run_parent(self, child_run_id: str, parent_run_id: str) -> None:
+        """
+        Update the parent relationship of an existing W&B run.
+
+        Note: W&B doesn't support updating fork relationships after run creation,
+        so this is a no-op with a warning.
+        """
+        self._logger.warning(
+            f"W&B does not support updating fork relationships after run creation. "
+            f"Run {child_run_id} cannot be updated to fork from {parent_run_id}."
+        )
+
+    def upload_run_data(
+        self,
+        run_data: pa.Table,
+        run_id: str,
+        files_directory: Path,
+    ) -> None:
+        """Upload all data for a single run to W&B."""
+        try:
+            # Note: We assume the run is already active from create_run
+            # If not, we would need to resume it
+            if self._active_run is None or self._active_run.id != run_id:
+                self._logger.error(
+                    f"Run {run_id} is not active. Call create_run first."
+                )
+                raise RuntimeError(f"Run {run_id} is not active")
+
+            run_df = run_data.to_pandas()
+
+            self.upload_parameters(run_df, run_id)
+            self.upload_metrics(run_df, run_id)
+            self.upload_artifacts(run_df, run_id, files_directory)
+
+            # Finish the run
+            self._active_run.finish()
+            self._active_run = None
+
+            self._logger.info(f"Successfully uploaded run {run_id} to W&B")
+
+        except Exception as e:
+            self._logger.error(f"Error uploading run {run_id}: {e}")
+            if self._active_run:
+                self._active_run.finish(exit_code=1)
+                self._active_run = None
+            raise
+
+    def upload_parameters(self, run_data: pd.DataFrame, run_id: str) -> None:
+        """Upload parameters (configs) to W&B run."""
+        if self._active_run is None:
+            raise RuntimeError("No active run")
+
+        param_types = {"float", "int", "string", "bool", "datetime", "string_set"}
+        param_data = run_data[run_data["attribute_type"].isin(param_types)]
+
+        if param_data.empty:
+            return
+
+        config = {}
+        for _, row in param_data.iterrows():
+            attr_name = self._sanitize_attribute_name(row["attribute_path"])
+
+            # Get the appropriate value based on attribute type
+            if row["attribute_type"] == "float" and pd.notna(row["float_value"]):
+                config[attr_name] = row["float_value"]
+            elif row["attribute_type"] == "int" and pd.notna(row["int_value"]):
+                config[attr_name] = int(row["int_value"])
+            elif row["attribute_type"] == "string" and pd.notna(row["string_value"]):
+                config[attr_name] = row["string_value"]
+            elif row["attribute_type"] == "bool" and pd.notna(row["bool_value"]):
+                config[attr_name] = bool(row["bool_value"])
+            elif row["attribute_type"] == "datetime" and pd.notna(
+                row["datetime_value"]
+            ):
+                config[attr_name] = str(row["datetime_value"])
+            elif (
+                row["attribute_type"] == "string_set"
+                and row["string_set_value"] is not None
+            ):
+                config[attr_name] = list(row["string_set_value"])
+
+        if config:
+            self._active_run.config.update(config)
+            self._logger.info(f"Uploaded {len(config)} parameters for run {run_id}")
+
+    def upload_metrics(self, run_data: pd.DataFrame, run_id: str) -> None:
+        """Upload metrics (float series) to W&B run."""
+        if self._active_run is None:
+            raise RuntimeError("No active run")
+
+        metrics_data = run_data[run_data["attribute_type"] == "float_series"]
+
+        if metrics_data.empty:
+            return
+
+        # Determine step multiplier from actual data
+        step_multiplier = self._determine_step_multiplier(metrics_data["step"])
+
+        # Group by step to log all metrics at each step together
+        for step_value, group in metrics_data.groupby("step"):
+            if pd.notna(step_value):
+                step = self._convert_step_to_int(step_value, step_multiplier)
+
+                metrics = {}
+                for _, row in group.iterrows():
+                    if pd.notna(row["float_value"]):
+                        attr_name = self._sanitize_attribute_name(row["attribute_path"])
+                        metrics[attr_name] = row["float_value"]
+
+                if metrics:
+                    self._active_run.log(metrics, step=step)
+
+        self._logger.info(f"Uploaded metrics for run {run_id}")
+
+    def upload_artifacts(
+        self, run_data: pd.DataFrame, run_id: str, files_base_path: Path
+    ) -> None:
+        """Upload files and series as artifacts to W&B run."""
+        if self._active_run is None:
+            raise RuntimeError("No active run")
+
+        # Handle regular files
+        file_data = run_data[run_data["attribute_type"] == "file"]
+        for _, row in file_data.iterrows():
+            if pd.notna(row["file_value"]) and isinstance(row["file_value"], dict):
+                file_path = files_base_path / row["file_value"]["path"]
+                if file_path.exists():
+                    attr_name = self._sanitize_attribute_name(row["attribute_path"])
+                    artifact = wandb.Artifact(name=attr_name, type="file")
+                    if file_path.is_file():
+                        artifact.add_file(str(file_path))
+                    else:
+                        artifact.add_dir(str(file_path))
+                    self._active_run.log_artifact(artifact)
+                else:
+                    self._logger.warning(f"File not found: {file_path}")
+
+        # Handle file series
+        file_series_data = run_data[run_data["attribute_type"] == "file_series"]
+        for attr_path, group in file_series_data.groupby("attribute_path"):
+            attr_name = self._sanitize_attribute_name(attr_path)
+            step_multiplier = self._determine_step_multiplier(group["step"])
+
+            for _, row in group.iterrows():
+                if pd.notna(row["file_value"]) and isinstance(row["file_value"], dict):
+                    file_path = files_base_path / row["file_value"]["path"]
+                    if file_path.exists():
+                        step = (
+                            self._convert_step_to_int(row["step"], step_multiplier)
+                            if pd.notna(row["step"])
+                            else 0
+                        )
+                        artifact_name = f"{attr_name}_step_{step}"
+                        artifact = wandb.Artifact(
+                            name=artifact_name, type="file_series"
+                        )
+                        if file_path.is_file():
+                            artifact.add_file(str(file_path))
+                        else:
+                            artifact.add_dir(str(file_path))
+                        self._active_run.log_artifact(artifact)
+                    else:
+                        self._logger.warning(f"File not found: {file_path}")
+
+        # Handle string series as W&B Tables
+        string_series_data = run_data[run_data["attribute_type"] == "string_series"]
+        for attr_path, group in string_series_data.groupby("attribute_path"):
+            attr_name = self._sanitize_attribute_name(attr_path)
+            step_multiplier = self._determine_step_multiplier(group["step"])
+
+            # Create table data
+            table_data = []
+            for _, row in group.iterrows():
+                if pd.notna(row["string_value"]) and pd.notna(row["step"]):
+                    step = self._convert_step_to_int(row["step"], step_multiplier)
+                    timestamp_str = (
+                        row["timestamp"].isoformat()
+                        if pd.notna(row["timestamp"])
+                        else None
+                    )
+                    table_data.append([step, row["string_value"], timestamp_str])
+
+            if table_data:
+                # Create and log W&B Table
+                table = wandb.Table(
+                    columns=["step", "value", "timestamp"], data=table_data
+                )
+                self._active_run.log({attr_name: table})
+
+        # Handle histogram series as W&B Histograms
+        histogram_series_data = run_data[
+            run_data["attribute_type"] == "histogram_series"
+        ]
+        for attr_path, group in histogram_series_data.groupby("attribute_path"):
+            attr_name = self._sanitize_attribute_name(attr_path)
+            step_multiplier = self._determine_step_multiplier(group["step"])
+
+            for _, row in group.iterrows():
+                if pd.notna(row["histogram_value"]) and isinstance(
+                    row["histogram_value"], dict
+                ):
+                    step = (
+                        self._convert_step_to_int(row["step"], step_multiplier)
+                        if pd.notna(row["step"])
+                        else 0
+                    )
+                    hist = row["histogram_value"]
+
+                    # Convert Neptune histogram to W&B Histogram
+                    # Neptune format: {"type": str, "edges": list, "values": list}
+                    # W&B expects histogram data as np_histogram tuple or sequence
+                    try:
+                        wandb_hist = wandb.Histogram(
+                            np_histogram=(hist.get("values", []), hist.get("edges", []))
+                        )
+                        self._active_run.log({attr_name: wandb_hist}, step=step)
+                    except Exception as e:
+                        self._logger.warning(
+                            f"Failed to log histogram for {attr_path} at step {step}: {e}"
+                        )
+
+        self._logger.info(f"Uploaded artifacts for run {run_id}")

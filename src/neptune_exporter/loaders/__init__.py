@@ -15,6 +15,8 @@
 
 """Loaders package for uploading data to target platforms."""
 
+from .loader import DataLoader
 from .mlflow import MLflowLoader
+from .wandb import WandBLoader
 
-__all__ = ["MLflowLoader"]
+__all__ = ["DataLoader", "MLflowLoader", "WandBLoader"]

@@ -21,7 +21,7 @@ from tqdm import tqdm
 import logging
 
 from neptune_exporter.storage.parquet_reader import ParquetReader
-from neptune_exporter.loaders.mlflow import MLflowLoader
+from neptune_exporter.loaders.loader import DataLoader
 from neptune_exporter.utils import sanitize_path_part
 
 
@@ -31,7 +31,7 @@ class LoaderManager:
     def __init__(
         self,
         parquet_reader: ParquetReader,
-        data_loader: MLflowLoader,
+        data_loader: DataLoader,
         files_directory: Path,
     ):
         self._parquet_reader = parquet_reader
@@ -45,7 +45,7 @@ class LoaderManager:
         runs: Optional[list[str]] = None,
     ) -> None:
         """
-        Load Neptune data from files to target platforms (e.g. MLflow).
+        Load Neptune data from files to target platforms.
 
         Args:
             project_ids: List of project IDs to load. If None, loads all available projects.
@@ -74,7 +74,7 @@ class LoaderManager:
                 )
                 continue
 
-        self._logger.info("MLflow loading completed")
+        self._logger.info("Data loading completed")
 
     def _load_project(
         self,
