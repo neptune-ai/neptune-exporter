@@ -22,7 +22,9 @@ from neptune_exporter.exporters.neptune3 import Neptune3Exporter
 from neptune_exporter.export_manager import ExportManager
 from neptune_exporter.storage.parquet_writer import ParquetWriter
 from neptune_exporter.storage.parquet_reader import ParquetReader
+from neptune_exporter.loaders.loader import DataLoader
 from neptune_exporter.loaders.mlflow import MLflowLoader
+from neptune_exporter.loaders.wandb import WandBLoader
 from neptune_exporter.loader_manager import LoaderManager
 from neptune_exporter.summary_manager import SummaryManager
 from neptune_exporter.validation import ReportFormatter
@@ -302,12 +304,26 @@ def export(
     help="Run IDs to filter by. Can be specified multiple times.",
 )
 @click.option(
+    "--loader",
+    type=click.Choice(["mlflow", "wandb"], case_sensitive=False),
+    default="mlflow",
+    help="Target platform loader to use. Default: mlflow.",
+)
+@click.option(
     "--mlflow-tracking-uri",
-    help="MLflow tracking URI. If not provided, uses default MLflow tracking URI.",
+    help="MLflow tracking URI. Only used with --loader mlflow.",
+)
+@click.option(
+    "--wandb-entity",
+    help="W&B entity (organization/username). Only used with --loader wandb.",
+)
+@click.option(
+    "--wandb-api-key",
+    help="W&B API key for authentication. Only used with --loader wandb.",
 )
 @click.option(
     "--name-prefix",
-    help="Optional prefix for MLflow experiment and run names (to handle org/project structure).",
+    help="Optional prefix for experiment/project and run names.",
 )
 @click.option(
     "--verbose",
@@ -320,20 +336,27 @@ def load(
     files_path: Path,
     project_ids: tuple[str, ...],
     runs: tuple[str, ...],
+    loader: str,
     mlflow_tracking_uri: str | None,
+    wandb_entity: str | None,
+    wandb_api_key: str | None,
     name_prefix: str | None,
     verbose: bool,
 ) -> None:
-    """Load exported Neptune data from parquet files to MLflow.
+    """Load exported Neptune data from parquet files to target platforms (MLflow or W&B).
 
     This tool loads previously exported Neptune data from parquet files
-    and uploads it to MLflow for further analysis and tracking.
+    and uploads it to MLflow or Weights & Biases for further analysis and tracking.
 
     Examples:
 
     \b
-    # Load all data from exported parquet files
+    # Load all data from exported parquet files to MLflow (default)
     neptune-exporter load
+
+    \b
+    # Load to Weights & Biases
+    neptune-exporter load --loader wandb --wandb-entity my-org
 
     \b
     # Load specific projects
@@ -344,12 +367,12 @@ def load(
     neptune-exporter load -r "RUN-123" -r "RUN-456"
 
     \b
-    # Load only parameters and metrics
-    neptune-exporter load -t parameters -t float_series
-
-    \b
     # Load to specific MLflow tracking URI
     neptune-exporter load --mlflow-tracking-uri "http://localhost:5000"
+
+    \b
+    # Load to W&B with API key
+    neptune-exporter load --loader wandb --wandb-entity my-org --wandb-api-key xxx
     """
     # Convert tuples to lists and handle None values
     project_ids_list = list(project_ids) if project_ids else None
@@ -362,12 +385,25 @@ def load(
     # Create parquet reader
     parquet_reader = ParquetReader(base_path=data_path)
 
-    # Create MLflow loader
-    data_loader = MLflowLoader(
-        tracking_uri=mlflow_tracking_uri,
-        name_prefix=name_prefix,
-        verbose=verbose,
-    )
+    # Create appropriate loader based on --loader flag
+    data_loader: DataLoader
+    if loader == "mlflow":
+        data_loader = MLflowLoader(
+            tracking_uri=mlflow_tracking_uri,
+            name_prefix=name_prefix,
+            verbose=verbose,
+        )
+        loader_name = "MLflow"
+    elif loader == "wandb":
+        data_loader = WandBLoader(
+            entity=wandb_entity,
+            api_key=wandb_api_key,
+            name_prefix=name_prefix,
+            verbose=verbose,
+        )
+        loader_name = "W&B"
+    else:
+        raise click.BadParameter(f"Unknown loader: {loader}")
 
     # Create loader manager
     loader_manager = LoaderManager(
@@ -376,7 +412,7 @@ def load(
         files_directory=files_path,
     )
 
-    click.echo(f"Starting MLflow loading from {data_path.absolute()}")
+    click.echo(f"Starting {loader_name} loading from {data_path.absolute()}")
     click.echo(f"Files directory: {files_path.absolute()}")
     if project_ids_list:
         click.echo(f"Project IDs: {', '.join(project_ids_list)}")
@@ -388,9 +424,9 @@ def load(
             project_ids=project_ids_list,
             runs=runs_list,
         )
-        click.echo("MLflow loading completed successfully!")
+        click.echo(f"{loader_name} loading completed successfully!")
     except Exception as e:
-        click.echo(f"MLflow loading failed: {e}", err=True)
+        click.echo(f"{loader_name} loading failed: {e}", err=True)
         raise click.Abort()
 
 

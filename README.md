@@ -94,12 +94,14 @@ Use the `--overwrite` flag to force re-export of all runs, which will:
 
 **Note:** Resume works at the run level - if a run was partially exported, it will be skipped entirely and not resumed.
 
-### Load Data to MLflow
+### Load Data to Target Platforms
 
-Load exported parquet data to MLflow:
+Load exported parquet data to MLflow or Weights & Biases:
+
+#### MLflow
 
 ```bash
-# Load all data from exported parquet files
+# Load all data from exported parquet files to MLflow (default)
 neptune-exporter load
 
 # Load specific projects
@@ -115,6 +117,22 @@ neptune-exporter load --data-path ./my-data --files-path ./my-files
 neptune-exporter load --mlflow-tracking-uri "http://localhost:5000"
 ```
 
+#### Weights & Biases
+
+```bash
+# Load all data to W&B
+neptune-exporter load --loader wandb --wandb-entity my-org
+
+# Load to W&B with API key
+neptune-exporter load --loader wandb --wandb-entity my-org --wandb-api-key YOUR_API_KEY
+
+# Load specific projects to W&B
+neptune-exporter load --loader wandb --wandb-entity my-org -p "my-org/my-project"
+
+# Load with custom paths
+neptune-exporter load --loader wandb --wandb-entity my-org --data-path ./my-data --files-path ./my-files
+```
+
 ### View Data Summary
 
 Get a summary of exported data:
@@ -127,7 +145,9 @@ neptune-exporter summary
 neptune-exporter summary --data-path ./my-data
 ```
 
-### Complete Migration Example
+### Complete Migration Examples
+
+#### To MLflow
 
 ```bash
 # Step 1: Export data from Neptune
@@ -140,6 +160,19 @@ neptune-exporter summary
 neptune-exporter load --mlflow-tracking-uri "http://localhost:5000"
 ```
 
+#### To Weights & Biases
+
+```bash
+# Step 1: Export data from Neptune
+neptune-exporter export -p "my-org/my-project"
+
+# Step 2: View what was exported
+neptune-exporter summary
+
+# Step 3: Load to W&B
+neptune-exporter load --loader wandb --wandb-entity my-org
+```
+
 
 ## Data Type Mappings
 
@@ -150,13 +183,35 @@ neptune-exporter load --mlflow-tracking-uri "http://localhost:5000"
 | Parameters (float, int, string, bool, datetime, string_set) | Parameters | All values converted to strings |
 | Float Series | Metrics | Steps converted from decimal to integer |
 | String Series | Artifacts | Saved as text files |
-| Histogram Series | Artifacts | Saved as CSV tables |
+| Histogram Series | Artifacts | Saved as JSON |
 | Files | Artifacts | Direct file upload |
 | File Series | Artifacts | Files with step information in path |
 
-### Key Considerations
+#### MLflow Key Considerations
 
-- **Step Conversion**: Neptune uses decimal steps, MLflow uses integer steps. Default multiplier is 1,000,000 (configurable with `--step-multiplier`)
+- **Step Conversion**: Neptune uses decimal steps, MLflow uses integer steps. Multiplier automatically determined based on data precision
 - **Attribute Names**: Neptune attribute paths are sanitized to meet MLflow key constraints (max 250 chars, alphanumeric + special chars)
 - **Experiment Names**: Neptune project IDs become MLflow experiment names (with optional prefix)
 - **File Artifacts**: Files are uploaded as MLflow artifacts with preserved directory structure
+- **Nested Runs**: Neptune forks become MLflow nested runs using parent-child relationships
+
+### Neptune to Weights & Biases
+
+| Neptune Type | W&B Type | Notes |
+|--------------|----------|-------|
+| Parameters (float, int, string, bool, datetime, string_set) | Config | Native type preservation (string_set as list) |
+| Float Series | Metrics | Steps converted from decimal to integer |
+| String Series | Tables | W&B Tables with step, value, timestamp columns |
+| Histogram Series | Histograms | Native W&B Histogram objects |
+| Files | Artifacts | W&B artifacts (supports both files and directories) |
+| File Series | Artifacts | Artifacts with step in name |
+
+#### W&B Key Considerations
+
+- **Step Conversion**: Neptune uses decimal steps, W&B uses integer steps. Multiplier automatically determined based on data precision
+- **Attribute Names**: Neptune attribute paths are sanitized to meet W&B key constraints (must start with letter/underscore, only alphanumerics and underscores)
+- **Project Names**: Neptune project ID and experiment name are combined into W&B project name
+- **Entity**: W&B requires an entity (organization/username) to be specified
+- **Nested Runs**: Neptune forks become W&B forked runs using native `fork_from` feature
+- **String Series**: Logged as W&B Tables for better visualization and analysis
+- **Histograms**: Use native W&B Histogram objects for proper visualization
