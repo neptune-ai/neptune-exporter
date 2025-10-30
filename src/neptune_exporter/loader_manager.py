@@ -82,116 +82,195 @@ class LoaderManager:
         project_ids: Optional[list[str]] = None,
         runs: Optional[list[str]] = None,
     ) -> None:
-        """Load a single project to target platform."""
+        """Load a single project to target platform using streaming buffering approach.
+
+        Runs are processed in topological order: parents before children.
+        Runs waiting for their parent are buffered until parent becomes available.
+        """
         self._logger.info(f"Loading data from {project_directory} to target platform")
 
         project_data_generator: Generator[pa.Table, None, None] = (
             self._parquet_reader.read_project_data(project_directory, project_ids, runs)
         )
 
-        run_id_to_target_run_id: dict[str, str] = {}
-        pending_parent_relationships: list[
-            tuple[str, str]
-        ] = []  # (child_target_run_id, parent_source_run_id)
+        # Track processed runs
+        processed_runs: set[str] = set()
 
+        # Track parent-child relationships for efficient lookup
+        parent_to_children: dict[str, list[str]] = {}
+
+        # Track target run IDs
+        run_id_to_target_run_id: dict[str, str] = {}
+
+        # Buffer runs waiting for their parent (assumes each run's data is in a single table)
+        # Structure: {run_id: {"data": pa.Table, "metadata": dict}}
+        buffered_runs: dict[str, dict] = {}
+
+        # Stream through parquet data
         for project_data in project_data_generator:
             project_id = project_data["project_id"].to_pylist()[0]
             run_ids = pc.unique(project_data["run_id"]).to_pylist()
 
             for source_run_id in run_ids:
-                try:
-                    run_mask = pc.equal(project_data["run_id"], source_run_id)
-                    run_data = project_data.filter(run_mask)
+                run_mask = pc.equal(project_data["run_id"], source_run_id)
+                run_data = project_data.filter(run_mask)
 
-                    if source_run_id in run_id_to_target_run_id:
-                        target_run_id = run_id_to_target_run_id[source_run_id]
-                    else:
-                        custom_run_id = (
-                            self._get_attribute_value(run_data, "sys/custom_run_id")
-                            or source_run_id
-                        )
-                        experiment_name = self._get_attribute_value(
-                            run_data, "sys/experiment/name"
-                        )
-                        parent_source_run_id = self._get_attribute_value(
-                            run_data, "sys/forking/parent"
-                        )
+                # Extract metadata
+                custom_run_id = (
+                    self._get_attribute_value(run_data, "sys/custom_run_id")
+                    or source_run_id
+                )
+                experiment_name = self._get_attribute_value(
+                    run_data, "sys/experiment/name"
+                )
+                parent_source_run_id = self._get_attribute_value(
+                    run_data, "sys/forking/parent"
+                )
+                fork_step_str = self._get_attribute_value(run_data, "sys/forking/step")
+                fork_step = float(fork_step_str) if fork_step_str is not None else None
 
-                        if experiment_name is not None:
-                            target_experiment_id = self._data_loader.create_experiment(
-                                project_id=project_id, experiment_name=experiment_name
-                            )
-                        else:
-                            target_experiment_id = None
+                metadata = {
+                    "project_id": project_id,
+                    "custom_run_id": custom_run_id,
+                    "experiment_name": experiment_name,
+                    "parent_source_run_id": parent_source_run_id,
+                    "fork_step": fork_step,
+                }
 
-                        parent_target_run_id = None
-                        if (
-                            parent_source_run_id
-                            and parent_source_run_id in run_id_to_target_run_id
-                        ):
-                            parent_target_run_id = run_id_to_target_run_id[
-                                parent_source_run_id
-                            ]
-
-                        target_run_id = self._data_loader.create_run(
-                            project_id=project_id,
-                            run_name=custom_run_id,
-                            experiment_id=target_experiment_id,
-                            parent_run_id=parent_target_run_id,
-                        )
-                        run_id_to_target_run_id[source_run_id] = target_run_id
-
-                        # If parent doesn't exist yet, track this relationship for later resolution
-                        if (
-                            parent_source_run_id
-                            and parent_source_run_id not in run_id_to_target_run_id
-                        ):
-                            pending_parent_relationships.append(
-                                (target_run_id, parent_source_run_id)
-                            )
-
-                    self._data_loader.upload_run_data(
+                # Check if run can be processed immediately
+                if (
+                    parent_source_run_id is None
+                    or parent_source_run_id in processed_runs
+                ):
+                    # Process immediately
+                    self._process_run(
+                        source_run_id=source_run_id,
                         run_data=run_data,
-                        run_id=target_run_id,
-                        files_directory=self._files_directory
-                        / sanitize_path_part(project_id),
-                    )
-                except Exception:
-                    self._logger.error(
-                        f"Error loading project data for run {source_run_id}",
-                        exc_info=True,
-                    )
-                    continue
-
-        # Resolve any pending parent relationships
-        self._resolve_pending_parent_relationships(
-            pending_parent_relationships, run_id_to_target_run_id
-        )
-
-    def _resolve_pending_parent_relationships(
-        self,
-        pending_relationships: list[tuple[str, str]],
-        run_id_to_target_run_id: dict[str, str],
-    ) -> None:
-        """Resolve parent-child relationships that couldn't be set during initial run creation."""
-        for child_target_run_id, parent_source_run_id in pending_relationships:
-            try:
-                if parent_source_run_id in run_id_to_target_run_id:
-                    parent_target_run_id = run_id_to_target_run_id[parent_source_run_id]
-                    self._data_loader.update_run_parent(
-                        child_run_id=child_target_run_id,
-                        parent_run_id=parent_target_run_id,
+                        metadata=metadata,
+                        processed_runs=processed_runs,
+                        parent_to_children=parent_to_children,
+                        run_id_to_target_run_id=run_id_to_target_run_id,
+                        buffered_runs=buffered_runs,
                     )
                 else:
-                    self._logger.warning(
-                        f"Could not resolve parent relationship for {child_target_run_id}: "
-                        f"parent source run {parent_source_run_id} not found"
-                    )
-            except Exception as e:
+                    # Buffer for later
+                    buffered_runs[source_run_id] = {
+                        "data": run_data,
+                        "metadata": metadata,
+                    }
+                    # Track parent-child relationship
+                    if parent_source_run_id not in parent_to_children:
+                        parent_to_children[parent_source_run_id] = []
+                    parent_to_children[parent_source_run_id].append(source_run_id)
+
+        # Process any remaining buffered runs (orphaned - parent not in dataset)
+        for source_run_id in list(buffered_runs.keys()):
+            try:
+                self._logger.warning(
+                    f"Processing orphaned run {source_run_id} (parent not found in dataset)"
+                )
+                run_info = buffered_runs[source_run_id]
+                self._process_run(
+                    source_run_id=source_run_id,
+                    run_data=run_info["data"],
+                    metadata=run_info["metadata"],
+                    processed_runs=processed_runs,
+                    parent_to_children=parent_to_children,
+                    run_id_to_target_run_id=run_id_to_target_run_id,
+                    buffered_runs=buffered_runs,
+                )
+            except Exception:
                 self._logger.error(
-                    f"Error updating parent relationship for {child_target_run_id}: {e}",
+                    f"Error processing orphaned run {source_run_id}",
                     exc_info=True,
                 )
+                continue
+
+    def _process_run(
+        self,
+        source_run_id: str,
+        run_data: pa.Table,
+        metadata: dict,
+        processed_runs: set[str],
+        parent_to_children: dict[str, list[str]],
+        run_id_to_target_run_id: dict[str, str],
+        buffered_runs: dict[str, dict],
+    ) -> None:
+        """Process a single run and recursively process its buffered children.
+
+        Args:
+            source_run_id: Source run ID from Neptune
+            run_data: PyArrow table with run data
+            metadata: Dictionary with run metadata (project_id, custom_run_id, etc.)
+            processed_runs: Set of processed run IDs
+            parent_to_children: Dictionary mapping parent to list of child IDs
+            run_id_to_target_run_id: Dictionary mapping source run IDs to target run IDs
+            buffered_runs: Dictionary of buffered runs waiting for parents
+        """
+        project_id = metadata["project_id"]
+        custom_run_id = metadata["custom_run_id"]
+        experiment_name = metadata["experiment_name"]
+        parent_source_run_id = metadata["parent_source_run_id"]
+        fork_step = metadata["fork_step"]
+
+        # Get or create experiment
+        if experiment_name is not None:
+            target_experiment_id = self._data_loader.create_experiment(
+                project_id=project_id, experiment_name=experiment_name
+            )
+        else:
+            target_experiment_id = None
+
+        # Get parent target run ID if parent exists
+        parent_target_run_id = None
+        if parent_source_run_id and parent_source_run_id in run_id_to_target_run_id:
+            parent_target_run_id = run_id_to_target_run_id[parent_source_run_id]
+
+        # Calculate step multiplier for W&B (needed for fork_step conversion)
+        # MLflow returns None and calculates per-series, W&B returns global multiplier
+        step_multiplier = None
+        if fork_step is not None:
+            step_multiplier = self._data_loader.calculate_global_step_multiplier(
+                run_data, fork_step
+            )
+
+        # Create run in target platform
+        target_run_id = self._data_loader.create_run(
+            project_id=project_id,
+            run_name=custom_run_id,
+            experiment_id=target_experiment_id,
+            parent_run_id=parent_target_run_id,
+            fork_step=fork_step,
+            step_multiplier=step_multiplier,
+        )
+        run_id_to_target_run_id[source_run_id] = target_run_id
+
+        # Upload run data
+        self._data_loader.upload_run_data(
+            run_data=run_data,
+            run_id=target_run_id,
+            files_directory=self._files_directory / sanitize_path_part(project_id),
+            fork_step=fork_step,
+            step_multiplier=step_multiplier,
+        )
+
+        # Mark as processed
+        processed_runs.add(source_run_id)
+
+        # Recursively process all buffered children of this run
+        if source_run_id in parent_to_children:
+            for child_source_run_id in parent_to_children[source_run_id]:
+                if child_source_run_id in buffered_runs:
+                    child_info = buffered_runs.pop(child_source_run_id)
+                    self._process_run(
+                        source_run_id=child_source_run_id,
+                        run_data=child_info["data"],
+                        metadata=child_info["metadata"],
+                        processed_runs=processed_runs,
+                        parent_to_children=parent_to_children,
+                        run_id_to_target_run_id=run_id_to_target_run_id,
+                        buffered_runs=buffered_runs,
+                    )
 
     @staticmethod
     def _get_attribute_value(

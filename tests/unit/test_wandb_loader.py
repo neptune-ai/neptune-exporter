@@ -184,15 +184,6 @@ def test_create_run_with_parent(mock_init):
     assert "wandb-run-parent" in call_kwargs["fork_from"]
 
 
-def test_update_run_parent():
-    """Test updating run parent (should log warning)."""
-    loader = WandBLoader()
-
-    # This should just log a warning since W&B doesn't support updating forks
-    loader.update_run_parent("child-run", "parent-run")
-    # No exception should be raised
-
-
 def test_upload_parameters():
     """Test parameter upload to W&B."""
     loader = WandBLoader()
@@ -283,7 +274,7 @@ def test_upload_metrics():
         }
     )
 
-    loader.upload_metrics(test_data, "RUN-123")
+    loader.upload_metrics(test_data, "RUN-123", step_multiplier=1)
 
     # Verify log was called twice (once for each step)
     assert mock_run.log.call_count == 2
@@ -320,7 +311,9 @@ def test_upload_artifacts_files():
         mock_artifact_class.return_value = mock_artifact
 
         files_base_path = Path("/test/files")
-        loader.upload_artifacts(test_data, "RUN-123", files_base_path)
+        loader.upload_artifacts(
+            test_data, "RUN-123", files_base_path, step_multiplier=1
+        )
 
         # Verify artifacts were created and logged
         assert mock_artifact_class.call_count == 2
@@ -352,7 +345,9 @@ def test_upload_artifacts_file_series():
         mock_artifact_class.return_value = mock_artifact
 
         files_base_path = Path("/test/files")
-        loader.upload_artifacts(test_data, "RUN-123", files_base_path)
+        loader.upload_artifacts(
+            test_data, "RUN-123", files_base_path, step_multiplier=1
+        )
 
         # Verify artifacts include step in name
         assert mock_artifact_class.call_count == 2
@@ -386,7 +381,9 @@ def test_upload_artifacts_string_series():
         mock_table_class.return_value = mock_table
 
         files_base_path = Path("/test/files")
-        loader.upload_artifacts(test_data, "RUN-123", files_base_path)
+        loader.upload_artifacts(
+            test_data, "RUN-123", files_base_path, step_multiplier=1
+        )
 
         # Verify Table was created and logged
         mock_table_class.assert_called_once()
@@ -427,7 +424,9 @@ def test_upload_artifacts_histogram_series():
         mock_histogram_class.return_value = mock_histogram
 
         files_base_path = Path("/test/files")
-        loader.upload_artifacts(test_data, "RUN-123", files_base_path)
+        loader.upload_artifacts(
+            test_data, "RUN-123", files_base_path, step_multiplier=1
+        )
 
         # Verify Histogram was created and logged
         mock_histogram_class.assert_called_once()

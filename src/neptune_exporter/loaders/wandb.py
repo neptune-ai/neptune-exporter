@@ -128,6 +128,48 @@ class WandBLoader:
 
         return 10**max_decimal_places
 
+    def calculate_global_step_multiplier(
+        self, run_data: pa.Table, fork_step: Optional[float] = None
+    ) -> Optional[int]:
+        """Calculate global step multiplier for W&B run.
+
+        W&B needs a global multiplier across all series and fork_step to ensure
+        consistent step conversion throughout the run.
+
+        Args:
+            run_data: PyArrow table containing run data
+            fork_step: Optional fork step to include in calculation
+
+        Returns:
+            Step multiplier (power of 10) calculated from all series + fork_step
+        """
+        run_df = run_data.to_pandas()
+        all_steps = []
+
+        # Collect steps from all series types at once
+        series_types = [
+            "float_series",
+            "string_series",
+            "histogram_series",
+            "file_series",
+        ]
+        series_data = run_df[run_df["attribute_type"].isin(series_types)]
+        if not series_data.empty and "step" in series_data.columns:
+            valid_steps = series_data["step"].dropna()
+            if not valid_steps.empty:
+                all_steps.extend(valid_steps.tolist())
+
+        # Add fork_step if provided
+        if fork_step is not None:
+            all_steps.append(Decimal(str(fork_step)))
+
+        if not all_steps:
+            return 1
+
+        # Calculate multiplier from all collected steps
+        steps_series = pd.Series(all_steps)
+        return self._determine_step_multiplier(steps_series)
+
     def create_experiment(self, project_id: str, experiment_name: str) -> str:
         """
         Create or get W&B project for a Neptune experiment.
@@ -147,8 +189,17 @@ class WandBLoader:
         run_name: str,
         experiment_id: Optional[str] = None,
         parent_run_id: Optional[str] = None,
+        fork_step: Optional[float] = None,
+        step_multiplier: Optional[int] = None,
     ) -> str:
-        """Create W&B run, with support for forked runs."""
+        """Create W&B run, with support for forked runs.
+
+        Args:
+            fork_step: Fork step as float (decimal). Will be converted to int using step_multiplier.
+            step_multiplier: Step multiplier for converting decimal steps to integers.
+                If provided, will be used for fork_step conversion. If not provided,
+                will calculate from fork_step alone as fallback.
+        """
         target_run_name = self._get_run_name(project_id, run_name)
 
         try:
@@ -161,13 +212,28 @@ class WandBLoader:
 
             # Handle forking if parent exists
             if parent_run_id and parent_run_id in self._run_id_to_wandb_id:
-                # W&B fork format: entity/project/run_id?_step=step
-                # We fork from step 0 since we're migrating historical data
                 parent_wandb_id = self._run_id_to_wandb_id[parent_run_id]
-                fork_from = f"{self.entity}/{experiment_id}/{parent_wandb_id}?_step=0"
+
+                # Convert fork_step to int using provided step_multiplier
+                # step_multiplier should always be provided when fork_step is set
+                if fork_step is not None:
+                    if step_multiplier is None:
+                        raise ValueError(
+                            "step_multiplier must be provided when fork_step is set"
+                        )
+                    step_int = self._convert_step_to_int(
+                        Decimal(str(fork_step)), step_multiplier
+                    )
+                else:
+                    step_int = 0
+
+                # W&B fork format: entity/project/run_id?_step=step
+                fork_from = (
+                    f"{self.entity}/{experiment_id}/{parent_wandb_id}?_step={step_int}"
+                )
                 init_kwargs["fork_from"] = fork_from
                 self._logger.info(
-                    f"Creating forked run '{target_run_name}' from parent {parent_run_id}"
+                    f"Creating forked run '{target_run_name}' from parent {parent_run_id} at step {step_int}"
                 )
 
             # Initialize the run
@@ -186,25 +252,20 @@ class WandBLoader:
             self._logger.error(f"Error creating run '{target_run_name}': {e}")
             raise
 
-    def update_run_parent(self, child_run_id: str, parent_run_id: str) -> None:
-        """
-        Update the parent relationship of an existing W&B run.
-
-        Note: W&B doesn't support updating fork relationships after run creation,
-        so this is a no-op with a warning.
-        """
-        self._logger.warning(
-            f"W&B does not support updating fork relationships after run creation. "
-            f"Run {child_run_id} cannot be updated to fork from {parent_run_id}."
-        )
-
     def upload_run_data(
         self,
         run_data: pa.Table,
         run_id: str,
         files_directory: Path,
+        fork_step: Optional[float] = None,
+        step_multiplier: Optional[int] = None,
     ) -> None:
-        """Upload all data for a single run to W&B."""
+        """Upload all data for a single run to W&B.
+
+        Args:
+            fork_step: Optional fork step (used for logging context)
+            step_multiplier: Step multiplier from create_run (already calculated in LoaderManager)
+        """
         try:
             # Note: We assume the run is already active from create_run
             # If not, we would need to resume it
@@ -216,9 +277,18 @@ class WandBLoader:
 
             run_df = run_data.to_pandas()
 
+            # Use step_multiplier passed from LoaderManager (already calculated)
+            # Fallback to calculating if somehow not provided (shouldn't happen)
+            if step_multiplier is None:
+                step_multiplier = self.calculate_global_step_multiplier(
+                    run_data, fork_step
+                )
+                if step_multiplier is None:
+                    step_multiplier = 1
+
             self.upload_parameters(run_df, run_id)
-            self.upload_metrics(run_df, run_id)
-            self.upload_artifacts(run_df, run_id, files_directory)
+            self.upload_metrics(run_df, run_id, step_multiplier)
+            self.upload_artifacts(run_df, run_id, files_directory, step_multiplier)
 
             # Finish the run
             self._active_run.finish()
@@ -271,8 +341,14 @@ class WandBLoader:
             self._active_run.config.update(config)
             self._logger.info(f"Uploaded {len(config)} parameters for run {run_id}")
 
-    def upload_metrics(self, run_data: pd.DataFrame, run_id: str) -> None:
-        """Upload metrics (float series) to W&B run."""
+    def upload_metrics(
+        self, run_data: pd.DataFrame, run_id: str, step_multiplier: int
+    ) -> None:
+        """Upload metrics (float series) to W&B run.
+
+        Args:
+            step_multiplier: Global step multiplier for the run (calculated from all series + fork_step)
+        """
         if self._active_run is None:
             raise RuntimeError("No active run")
 
@@ -281,9 +357,7 @@ class WandBLoader:
         if metrics_data.empty:
             return
 
-        # Determine step multiplier from actual data
-        step_multiplier = self._determine_step_multiplier(metrics_data["step"])
-
+        # Use global step multiplier (calculated from all series + fork_step)
         # Group by step to log all metrics at each step together
         for step_value, group in metrics_data.groupby("step"):
             if pd.notna(step_value):
@@ -301,9 +375,17 @@ class WandBLoader:
         self._logger.info(f"Uploaded metrics for run {run_id}")
 
     def upload_artifacts(
-        self, run_data: pd.DataFrame, run_id: str, files_base_path: Path
+        self,
+        run_data: pd.DataFrame,
+        run_id: str,
+        files_base_path: Path,
+        step_multiplier: int,
     ) -> None:
-        """Upload files and series as artifacts to W&B run."""
+        """Upload files and series as artifacts to W&B run.
+
+        Args:
+            step_multiplier: Global step multiplier for the run (calculated from all series + fork_step)
+        """
         if self._active_run is None:
             raise RuntimeError("No active run")
 
@@ -327,7 +409,7 @@ class WandBLoader:
         file_series_data = run_data[run_data["attribute_type"] == "file_series"]
         for attr_path, group in file_series_data.groupby("attribute_path"):
             attr_name = self._sanitize_attribute_name(attr_path)
-            step_multiplier = self._determine_step_multiplier(group["step"])
+            # Use global step multiplier
 
             for _, row in group.iterrows():
                 if pd.notna(row["file_value"]) and isinstance(row["file_value"], dict):
@@ -354,7 +436,7 @@ class WandBLoader:
         string_series_data = run_data[run_data["attribute_type"] == "string_series"]
         for attr_path, group in string_series_data.groupby("attribute_path"):
             attr_name = self._sanitize_attribute_name(attr_path)
-            step_multiplier = self._determine_step_multiplier(group["step"])
+            # Use global step multiplier
 
             # Create table data
             table_data = []
@@ -381,7 +463,7 @@ class WandBLoader:
         ]
         for attr_path, group in histogram_series_data.groupby("attribute_path"):
             attr_name = self._sanitize_attribute_name(attr_path)
-            step_multiplier = self._determine_step_multiplier(group["step"])
+            # Use global step multiplier
 
             for _, row in group.iterrows():
                 if pd.notna(row["histogram_value"]) and isinstance(

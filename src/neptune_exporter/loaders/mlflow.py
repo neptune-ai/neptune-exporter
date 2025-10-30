@@ -152,8 +152,15 @@ class MLflowLoader:
         run_name: str,
         experiment_id: Optional[str] = None,
         parent_run_id: Optional[str] = None,
+        fork_step: Optional[float] = None,
+        step_multiplier: Optional[int] = None,
     ) -> str:
-        """Create MLflow run."""
+        """Create MLflow run.
+
+        Args:
+            fork_step: Ignored for MLflow (parent relationships don't use step information)
+            step_multiplier: Ignored for MLflow (not needed for parent relationships)
+        """
         target_run_name = self._get_run_name(project_id, run_name)
 
         tags = {}
@@ -173,25 +180,36 @@ class MLflowLoader:
             self._logger.error(f"Error creating run '{target_run_name}': {e}")
             raise
 
-    def update_run_parent(self, child_run_id: str, parent_run_id: str) -> None:
-        """Update the parent relationship of an existing MLflow run."""
-        try:
-            with mlflow.start_run(run_id=child_run_id):
-                mlflow.set_tag(MLFLOW_PARENT_RUN_ID, parent_run_id)
-                self._logger.info(
-                    f"Updated parent relationship for run {child_run_id} to {parent_run_id}"
-                )
-        except Exception as e:
-            self._logger.error(f"Error updating parent for run {child_run_id}: {e}")
-            raise
+    def calculate_global_step_multiplier(
+        self, run_data: pa.Table, fork_step: Optional[float] = None
+    ) -> Optional[int]:
+        """Calculate global step multiplier for MLflow.
+
+        MLflow calculates step multipliers per-series, so this returns None.
+
+        Args:
+            run_data: PyArrow table containing run data
+            fork_step: Ignored for MLflow (not used)
+
+        Returns:
+            None (MLflow calculates per-series)
+        """
+        return None
 
     def upload_run_data(
         self,
         run_data: pa.Table,
         run_id: str,
         files_directory: Path,
+        fork_step: Optional[float] = None,
+        step_multiplier: Optional[int] = None,
     ) -> None:
-        """Upload all data for a single run to MLflow."""
+        """Upload all data for a single run to MLflow.
+
+        Args:
+            fork_step: Ignored for MLflow (not used in parent relationships)
+            step_multiplier: Ignored for MLflow (calculates per-series)
+        """
         try:
             with mlflow.start_run(run_id=run_id):
                 run_df = run_data.to_pandas()
