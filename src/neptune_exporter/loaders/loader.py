@@ -42,6 +42,8 @@ class DataLoader(Protocol):
         run_name: str,
         experiment_id: Optional[str] = None,
         parent_run_id: Optional[str] = None,
+        fork_step: Optional[float] = None,
+        step_multiplier: Optional[int] = None,
     ) -> str:
         """
         Create a run in the target platform.
@@ -51,19 +53,30 @@ class DataLoader(Protocol):
             run_name: Name of the run
             experiment_id: Optional experiment/project ID in target platform
             parent_run_id: Optional parent run ID for nested runs
+            fork_step: Optional fork step if this is a forked run
+            step_multiplier: Optional step multiplier for converting decimal steps to integers
+                (used by W&B for fork_step conversion)
 
         Returns:
             Run ID in the target platform
         """
         ...
 
-    def update_run_parent(self, child_run_id: str, parent_run_id: str) -> None:
+    def calculate_global_step_multiplier(
+        self, run_data: pa.Table, fork_step: Optional[float] = None
+    ) -> Optional[int]:
         """
-        Update the parent relationship of an existing run.
+        Calculate global step multiplier for converting decimal steps to integers.
+
+        Some loaders (like W&B) need a global multiplier across all series and fork_step.
+        Other loaders (like MLflow) calculate per-series and can return None.
 
         Args:
-            child_run_id: ID of the child run
-            parent_run_id: ID of the parent run
+            run_data: PyArrow table containing run data
+            fork_step: Optional fork step to include in calculation
+
+        Returns:
+            Step multiplier (power of 10) or None if not needed/calculated globally
         """
         ...
 
@@ -72,6 +85,8 @@ class DataLoader(Protocol):
         run_data: pa.Table,
         run_id: str,
         files_directory: Path,
+        fork_step: Optional[float] = None,
+        step_multiplier: Optional[int] = None,
     ) -> None:
         """
         Upload all data for a single run to the target platform.
@@ -80,5 +95,8 @@ class DataLoader(Protocol):
             run_data: PyArrow table containing run data
             run_id: Run ID in the target platform
             files_directory: Base directory for file artifacts
+            fork_step: Optional fork step if this is a forked run
+            step_multiplier: Optional step multiplier (calculated globally for W&B,
+                None for MLflow which calculates per-series)
         """
         ...
