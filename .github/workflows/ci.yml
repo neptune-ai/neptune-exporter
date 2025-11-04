@@ -53,6 +53,10 @@ jobs:
         NEPTUNE2_E2E_API_TOKEN: ${{ secrets.NEPTUNE2_E2E_API_TOKEN }}
         NEPTUNE2_E2E_PROJECT: ${{ secrets.NEPTUNE2_E2E_PROJECT }}
 
+    - name: Run integration tests - mlflow
+      run: |
+        uv run pytest tests/integration/mlflow -v --junitxml=test-results/integration-mlflow-results.xml
+
     - name: Publish Unit Test Results
       uses: mikepenz/action-junit-report@v4
       if: always()
@@ -75,4 +79,12 @@ jobs:
       with:
         report_paths: 'test-results/integration-neptune2-results.xml'
         check_name: 'Integration Tests - Neptune 2'
+        fail_on_failure: true
+
+    - name: Publish Integration Test Results - mlflow
+      uses: mikepenz/action-junit-report@v4
+      if: always()
+      with:
+        report_paths: 'test-results/integration-mlflow-results.xml'
+        check_name: 'Integration Tests - MLflow'
         fail_on_failure: true
