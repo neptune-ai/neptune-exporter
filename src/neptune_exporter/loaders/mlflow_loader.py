@@ -170,8 +170,8 @@ class MLflowLoader:
         try:
             with mlflow.start_run(
                 experiment_id=experiment_id, run_name=target_run_name, tags=tags
-            ):
-                mlflow_run_id = mlflow.active_run().info.run_id
+            ) as active_run:
+                mlflow_run_id = active_run.info.run_id
                 self._logger.info(
                     f"Created run '{target_run_name}' with MLflow ID {mlflow_run_id}"
                 )
@@ -406,7 +406,7 @@ class MLflowLoader:
             if histogram_data:
                 # Use MLflow's log_dict for structured data
                 mlflow.log_dict(
-                    data=histogram_data,
+                    dictionary={"histograms": histogram_data},
                     artifact_file=f"{attr_name}/histograms.json",
                     run_id=run_id,
                 )

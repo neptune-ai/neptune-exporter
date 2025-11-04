@@ -18,7 +18,7 @@ import re
 import logging
 from decimal import Decimal
 from pathlib import Path
-from typing import Optional
+from typing import Optional, Any
 import pandas as pd
 import pyarrow as pa
 import wandb
@@ -48,7 +48,7 @@ class WandBLoader:
         self._logger = logging.getLogger(__name__)
         self._logger.setLevel(logging.INFO if verbose else logging.ERROR)
         self._verbose = verbose
-        self._active_run: Optional[wandb.sdk.wandb_run.Run] = None
+        self._active_run: Optional[wandb.Run] = None
         self._run_id_to_wandb_id: dict[str, str] = {}
 
         # Authenticate with W&B if API key provided
@@ -204,7 +204,7 @@ class WandBLoader:
 
         try:
             # Prepare init arguments
-            init_kwargs = {
+            init_kwargs: dict[str, Any] = {
                 "entity": self.entity,
                 "project": experiment_id,
                 "name": target_run_name,

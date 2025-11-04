@@ -11,7 +11,7 @@ dependencies = [
     "neptune-query>=1.5.1,<2.0.0",
     "pyarrow>=21.0.0,<22.0.0",
     "tqdm>=4.67.1,<5.0.0",
-    "wandb>=0.18.0,<1.0.0",
+    "wandb>=0.22.3,<1.0.0",
 ]
 
 [dependency-groups]
@@ -33,7 +33,7 @@ build-backend = "uv_build"
 [tool.mypy]
 mypy_path = './src/'
 packages = 'neptune_exporter'
-ignore_missing_imports = "True"
+ignore_missing_imports = true
 
 [tool.pytest.ini_options]
 addopts = "-s"

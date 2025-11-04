@@ -57,6 +57,10 @@ class ProjectWriterContext:
         """Save a RecordBatch to this project."""
         self.storage.save(self.project_id, data)
 
+    def finish_run(self) -> None:
+        """Signal that the current run is complete."""
+        self.storage.finish_run(self.project_id)
+
 
 class ParquetWriter:
     def __init__(
@@ -68,28 +72,25 @@ class ParquetWriter:
 
         # Track current part state per project
         self._project_writers: dict[str, ProjectWriter] = {}
+        # Track last part number per project (source of truth, persists after closing)
+        self._project_last_part: dict[str, int] = {}
 
     def _initialize_directory(self) -> None:
         self.base_path.mkdir(parents=True, exist_ok=True)
 
     def save(self, project_id: str, data: pa.RecordBatch) -> None:
-        """Stream data to current part, creating new part when compressed size limit reached."""
+        """Stream data to current part, creating new part when needed.
+
+        Size limits are NOT enforced here - use finish_run() to check after a run completes.
+        """
         if project_id not in self._project_writers:
             # Create first part for new project
             self._create_new_part(project_id, data)
             return
 
+        # Write batch to current part (no size check during a run)
         writer_state = self._project_writers[project_id]
-
-        # If current part is too large, start new part
-        if writer_state.get_compressed_size() > self._target_part_size_bytes:
-            # Close current writer
-            writer_state.close()
-            # Create new part
-            self._create_new_part(project_id, data)
-        else:
-            # Write batch to current part
-            writer_state.writer.write_batch(data)
+        writer_state.writer.write_batch(data)
 
     def project_writer(self, project_id: str) -> ProjectWriterContext:
         """Get a context manager for writing to a specific project."""
@@ -102,12 +103,13 @@ class ParquetWriter:
 
     def _create_new_part(self, project_id: str, data: pa.RecordBatch) -> None:
         """Create a new part for the given project."""
-        if project_id not in self._project_writers:
-            # New project - start with part 0
-            current_part = 0
+        # Determine next part number from tracking
+        if project_id in self._project_last_part:
+            # Increment from last part
+            current_part = self._project_last_part[project_id] + 1
         else:
-            # Existing project - increment part number
-            current_part = self._project_writers[project_id].current_part + 1
+            # Brand new project - start with part 0
+            current_part = 0
 
         # Sanitize project_id for safe file path usage
         sanitized_project_id = sanitize_path_part(project_id)
@@ -126,6 +128,9 @@ class ParquetWriter:
             current_part=current_part,
         )
 
+        # Update last part tracking (source of truth)
+        self._project_last_part[project_id] = current_part
+
         # Write the data to the new part
         writer.write_batch(data)
 
@@ -137,6 +142,27 @@ class ParquetWriter:
         project_dir = self.base_path / sanitized_project_id
         if project_dir.exists():
             shutil.rmtree(project_dir)
+
+    def finish_run(self, project_id: str) -> None:
+        """Signal that a run is complete.
+
+        Checks if the current part exceeds the size limit and closes it if so.
+        The next batch for this project will start a new part.
+
+        Args:
+            project_id: The project ID to check
+        """
+        if project_id not in self._project_writers:
+            return  # No active writer
+
+        writer_state = self._project_writers[project_id]
+
+        # Check size and close if over limit
+        if writer_state.get_compressed_size() > self._target_part_size_bytes:
+            writer_state.close()
+            # Remove from tracking so next save() creates a new part
+            # Part number is already tracked in _project_last_part
+            del self._project_writers[project_id]
 
     def close_all(self) -> None:
         """Close all open writers."""

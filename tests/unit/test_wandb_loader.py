@@ -19,7 +19,7 @@ from decimal import Decimal
 from unittest.mock import Mock, patch
 from pathlib import Path
 
-from neptune_exporter.loaders.wandb import WandBLoader
+from neptune_exporter.loaders.wandb_loader import WandBLoader
 
 
 @patch("wandb.login")

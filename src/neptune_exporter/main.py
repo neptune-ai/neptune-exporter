@@ -23,8 +23,8 @@ from neptune_exporter.export_manager import ExportManager
 from neptune_exporter.storage.parquet_writer import ParquetWriter
 from neptune_exporter.storage.parquet_reader import ParquetReader
 from neptune_exporter.loaders.loader import DataLoader
-from neptune_exporter.loaders.mlflow import MLflowLoader
-from neptune_exporter.loaders.wandb import WandBLoader
+from neptune_exporter.loaders.mlflow_loader import MLflowLoader
+from neptune_exporter.loaders.wandb_loader import WandBLoader
 from neptune_exporter.loader_manager import LoaderManager
 from neptune_exporter.summary_manager import SummaryManager
 from neptune_exporter.validation import ReportFormatter

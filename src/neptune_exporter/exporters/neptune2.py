@@ -15,6 +15,7 @@
 
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from decimal import Decimal
+from typing import cast
 from neptune.attributes.attribute import Attribute
 from neptune import attributes as na
 from neptune.attributes.series.fetchable_series import FetchableSeries
@@ -92,7 +93,7 @@ class Neptune2Exporter:
 
     def list_projects(self) -> list[ProjectId]:
         """List Neptune projects."""
-        return management.get_project_list()
+        return cast(list[ProjectId], management.get_project_list())
 
     def list_runs(
         self, project_id: ProjectId, runs: Optional[str] = None
@@ -293,7 +294,7 @@ class Neptune2Exporter:
                 if attribute_type not in _METRIC_TYPES:
                     continue
 
-                series_attribute: FetchableSeries = attribute
+                series_attribute = cast(FetchableSeries, attribute)
                 series_df = series_attribute.fetch_values()
 
                 series_df["run_id"] = run_id
@@ -386,7 +387,7 @@ class Neptune2Exporter:
                 if attribute_type not in _SERIES_TYPES:
                     continue
 
-                series_attribute: FetchableSeries = attribute
+                series_attribute = cast(FetchableSeries, attribute)
                 series_df = series_attribute.fetch_values()
 
                 series_df["run_id"] = run_id
@@ -482,7 +483,7 @@ class Neptune2Exporter:
 
                 attribute_type = self._get_attribute_type(attribute)
                 if attribute_type in _FILE_TYPES:
-                    file_attribute: na.File = attribute
+                    file_attribute = cast(na.File, attribute)
 
                     file_path = destination / project_id / run_id / attribute_path
                     file_path.parent.mkdir(parents=True, exist_ok=True)
@@ -500,7 +501,7 @@ class Neptune2Exporter:
                         }
                     )
                 elif attribute_type in _FILE_SERIES_TYPES:
-                    file_series_attribute: na.FileSeries = attribute
+                    file_series_attribute = cast(na.FileSeries, attribute)
 
                     file_series_path = (
                         destination / project_id / run_id / attribute_path
@@ -523,7 +524,7 @@ class Neptune2Exporter:
                         ]
                     )
                 elif attribute_type in _FILE_SET_TYPES:
-                    file_set_attribute: na.FileSet = attribute
+                    file_set_attribute = cast(na.FileSet, attribute)
 
                     file_set_path = destination / project_id / run_id / attribute_path
                     file_set_path.mkdir(parents=True, exist_ok=True)

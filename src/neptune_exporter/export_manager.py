@@ -15,7 +15,7 @@
 
 
 from typing import Iterable, Literal
-from click import Path
+from pathlib import Path
 from tqdm import tqdm
 from neptune_exporter.exporters.exporter import NeptuneExporter
 from neptune_exporter.storage.parquet_writer import ParquetWriter
@@ -153,5 +153,8 @@ class ExportManager:
                             ):
                                 writer.save(batch)
                                 pbar.update(batch.num_rows)
+
+                    # Signal run is complete - check size and close part if needed
+                    writer.finish_run()
 
         return total_runs

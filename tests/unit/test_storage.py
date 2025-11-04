@@ -69,7 +69,7 @@ def test_parquet_storage_context_manager(temp_dir):
 
 
 def test_parquet_storage_part_splitting(temp_dir):
-    """Test that data is split into multiple parts when size limit is reached."""
+    """Test that data is split into multiple parts when size limit is reached after runs complete."""
     base_path = temp_dir
     # Use a very small size limit to force part splitting
     storage = ParquetWriter(base_path, target_part_size_bytes=1024)  # 1KB limit
@@ -88,9 +88,13 @@ def test_parquet_storage_part_splitting(temp_dir):
         }
     )
 
-    # Save multiple batches to trigger part splitting
-    for i in range(5):
-        storage.save("test-project", large_data)
+    # Save multiple batches, calling finish_run() after each to trigger part splitting
+    # This simulates multiple runs, each potentially exceeding the size limit
+    # Use a single context for all writes, calling finish_run() after each "run"
+    with storage.project_writer("test-project") as writer:
+        for i in range(5):
+            writer.save(large_data)
+            writer.finish_run()  # Check size and close if over limit
 
     storage.close_all()
 
@@ -121,6 +125,54 @@ def test_parquet_storage_part_splitting(temp_dir):
     for file_path in parquet_files:
         assert file_path.exists()
         assert file_path.stat().st_size > 0, f"Part file {file_path} is empty"
+
+
+def test_runs_dont_split_across_parts(temp_dir):
+    """Test that a single run's data stays in one part even if it exceeds size limit."""
+    base_path = temp_dir
+    # Use a very small size limit
+    storage = ParquetWriter(base_path, target_part_size_bytes=1024)  # 1KB limit
+
+    # Create test data that will exceed the size limit
+    large_data = pa.record_batch(
+        {
+            "project_id": ["test-project"] * 200,  # Large batch
+            "run_id": ["run-A"] * 200,  # All data for run A
+            "attribute_path": ["test/attribute"] * 200,
+            "attribute_type": ["string"] * 200,
+            "string_value": [
+                "test-value-with-some-additional-content-to-make-it-larger"
+            ]
+            * 200,
+        }
+    )
+
+    # Simulate writing a run that exceeds size limit
+    # All batches should go to the same part, even if it exceeds the limit
+    with storage.project_writer("test-project") as writer:
+        # Write multiple batches for the same run
+        for i in range(3):
+            writer.save(large_data)
+        # finish_run() should check size and close if over limit
+        writer.finish_run()
+
+    storage.close_all()
+
+    # Check that only one part was created (all data for run-A is in one part)
+    project_dir = base_path / "test-project"
+    assert project_dir.exists()
+
+    parquet_files = list(project_dir.glob("part_*.parquet"))
+    # Should have 1 part (all of run-A's data), even though it exceeds size limit
+    # The part may be closed after finish_run(), but all data is in part_0
+    assert len(parquet_files) == 1, (
+        f"Expected single part for run-A, but found {len(parquet_files)} files: {parquet_files}"
+    )
+    assert parquet_files[0].name == "part_0.parquet"
+
+    # Verify the file is not empty and contains all the data
+    assert parquet_files[0].exists()
+    assert parquet_files[0].stat().st_size > 0
 
 
 def test_parquet_storage_sanitizes_project_id(temp_dir):

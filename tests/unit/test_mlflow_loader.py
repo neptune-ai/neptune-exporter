@@ -18,7 +18,7 @@ from decimal import Decimal
 from unittest.mock import Mock, patch
 from pathlib import Path
 
-from neptune_exporter.loaders.mlflow import MLflowLoader
+from neptune_exporter.loaders.mlflow_loader import MLflowLoader
 
 
 def test_init():
@@ -267,7 +267,9 @@ def test_upload_metrics():
         }
     )
 
-    with patch("neptune_exporter.loaders.mlflow.MlflowClient") as mock_client_class:
+    with patch(
+        "neptune_exporter.loaders.mlflow_loader.MlflowClient"
+    ) as mock_client_class:
         mock_client = Mock()
         mock_client_class.return_value = mock_client
 
@@ -316,7 +318,9 @@ def test_upload_run_data():
     with (
         patch("mlflow.start_run") as mock_start_run,
         patch("mlflow.log_params") as mock_log_params,
-        patch("neptune_exporter.loaders.mlflow.MlflowClient") as mock_client_class,
+        patch(
+            "neptune_exporter.loaders.mlflow_loader.MlflowClient"
+        ) as mock_client_class,
         patch("mlflow.log_artifact") as mock_log_artifact,
         patch("pathlib.Path.exists", return_value=True),
     ):
