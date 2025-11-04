@@ -152,38 +152,32 @@ def test_create_experiment_existing(mock_create, mock_get):
     mock_create.assert_not_called()
 
 
-@patch("mlflow.active_run")
 @patch("mlflow.start_run")
-def test_create_run(mock_start_run, mock_active_run):
+def test_create_run(mock_start_run):
     """Test creating a run."""
     mock_run = Mock()
     mock_run.info.run_id = "run-123"
-    mock_active_run.return_value = mock_run
-    mock_start_run.return_value.__enter__.return_value = None
+    mock_start_run.return_value.__enter__.return_value = mock_run
 
     loader = MLflowLoader()
     run_id = loader.create_run("test-project", "run-name", "exp-123")
 
     assert run_id == "run-123"
     mock_start_run.assert_called_once()
-    mock_active_run.assert_called_once()
 
 
-@patch("mlflow.active_run")
 @patch("mlflow.start_run")
-def test_create_run_with_parent(mock_start_run, mock_active_run):
+def test_create_run_with_parent(mock_start_run):
     """Test creating a run with parent."""
     mock_run = Mock()
     mock_run.info.run_id = "run-123"
-    mock_active_run.return_value = mock_run
-    mock_start_run.return_value.__enter__.return_value = None
+    mock_start_run.return_value.__enter__.return_value = mock_run
 
     loader = MLflowLoader()
     run_id = loader.create_run("test-project", "run-name", "exp-123", "parent-run-123")
 
     assert run_id == "run-123"
     mock_start_run.assert_called_once()
-    mock_active_run.assert_called_once()
 
 
 def test_upload_parameters():
@@ -470,12 +464,17 @@ def test_upload_artifacts_histogram_series():
         # Verify dict was logged
         mock_log_dict.assert_called_once()
         call_args = mock_log_dict.call_args
-        assert call_args[1]["artifact_file"] == "test/hist_series/histograms.json"
 
-        # Verify data content
-        data = call_args[1]["data"]
-        assert len(data) == 1
-        assert data[0]["step"] == 1
-        assert data[0]["type"] == "histogram"
-        assert data[0]["edges"] == [0.0, 1.0, 2.0]
-        assert data[0]["values"] == [10, 20]
+        # Check keyword arguments
+        assert call_args[1]["artifact_file"] == "test/hist_series/histograms.json"
+        assert call_args[1]["run_id"] == "RUN-123"
+
+        # Verify dictionary parameter contains histogram data wrapped in "histograms" key
+        dictionary = call_args[1]["dictionary"]
+        assert "histograms" in dictionary
+        histogram_list = dictionary["histograms"]
+        assert len(histogram_list) == 1
+        assert histogram_list[0]["step"] == 1
+        assert histogram_list[0]["type"] == "histogram"
+        assert histogram_list[0]["edges"] == [0.0, 1.0, 2.0]
+        assert histogram_list[0]["values"] == [10, 20]
