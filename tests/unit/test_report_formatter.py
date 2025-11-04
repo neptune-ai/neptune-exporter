@@ -15,6 +15,7 @@
 
 from pathlib import Path
 from unittest.mock import patch
+import click
 
 from neptune_exporter.validation import ReportFormatter
 
@@ -108,7 +109,7 @@ def test_format_data_summary_with_error():
     )
 
 
-@patch("neptune_exporter.validation.report_formatter.click.echo")
+@patch("neptune_exporter.validation.report_formatter.click.echo", spec=click.echo)
 def test_print_data_summary(mock_echo):
     """Test printing data summary."""
     summary = {

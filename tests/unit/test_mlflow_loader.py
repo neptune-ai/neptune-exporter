@@ -17,6 +17,8 @@ import pandas as pd
 from decimal import Decimal
 from unittest.mock import Mock, patch
 from pathlib import Path
+import mlflow
+from mlflow.tracking import MlflowClient
 
 from neptune_exporter.loaders.mlflow_loader import MLflowLoader
 
@@ -121,8 +123,8 @@ def test_determine_step_multiplier():
     assert multiplier == 1
 
 
-@patch("mlflow.get_experiment_by_name")
-@patch("mlflow.create_experiment")
+@patch("mlflow.get_experiment_by_name", spec=mlflow.get_experiment_by_name)
+@patch("mlflow.create_experiment", spec=mlflow.create_experiment)
 def test_create_experiment_new(mock_create, mock_get):
     """Test creating a new experiment."""
     mock_get.return_value = None
@@ -136,8 +138,8 @@ def test_create_experiment_new(mock_create, mock_get):
     mock_create.assert_called_once()
 
 
-@patch("mlflow.get_experiment_by_name")
-@patch("mlflow.create_experiment")
+@patch("mlflow.get_experiment_by_name", spec=mlflow.get_experiment_by_name)
+@patch("mlflow.create_experiment", spec=mlflow.create_experiment)
 def test_create_experiment_existing(mock_create, mock_get):
     """Test using an existing experiment."""
     mock_experiment = Mock()
@@ -152,7 +154,7 @@ def test_create_experiment_existing(mock_create, mock_get):
     mock_create.assert_not_called()
 
 
-@patch("mlflow.start_run")
+@patch("mlflow.start_run", spec=mlflow.start_run)
 def test_create_run(mock_start_run):
     """Test creating a run."""
     mock_run = Mock()
@@ -166,7 +168,7 @@ def test_create_run(mock_start_run):
     mock_start_run.assert_called_once()
 
 
-@patch("mlflow.start_run")
+@patch("mlflow.start_run", spec=mlflow.start_run)
 def test_create_run_with_parent(mock_start_run):
     """Test creating a run with parent."""
     mock_run = Mock()
@@ -198,7 +200,7 @@ def test_upload_parameters():
         }
     )
 
-    with patch("mlflow.log_params") as mock_log_params:
+    with patch("mlflow.log_params", spec=mlflow.log_params) as mock_log_params:
         loader.upload_parameters(test_data, "RUN-123")
 
         # Verify parameters were logged
@@ -231,7 +233,7 @@ def test_upload_parameters_string_set():
         }
     )
 
-    with patch("mlflow.log_params") as mock_log_params:
+    with patch("mlflow.log_params", spec=mlflow.log_params) as mock_log_params:
         loader.upload_parameters(test_data, "RUN-123")
 
         # Verify parameters were logged
@@ -262,7 +264,7 @@ def test_upload_metrics():
     )
 
     with patch(
-        "neptune_exporter.loaders.mlflow_loader.MlflowClient"
+        "neptune_exporter.loaders.mlflow_loader.MlflowClient", spec=MlflowClient
     ) as mock_client_class:
         mock_client = Mock()
         mock_client_class.return_value = mock_client
@@ -310,12 +312,12 @@ def test_upload_run_data():
     )
 
     with (
-        patch("mlflow.start_run") as mock_start_run,
-        patch("mlflow.log_params") as mock_log_params,
+        patch("mlflow.start_run", spec=mlflow.start_run) as mock_start_run,
+        patch("mlflow.log_params", spec=mlflow.log_params) as mock_log_params,
         patch(
-            "neptune_exporter.loaders.mlflow_loader.MlflowClient"
+            "neptune_exporter.loaders.mlflow_loader.MlflowClient", spec=MlflowClient
         ) as mock_client_class,
-        patch("mlflow.log_artifact") as mock_log_artifact,
+        patch("mlflow.log_artifact", spec=mlflow.log_artifact) as mock_log_artifact,
         patch("pathlib.Path.exists", return_value=True),
     ):
         mock_start_run.return_value.__enter__.return_value = None
@@ -350,7 +352,7 @@ def test_upload_artifacts_files():
     )
 
     with (
-        patch("mlflow.log_artifact") as mock_log_artifact,
+        patch("mlflow.log_artifact", spec=mlflow.log_artifact) as mock_log_artifact,
         patch("pathlib.Path.exists", return_value=True),
     ):
         files_base_path = Path("/test/files")
@@ -384,7 +386,7 @@ def test_upload_artifacts_file_series():
     )
 
     with (
-        patch("mlflow.log_artifact") as mock_log_artifact,
+        patch("mlflow.log_artifact", spec=mlflow.log_artifact) as mock_log_artifact,
         patch("pathlib.Path.exists", return_value=True),
     ):
         files_base_path = Path("/test/files")
@@ -416,7 +418,7 @@ def test_upload_artifacts_string_series():
     )
 
     with (
-        patch("mlflow.log_text") as mock_log_text,
+        patch("mlflow.log_text", spec=mlflow.log_text) as mock_log_text,
         patch("tempfile.NamedTemporaryFile") as mock_temp_file,
     ):
         # Mock temporary file
@@ -457,7 +459,7 @@ def test_upload_artifacts_histogram_series():
         }
     )
 
-    with patch("mlflow.log_dict") as mock_log_dict:
+    with patch("mlflow.log_dict", spec=mlflow.log_dict) as mock_log_dict:
         files_base_path = Path("/test/files")
         loader.upload_artifacts(test_data, "RUN-123", files_base_path)
 

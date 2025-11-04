@@ -18,11 +18,12 @@ import pyarrow as pa
 from decimal import Decimal
 from unittest.mock import Mock, patch
 from pathlib import Path
+import wandb
 
 from neptune_exporter.loaders.wandb_loader import WandBLoader
 
 
-@patch("wandb.login")
+@patch("wandb.login", spec=wandb.login)
 def test_init(mock_login):
     """Test WandBLoader initialization."""
     loader = WandBLoader(
@@ -38,7 +39,7 @@ def test_init(mock_login):
 
 def test_init_with_api_key():
     """Test WandBLoader initialization with API key authentication."""
-    with patch("wandb.login") as mock_login:
+    with patch("wandb.login", spec=wandb.login) as mock_login:
         loader = WandBLoader(entity="test-entity", api_key="test-api-key")
 
         mock_login.assert_called_once_with(key="test-api-key")
@@ -144,7 +145,7 @@ def test_create_experiment():
     assert project_name == "test-project_experiment-name"
 
 
-@patch("wandb.init")
+@patch("wandb.init", spec=wandb.init)
 def test_create_run(mock_init):
     """Test creating a W&B run."""
     mock_run = Mock()
@@ -160,7 +161,7 @@ def test_create_run(mock_init):
     )
 
 
-@patch("wandb.init")
+@patch("wandb.init", spec=wandb.init)
 def test_create_run_with_parent(mock_init):
     """Test creating a forked W&B run."""
     mock_run = Mock()
@@ -305,7 +306,7 @@ def test_upload_artifacts_files():
     with (
         patch("pathlib.Path.exists", return_value=True),
         patch("pathlib.Path.is_file", return_value=True),
-        patch("wandb.Artifact") as mock_artifact_class,
+        patch("wandb.Artifact", spec=wandb.Artifact) as mock_artifact_class,
     ):
         mock_artifact = Mock()
         mock_artifact_class.return_value = mock_artifact
@@ -339,7 +340,7 @@ def test_upload_artifacts_file_series():
     with (
         patch("pathlib.Path.exists", return_value=True),
         patch("pathlib.Path.is_file", return_value=True),
-        patch("wandb.Artifact") as mock_artifact_class,
+        patch("wandb.Artifact", spec=wandb.Artifact) as mock_artifact_class,
     ):
         mock_artifact = Mock()
         mock_artifact_class.return_value = mock_artifact
@@ -376,7 +377,7 @@ def test_upload_artifacts_string_series():
         }
     )
 
-    with patch("wandb.Table") as mock_table_class:
+    with patch("wandb.Table", spec=wandb.Table) as mock_table_class:
         mock_table = Mock()
         mock_table_class.return_value = mock_table
 
@@ -419,7 +420,7 @@ def test_upload_artifacts_histogram_series():
         }
     )
 
-    with patch("wandb.Histogram") as mock_histogram_class:
+    with patch("wandb.Histogram", spec=wandb.Histogram) as mock_histogram_class:
         mock_histogram = Mock()
         mock_histogram_class.return_value = mock_histogram
 
@@ -462,10 +463,10 @@ def test_upload_run_data():
     )
 
     with (
-        patch("wandb.init") as mock_init,
+        patch("wandb.init", spec=wandb.init) as mock_init,
         patch("pathlib.Path.exists", return_value=True),
         patch("pathlib.Path.is_file", return_value=True),
-        patch("wandb.Artifact") as mock_artifact_class,
+        patch("wandb.Artifact", spec=wandb.Artifact) as mock_artifact_class,
     ):
         mock_run = Mock()
         mock_run.id = "test-run-id"
