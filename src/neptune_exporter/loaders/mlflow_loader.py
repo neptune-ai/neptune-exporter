@@ -91,12 +91,7 @@ class MLflowLoader:
 
     def _get_run_name(self, project_id: str, run_id: str) -> str:
         """Get MLflow run name from Neptune run ID."""
-        name = f"{project_id}/{run_id}"
-
-        if self.name_prefix:
-            name = f"{self.name_prefix}/{name}"
-
-        return name
+        return run_id
 
     def _convert_step_to_int(self, step: Decimal, step_multiplier: int) -> int:
         """Convert Neptune decimal step to MLflow integer step."""

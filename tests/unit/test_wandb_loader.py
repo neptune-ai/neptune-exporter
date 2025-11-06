@@ -69,18 +69,16 @@ def test_sanitize_attribute_name():
 def test_get_project_name():
     """Test W&B project name generation."""
     loader = WandBLoader(name_prefix="test-prefix")
+    loader_no_prefix = WandBLoader()
 
     # Test with prefix
     assert (
-        loader._get_project_name("my-org/my-project", "experiment")
-        == "test-prefix_my-org_my-project_experiment"
+        loader._get_project_name("my-org/my-project") == "test-prefix_my-org_my-project"
     )
 
     # Test without prefix
-    loader_no_prefix = WandBLoader()
     assert (
-        loader_no_prefix._get_project_name("my-org/my-project", "experiment")
-        == "my-org_my-project_experiment"
+        loader_no_prefix._get_project_name("my-org/my-project") == "my-org_my-project"
     )
 
 
@@ -88,17 +86,12 @@ def test_get_run_name():
     """Test run name generation."""
     loader = WandBLoader(name_prefix="test-prefix")
 
-    # Test with prefix
-    assert (
-        loader._get_run_name("my-project", "run-123")
-        == "test-prefix/my-project/run-123"
-    )
+    # Test prefix ignored for run name
+    assert loader._get_run_name("run-123") == "run-123"
 
     # Test without prefix
     loader_no_prefix = WandBLoader()
-    assert (
-        loader_no_prefix._get_run_name("my-project", "run-123") == "my-project/run-123"
-    )
+    assert loader_no_prefix._get_run_name("run-123") == "run-123"
 
 
 def test_convert_step_to_int():
@@ -141,8 +134,7 @@ def test_create_experiment():
 
     project_name = loader.create_experiment("test-project", "experiment-name")
 
-    # W&B doesn't require explicit project creation
-    assert project_name == "test-project_experiment-name"
+    assert project_name == "experiment-name"
 
 
 @patch("wandb.init", spec=wandb.init)
@@ -157,7 +149,10 @@ def test_create_run(mock_init):
 
     assert run_id == "wandb-run-123"
     mock_init.assert_called_once_with(
-        entity="test-entity", project="experiment-id", name="test-project/run-name"
+        entity="test-entity",
+        project="test-project",
+        group="experiment-id",
+        name="run-name",
     )
 
 

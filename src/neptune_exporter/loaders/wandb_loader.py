@@ -81,11 +81,11 @@ class WandBLoader:
 
         return sanitized
 
-    def _get_project_name(self, project_id: str, experiment_name: str) -> str:
-        """Get W&B project name from Neptune project ID and experiment."""
+    def _get_project_name(self, project_id: str) -> str:
+        """Get W&B project name from Neptune project ID."""
         # W&B uses entity/project structure
-        # We combine Neptune project_id and experiment_name
-        name = f"{project_id}_{experiment_name}".replace("/", "_")
+        # Neptune project_id maps directly to W&B project
+        name = project_id
 
         if self.name_prefix:
             name = f"{self.name_prefix}_{name}"
@@ -95,14 +95,9 @@ class WandBLoader:
 
         return name
 
-    def _get_run_name(self, project_id: str, run_id: str) -> str:
+    def _get_run_name(self, run_id: str) -> str:
         """Get W&B run name from Neptune run ID."""
-        name = f"{project_id}/{run_id}"
-
-        if self.name_prefix:
-            name = f"{self.name_prefix}/{name}"
-
-        return name
+        return run_id
 
     def _convert_step_to_int(self, step: Decimal, step_multiplier: int) -> int:
         """Convert Neptune decimal step to W&B integer step."""
@@ -172,16 +167,10 @@ class WandBLoader:
 
     def create_experiment(self, project_id: str, experiment_name: str) -> str:
         """
-        Create or get W&B project for a Neptune experiment.
-
-        In W&B, this corresponds to a project. We return the project name
-        as the experiment ID since W&B projects are created implicitly.
+        Neptune experiment_name maps to W&B group (set in create_run).
+        We return the experiment name as the group name to use.
         """
-        project_name = self._get_project_name(project_id, experiment_name)
-        self._logger.info(
-            f"Using W&B project '{project_name}' for Neptune experiment '{experiment_name}'"
-        )
-        return project_name
+        return experiment_name
 
     def create_run(
         self,
@@ -200,13 +189,15 @@ class WandBLoader:
                 If provided, will be used for fork_step conversion. If not provided,
                 will calculate from fork_step alone as fallback.
         """
-        target_run_name = self._get_run_name(project_id, run_name)
+        target_run_name = self._get_run_name(run_name)
+        sanitized_project = self._get_project_name(project_id)
 
         try:
             # Prepare init arguments
             init_kwargs: dict[str, Any] = {
                 "entity": self.entity,
-                "project": experiment_id,
+                "project": sanitized_project,
+                "group": experiment_id,
                 "name": target_run_name,
             }
 
@@ -228,9 +219,7 @@ class WandBLoader:
                     step_int = 0
 
                 # W&B fork format: entity/project/run_id?_step=step
-                fork_from = (
-                    f"{self.entity}/{experiment_id}/{parent_wandb_id}?_step={step_int}"
-                )
+                fork_from = f"{self.entity}/{sanitized_project}/{parent_wandb_id}?_step={step_int}"
                 init_kwargs["fork_from"] = fork_from
                 self._logger.info(
                     f"Creating forked run '{target_run_name}' from parent {parent_run_id} at step {step_int}"
