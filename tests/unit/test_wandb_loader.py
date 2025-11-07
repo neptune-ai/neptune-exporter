@@ -82,18 +82,6 @@ def test_get_project_name():
     )
 
 
-def test_get_run_name():
-    """Test run name generation."""
-    loader = WandBLoader(name_prefix="test-prefix")
-
-    # Test prefix ignored for run name
-    assert loader._get_run_name("run-123") == "run-123"
-
-    # Test without prefix
-    loader_no_prefix = WandBLoader()
-    assert loader_no_prefix._get_run_name("run-123") == "run-123"
-
-
 def test_convert_step_to_int():
     """Test step conversion from decimal to int."""
     loader = WandBLoader()

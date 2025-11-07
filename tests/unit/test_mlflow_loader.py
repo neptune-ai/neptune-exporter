@@ -86,18 +86,6 @@ def test_get_experiment_name():
     )
 
 
-def test_get_run_name():
-    """Test run name generation."""
-    loader = MLflowLoader(name_prefix="test-prefix")
-    loader_no_prefix = MLflowLoader()
-
-    # Test prefix ignored for run name
-    assert loader._get_run_name("my-project", "run-123") == "run-123"
-
-    # Test without prefix
-    assert loader_no_prefix._get_run_name("my-project", "run-123") == "run-123"
-
-
 def test_determine_step_multiplier():
     """Test step multiplier determination."""
     loader = MLflowLoader()

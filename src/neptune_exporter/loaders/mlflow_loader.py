@@ -89,10 +89,6 @@ class MLflowLoader:
 
         return name
 
-    def _get_run_name(self, project_id: str, run_id: str) -> str:
-        """Get MLflow run name from Neptune run ID."""
-        return run_id
-
     def _convert_step_to_int(self, step: Decimal, step_multiplier: int) -> int:
         """Convert Neptune decimal step to MLflow integer step."""
         if step is None:
@@ -156,7 +152,6 @@ class MLflowLoader:
             fork_step: Ignored for MLflow (parent relationships don't use step information)
             step_multiplier: Ignored for MLflow (not needed for parent relationships)
         """
-        target_run_name = self._get_run_name(project_id, run_name)
 
         tags = {}
         if parent_run_id:
@@ -164,15 +159,15 @@ class MLflowLoader:
 
         try:
             with mlflow.start_run(
-                experiment_id=experiment_id, run_name=target_run_name, tags=tags
+                experiment_id=experiment_id, run_name=run_name, tags=tags
             ) as active_run:
                 mlflow_run_id = active_run.info.run_id
                 self._logger.info(
-                    f"Created run '{target_run_name}' with MLflow ID {mlflow_run_id}"
+                    f"Created run '{run_name}' with MLflow ID {mlflow_run_id}"
                 )
                 return mlflow_run_id
         except Exception as e:
-            self._logger.error(f"Error creating run '{target_run_name}': {e}")
+            self._logger.error(f"Error creating run '{run_name}': {e}")
             raise
 
     def calculate_global_step_multiplier(

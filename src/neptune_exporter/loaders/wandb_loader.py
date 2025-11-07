@@ -189,7 +189,6 @@ class WandBLoader:
                 If provided, will be used for fork_step conversion. If not provided,
                 will calculate from fork_step alone as fallback.
         """
-        target_run_name = self._get_run_name(run_name)
         sanitized_project = self._get_project_name(project_id)
 
         try:
@@ -198,7 +197,7 @@ class WandBLoader:
                 "entity": self.entity,
                 "project": sanitized_project,
                 "group": experiment_id,
-                "name": target_run_name,
+                "name": run_name,
             }
 
             # Handle forking if parent exists
@@ -222,7 +221,7 @@ class WandBLoader:
                 fork_from = f"{self.entity}/{sanitized_project}/{parent_wandb_id}?_step={step_int}"
                 init_kwargs["fork_from"] = fork_from
                 self._logger.info(
-                    f"Creating forked run '{target_run_name}' from parent {parent_run_id} at step {step_int}"
+                    f"Creating forked run '{run_name}' from parent {parent_run_id} at step {step_int}"
                 )
 
             # Initialize the run
@@ -232,13 +231,11 @@ class WandBLoader:
             self._active_run = run
             self._run_id_to_wandb_id[run_name] = wandb_run_id
 
-            self._logger.info(
-                f"Created run '{target_run_name}' with W&B ID {wandb_run_id}"
-            )
+            self._logger.info(f"Created run '{run_name}' with W&B ID {wandb_run_id}")
             return wandb_run_id
 
         except Exception as e:
-            self._logger.error(f"Error creating run '{target_run_name}': {e}")
+            self._logger.error(f"Error creating run '{run_name}': {e}")
             raise
 
     def upload_run_data(

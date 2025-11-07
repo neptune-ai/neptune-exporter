@@ -270,9 +270,7 @@ def test_mlflow_artifacts_loaded(
     )
 
     # Create a mapping of run name to test data (MLflow generates its own run IDs)
-    test_data_by_run_name = {
-        f"{TEST_PROJECT_ID}/{run_data.run_id}": run_data for run_data in TEST_RUNS
-    }
+    test_data_by_run_name = {run_data.run_id: run_data for run_data in TEST_RUNS}
 
     # Verify artifacts for each run
     runs_with_artifacts = 0

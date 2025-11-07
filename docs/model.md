@@ -52,13 +52,11 @@
   - Neptune `project_id` and `experiment_name` are combined to create W&B project name
   - Format: `{name_prefix}_{project_id}_{experiment_name}` (sanitized)
 
-- **experiment** → project
-  - **Implementation**: Mapped to W&B project, created implicitly on first run
-  - W&B projects are created automatically when runs are initialized
+- **experiment** → group
 
 - **run** → run
   - **Implementation**: Created using `wandb.init()` with entity, project, and name
-  - Run names follow format: `{name_prefix}/{project_id}/{run_id}`
+  - Run names follow format: `{run_id}`
 
 - **forks** → forks
   - **Implementation**: ✅ W&B native forks using `wandb.init(fork_from=f"{entity}/{project}/{run_id}?_step=0")`
