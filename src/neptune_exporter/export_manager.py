@@ -30,13 +30,11 @@ class ExportManager:
         reader: ParquetReader,
         writer: ParquetWriter,
         files_destination: Path,
-        resume: bool = True,
     ):
         self._exporter = exporter
         self._reader = reader
         self._writer = writer
         self._files_destination = files_destination
-        self._resume = resume
 
     def run(
         self,
@@ -64,24 +62,19 @@ class ExportManager:
         for project_id, run_ids in tqdm(
             project_runs.items(), desc="Exporting projects", unit="project"
         ):
-            # Overwrite mode: delete existing project data to avoid mixing old/new
-            if not self._resume:
-                self._writer.delete_project_data(project_id)
+            # Skip already-exported runs
+            sanitized_project_id = sanitize_path_part(project_id)
+            project_dir = self._writer.base_path / sanitized_project_id
+            existing_runs = self._reader.get_unique_run_ids(project_dir)
 
-            # Resume mode: skip already-exported runs
-            if self._resume:
-                sanitized_project_id = sanitize_path_part(project_id)
-                project_dir = self._writer.base_path / sanitized_project_id
-                existing_runs = self._reader.get_unique_run_ids(project_dir)
-
-                if existing_runs:
-                    original_count = len(run_ids)
-                    run_ids = [rid for rid in run_ids if rid not in existing_runs]
-                    skipped = original_count - len(run_ids)
-                    if skipped > 0:
-                        tqdm.write(
-                            f"Skipping {skipped} already exported run(s) in {project_id}"
-                        )
+            if existing_runs:
+                original_count = len(run_ids)
+                run_ids = [rid for rid in run_ids if rid not in existing_runs]
+                skipped = original_count - len(run_ids)
+                if skipped > 0:
+                    tqdm.write(
+                        f"Skipping {skipped} already exported run(s) in {project_id}"
+                    )
 
             if not run_ids:
                 continue  # All runs already exported or deleted, skip to next project
