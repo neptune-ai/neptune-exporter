@@ -94,11 +94,6 @@ def cli():
     help="Path for downloaded files. Default: ./exports/files",
 )
 @click.option(
-    "--overwrite",
-    is_flag=True,
-    help="Overwrite existing exported runs. By default, already-exported runs are skipped.",
-)
-@click.option(
     "--api-token",
     help="Neptune API token. If not provided, will use environment variable NEPTUNE_API_TOKEN.",
 )
@@ -117,7 +112,6 @@ def export(
     exporter: str,
     data_path: Path,
     files_path: Path,
-    overwrite: bool,
     api_token: str | None,
     verbose: bool,
 ) -> None:
@@ -227,26 +221,12 @@ def export(
     writer = ParquetWriter(base_path=data_path)
     reader = ParquetReader(base_path=data_path)
 
-    # Check for existing data and notify user about resume/overwrite behavior
-    existing_projects = reader.list_project_directories()
-    if existing_projects:
-        if overwrite:
-            click.echo(f"⚠️  Found existing data at {data_path.absolute()}")
-            click.echo(
-                "   Will delete and overwrite existing project data (--overwrite flag set)"
-            )
-        else:
-            click.echo(f"ℹ️  Found existing data at {data_path.absolute()}")
-            click.echo("   Will resume export, skipping already-exported runs")
-            click.echo("   Use --overwrite to delete and re-export all data")
-
-    # Create export manager with resume support
+    # Create export manager
     export_manager = ExportManager(
         exporter=exporter_instance,
         reader=reader,
         writer=writer,
         files_destination=files_path,
-        resume=not overwrite,
     )
 
     click.echo(f"Starting export of {len(project_ids_list)} project(s)...")
