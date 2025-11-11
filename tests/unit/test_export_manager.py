@@ -16,6 +16,7 @@
 from unittest.mock import Mock
 from pathlib import Path
 import pyarrow as pa
+import pyarrow.compute as pc
 import pyarrow.parquet as pq
 import tempfile
 
@@ -38,8 +39,11 @@ def test_export_manager_skips_existing_runs():
     # Mock exporter to return some runs initially
     mock_exporter.list_runs.return_value = ["RUN-123", "RUN-456", "RUN-789"]
 
-    # Mock reader to return existing runs (some overlap)
-    mock_reader.get_unique_run_ids.return_value = {"RUN-123", "RUN-456"}
+    # Mock reader to return True for existing runs
+    def mock_check_run_exists(project_id, run_id):
+        return run_id in {"RUN-123", "RUN-456"}
+
+    mock_reader.check_run_exists.side_effect = mock_check_run_exists
 
     # Create export manager
     export_manager = ExportManager(
@@ -49,12 +53,12 @@ def test_export_manager_skips_existing_runs():
         files_destination=Path("/fake/files"),
     )
 
-    # Mock the project writer context
+    # Mock the run writer context
     mock_writer_context = Mock()
-    mock_writer.project_writer.return_value.__enter__ = Mock(
+    mock_writer.run_writer.return_value.__enter__ = Mock(
         return_value=mock_writer_context
     )
-    mock_writer.project_writer.return_value.__exit__ = Mock(return_value=None)
+    mock_writer.run_writer.return_value.__exit__ = Mock(return_value=None)
 
     # Mock exporter methods to return empty generators
     mock_exporter.download_parameters.return_value = []
@@ -70,8 +74,8 @@ def test_export_manager_skips_existing_runs():
         export_classes={"parameters", "metrics", "series", "files"},
     )
 
-    # Verify reader was called to check existing runs
-    mock_reader.get_unique_run_ids.assert_called_once()
+    # Verify reader was called to check existing runs (3 times, once per run)
+    assert mock_reader.check_run_exists.call_count == 3
 
     # Should return 3 since it returns total runs found, not processed
     assert result == 3
@@ -90,8 +94,8 @@ def test_export_manager_with_no_existing_data():
     # Mock exporter to return some runs
     mock_exporter.list_runs.return_value = ["RUN-123", "RUN-456"]
 
-    # Mock reader to return no existing runs
-    mock_reader.get_unique_run_ids.return_value = set()
+    # Mock reader to return False for all runs (no existing runs)
+    mock_reader.check_run_exists.return_value = False
 
     # Create export manager
     export_manager = ExportManager(
@@ -101,12 +105,12 @@ def test_export_manager_with_no_existing_data():
         files_destination=Path("/fake/files"),
     )
 
-    # Mock the project writer context
+    # Mock the run writer context
     mock_writer_context = Mock()
-    mock_writer.project_writer.return_value.__enter__ = Mock(
+    mock_writer.run_writer.return_value.__enter__ = Mock(
         return_value=mock_writer_context
     )
-    mock_writer.project_writer.return_value.__exit__ = Mock(return_value=None)
+    mock_writer.run_writer.return_value.__exit__ = Mock(return_value=None)
 
     # Mock exporter methods to return empty generators
     mock_exporter.download_parameters.return_value = []
@@ -139,8 +143,11 @@ def test_export_manager_with_partial_existing_data():
     # Mock exporter to return some runs
     mock_exporter.list_runs.return_value = ["RUN-123", "RUN-456", "RUN-789"]
 
-    # Mock reader to return some existing runs
-    mock_reader.get_unique_run_ids.return_value = {"RUN-123"}
+    # Mock reader to return True only for RUN-123
+    def mock_check_run_exists(project_id, run_id):
+        return run_id == "RUN-123"
+
+    mock_reader.check_run_exists.side_effect = mock_check_run_exists
 
     # Create export manager
     export_manager = ExportManager(
@@ -150,12 +157,12 @@ def test_export_manager_with_partial_existing_data():
         files_destination=Path("/fake/files"),
     )
 
-    # Mock the project writer context
+    # Mock the run writer context
     mock_writer_context = Mock()
-    mock_writer.project_writer.return_value.__enter__ = Mock(
+    mock_writer.run_writer.return_value.__enter__ = Mock(
         return_value=mock_writer_context
     )
-    mock_writer.project_writer.return_value.__exit__ = Mock(return_value=None)
+    mock_writer.run_writer.return_value.__exit__ = Mock(return_value=None)
 
     # Mock exporter methods to return empty generators
     mock_exporter.download_parameters.return_value = []
@@ -205,10 +212,20 @@ def test_export_manager_integration_with_real_files():
             schema=model.SCHEMA,
         )
 
-        # Write existing data
+        # Write existing data (complete runs with part_0)
         project_dir = temp_path / "test-project"
         project_dir.mkdir()
-        pq.write_table(existing_data, project_dir / "part_0.parquet")
+        # Create complete runs (with part_0)
+        run_123_mask = pc.equal(existing_data["run_id"], "RUN-123")
+        run_456_mask = pc.equal(existing_data["run_id"], "RUN-456")
+        pq.write_table(
+            existing_data.filter(run_123_mask),
+            project_dir / "RUN-123_part_0.parquet",
+        )
+        pq.write_table(
+            existing_data.filter(run_456_mask),
+            project_dir / "RUN-456_part_0.parquet",
+        )
 
         # Create mock exporter
         mock_exporter = Mock()
@@ -235,7 +252,8 @@ def test_export_manager_integration_with_real_files():
         )
 
         # Verify existing data is still there
-        assert (project_dir / "part_0.parquet").exists()
+        assert (project_dir / "RUN-123_part_0.parquet").exists()
+        assert (project_dir / "RUN-456_part_0.parquet").exists()
 
         # Should return 3 since it returns total runs found, not processed
         assert result == 3

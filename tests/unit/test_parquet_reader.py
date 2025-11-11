@@ -141,35 +141,35 @@ def test_read_project_data():
         assert filtered_data[0]["run_id"][0].as_py() == "RUN-123"
 
 
-def test_get_unique_run_ids():
-    """Test getting unique run IDs from parquet files."""
+def test_check_run_exists():
+    """Test checking if a run exists."""
     with TemporaryDirectory() as temp_dir:
         temp_path = Path(temp_dir)
 
-        # Create test data with multiple runs
+        # Create test data for a single run
         test_data = pd.DataFrame(
             {
-                "project_id": ["test-project", "test-project", "test-project"],
-                "run_id": ["RUN-123", "RUN-456", "RUN-123"],  # RUN-123 appears twice
-                "attribute_path": ["test/param1", "test/param2", "test/param3"],
-                "attribute_type": ["string", "float", "int"],
-                "step": [None, None, None],
-                "timestamp": [None, None, None],
-                "int_value": [None, None, 42],
-                "float_value": [None, 3.14, None],
-                "string_value": ["test_value", None, None],
-                "bool_value": [None, None, None],
-                "datetime_value": [None, None, None],
-                "string_set_value": [None, None, None],
-                "file_value": [None, None, None],
-                "histogram_value": [None, None, None],
+                "project_id": ["test-project"],
+                "run_id": ["RUN-123"],
+                "attribute_path": ["test/param1"],
+                "attribute_type": ["string"],
+                "step": [None],
+                "timestamp": [None],
+                "int_value": [None],
+                "float_value": [None],
+                "string_value": ["test_value"],
+                "bool_value": [None],
+                "datetime_value": [None],
+                "string_set_value": [None],
+                "file_value": [None],
+                "histogram_value": [None],
             }
         )
 
-        # Create project directory and parquet file
+        # Create project directory and parquet file with new naming scheme
         project_dir = temp_path / "test-project"
         project_dir.mkdir()
-        parquet_file = project_dir / "part_0.parquet"
+        parquet_file = project_dir / "RUN-123_part_0.parquet"
 
         table = pa.Table.from_pandas(test_data, schema=model.SCHEMA)
         pq.write_table(table, parquet_file)
@@ -177,20 +177,27 @@ def test_get_unique_run_ids():
         # Test reader
         reader = ParquetReader(temp_path)
 
-        # Test with data
-        run_ids = reader.get_unique_run_ids(project_dir)
-        assert run_ids == {"RUN-123", "RUN-456"}
+        # Test that existing run is found
+        assert reader.check_run_exists("test-project", "RUN-123"), (
+            "Existing run should be found"
+        )
+
+        # Test that non-existent run is not found
+        assert not reader.check_run_exists("test-project", "RUN-456"), (
+            "Non-existent run should not be found"
+        )
+
+        # Test with non-existent project
+        assert not reader.check_run_exists("non-existent-project", "RUN-123"), (
+            "Non-existent project should return False"
+        )
 
         # Test with empty directory
         empty_dir = temp_path / "empty-project"
         empty_dir.mkdir()
-        run_ids = reader.get_unique_run_ids(empty_dir)
-        assert run_ids == set()
-
-        # Test with non-existent directory
-        non_existent_dir = temp_path / "non-existent"
-        run_ids = reader.get_unique_run_ids(non_existent_dir)
-        assert run_ids == set()
+        assert not reader.check_run_exists("empty-project", "RUN-123"), (
+            "Empty project should return False"
+        )
 
 
 def test_read_project_data_with_attribute_type_filter():

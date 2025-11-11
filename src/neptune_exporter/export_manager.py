@@ -62,30 +62,29 @@ class ExportManager:
         for project_id, run_ids in tqdm(
             project_runs.items(), desc="Exporting projects", unit="project"
         ):
-            # Skip already-exported runs
-            sanitized_project_id = sanitize_path_part(project_id)
-            project_dir = self._writer.base_path / sanitized_project_id
-            existing_runs = self._reader.get_unique_run_ids(project_dir)
-
-            if existing_runs:
-                original_count = len(run_ids)
-                run_ids = [rid for rid in run_ids if rid not in existing_runs]
-                skipped = original_count - len(run_ids)
-                if skipped > 0:
-                    tqdm.write(
-                        f"Skipping {skipped} already exported run(s) in {project_id}"
-                    )
+            # Filter out already-exported runs
+            original_count = len(run_ids)
+            run_ids = [
+                rid
+                for rid in run_ids
+                if not self._reader.check_run_exists(project_id, rid)
+            ]
+            skipped = original_count - len(run_ids)
+            if skipped > 0:
+                tqdm.write(
+                    f"Skipping {skipped} already exported run(s) in {project_id}"
+                )
 
             if not run_ids:
                 continue  # All runs already exported or deleted, skip to next project
 
-            with self._writer.project_writer(project_id) as writer:
-                for run_id in tqdm(
-                    run_ids,
-                    desc=f"Exporting runs from {project_id}",
-                    unit="run",
-                    leave=False,
-                ):
+            for run_id in tqdm(
+                run_ids,
+                desc=f"Exporting runs from {project_id}",
+                unit="run",
+                leave=False,
+            ):
+                with self._writer.run_writer(project_id, run_id) as writer:
                     if "parameters" in export_classes:
                         with tqdm(
                             desc=f"  Parameters for {run_id}",
@@ -146,8 +145,5 @@ class ExportManager:
                             ):
                                 writer.save(batch)
                                 pbar.update(batch.num_rows)
-
-                    # Signal run is complete - check size and close part if needed
-                    writer.finish_run()
 
         return total_runs

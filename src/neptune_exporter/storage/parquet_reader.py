@@ -21,6 +21,7 @@ from typing import Generator, Optional
 import logging
 
 from neptune_exporter import model
+from neptune_exporter.utils import sanitize_path_part
 
 
 class ParquetReader:
@@ -48,7 +49,10 @@ class ParquetReader:
         runs: Optional[list[str]] = None,
         attribute_types: Optional[list[str]] = None,
     ) -> Generator[pa.Table, None, None]:
-        """Read all data for a project, optionally filtered by project ids, runs and attribute types."""
+        """Read all data for a project, optionally filtered by project ids, runs and attribute types.
+
+        Only reads complete parquet files (excludes .tmp files).
+        """
         parquet_files = self._list_parquet_files_in_project(project_directory)
 
         if not parquet_files:
@@ -80,38 +84,40 @@ class ParquetReader:
                 self._logger.error(f"Error reading parquet file {file_path}: {e}")
                 continue
 
-    def get_unique_run_ids(self, project_directory: Path) -> set[str]:
-        """Get set of unique run_ids present in parquet files for a project directory.
+    def check_run_exists(self, project_id: str, run_id: str) -> bool:
+        """Check if a run exists and is complete (has part_0.parquet).
 
         Args:
-            project_directory: Path to the project directory containing parquet files
+            project_id: The project ID
+            run_id: The run ID
 
         Returns:
-            Set of run_ids found in the parquet files, empty set if no files exist
+            True if the run exists and is complete (has part_0.parquet), False otherwise
         """
-        parquet_files = self._list_parquet_files_in_project(project_directory)
-        if not parquet_files:
-            return set()
+        sanitized_project_id = sanitize_path_part(project_id)
+        sanitized_run_id = sanitize_path_part(run_id)
 
-        run_ids = set()
-        for file_path in parquet_files:
-            try:
-                # Read only run_id column for efficiency
-                table = pq.read_table(file_path, columns=["run_id"])
-                run_ids.update(pc.unique(table["run_id"]).to_pylist())
-            except Exception as e:
-                self._logger.warning(f"Could not read run_ids from {file_path}: {e}")
-                continue
+        project_directory = self.base_path / sanitized_project_id
+        if not project_directory.exists():
+            return False
 
-        return run_ids
+        # Check if part_0 file exists for this run
+        part_0_file = project_directory / f"{sanitized_run_id}_part_0.parquet"
+        return part_0_file.exists()
 
     def _list_parquet_files_in_project(self, project_directory: Path) -> list[Path]:
-        """List all parquet files for a given project."""
+        """List all parquet files for a given project.
+
+        Matches pattern run_id_part_N.parquet. The glob pattern automatically
+        excludes .tmp files since they end with .parquet.tmp, not .parquet.
+        """
         if not project_directory.exists():
             return []
 
         parquet_files = []
-        for file_path in project_directory.glob("part_*.parquet"):
+        # Match pattern: *_part_*.parquet (run_id_part_N.parquet)
+        # This automatically excludes .tmp files (which end with .parquet.tmp)
+        for file_path in project_directory.glob("*_part_*.parquet"):
             parquet_files.append(file_path)
 
         return sorted(parquet_files)
