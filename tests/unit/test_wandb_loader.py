@@ -404,6 +404,102 @@ def test_upload_artifacts_histogram_series():
         assert edges == [0.0, 1.0, 2.0]
 
 
+def test_upload_artifacts_file_set():
+    """Test file_set artifact upload (directory)."""
+    loader = WandBLoader()
+
+    mock_run = Mock()
+    loader._active_run = mock_run
+
+    test_data = pd.DataFrame(
+        {
+            "attribute_path": ["test/file_set1", "test/file_set2"],
+            "attribute_type": ["file_set", "file_set"],
+            "file_value": [
+                {"path": "file_set1_dir"},
+                {"path": "file_set2_dir"},
+            ],
+        }
+    )
+
+    with (
+        patch("pathlib.Path.exists", return_value=True),
+        patch("pathlib.Path.is_file", return_value=False),
+        patch("pathlib.Path.is_dir", return_value=True),
+        patch("wandb.Artifact", spec=wandb.Artifact) as mock_artifact_class,
+    ):
+        mock_artifact = Mock()
+        mock_artifact_class.return_value = mock_artifact
+
+        files_base_path = Path("/test/files")
+        loader.upload_artifacts(
+            test_data, "RUN-123", files_base_path, step_multiplier=1
+        )
+
+        # Verify artifacts were created and logged
+        assert mock_artifact_class.call_count == 2
+        assert mock_run.log_artifact.call_count == 2
+
+        # Verify artifact types are set correctly
+        calls = mock_artifact_class.call_args_list
+        assert calls[0][1]["type"] == "file_set"
+        assert calls[1][1]["type"] == "file_set"
+
+        # Verify add_dir was called (not add_file) for directories
+        assert mock_artifact.add_dir.call_count == 2
+        assert mock_artifact.add_file.call_count == 0
+
+
+def test_upload_artifacts_artifact_type():
+    """Test artifact type upload (JSON file containing artifact metadata)."""
+    loader = WandBLoader()
+
+    mock_run = Mock()
+    loader._active_run = mock_run
+
+    test_data = pd.DataFrame(
+        {
+            "attribute_path": ["test/artifact1", "test/artifact2"],
+            "attribute_type": ["artifact", "artifact"],
+            "file_value": [
+                {"path": "project/run/test/artifact1/files_list.json"},
+                {"path": "project/run/test/artifact2/files_list.json"},
+            ],
+        }
+    )
+
+    with (
+        patch("pathlib.Path.exists", return_value=True),
+        patch("pathlib.Path.is_file", return_value=True),
+        patch("wandb.Artifact", spec=wandb.Artifact) as mock_artifact_class,
+    ):
+        mock_artifact = Mock()
+        mock_artifact_class.return_value = mock_artifact
+
+        files_base_path = Path("/test/files")
+        loader.upload_artifacts(
+            test_data, "RUN-123", files_base_path, step_multiplier=1
+        )
+
+        # Verify artifacts were created and logged
+        assert mock_artifact_class.call_count == 2
+        assert mock_run.log_artifact.call_count == 2
+
+        # Verify artifact types are set correctly
+        calls = mock_artifact_class.call_args_list
+        assert calls[0][1]["type"] == "artifact"
+        assert calls[1][1]["type"] == "artifact"
+
+        # Verify add_file was called (not add_dir) for files
+        assert mock_artifact.add_file.call_count == 2
+        assert mock_artifact.add_dir.call_count == 0
+
+        # Verify file paths
+        file_paths = [call[0][0] for call in mock_artifact.add_file.call_args_list]
+        assert "/test/files/project/run/test/artifact1/files_list.json" in file_paths
+        assert "/test/files/project/run/test/artifact2/files_list.json" in file_paths
+
+
 def test_upload_run_data():
     """Test uploading complete run data."""
     loader = WandBLoader()

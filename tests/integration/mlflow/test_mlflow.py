@@ -339,25 +339,41 @@ def test_mlflow_string_series_loaded(
     test_data_by_run_name = {run_data.run_id: run_data for run_data in TEST_RUNS}
 
     # Verify string series are logged as artifacts or text files
+    runs_with_string_series = 0
     for run in all_runs:
         # Match by run name instead of run_id (MLflow generates its own IDs)
         run_name = run.info.run_name
         test_data = test_data_by_run_name[run_name]
 
-        # String series may be logged as text artifacts
-        # Check that artifacts exist (they may be in subdirectories)
-        artifacts = mlflow_client.list_artifacts(run.info.run_id)
-        artifact_paths = {artifact.path for artifact in artifacts}
+        # Recursively list all artifacts to find nested paths
+        artifact_paths = _list_all_artifacts(mlflow_client, run.info.run_id)
 
-        # At least one string series should result in some artifact
-        # (exact mapping depends on MLflowLoader implementation)
-        if test_data.string_series:
-            # String series are typically logged as text files
-            # Verify there are some text artifacts
-            text_artifacts = [a for a in artifacts if a.path.endswith(".txt")]
-            assert len(text_artifacts) > 0 or len(artifact_paths) > 0, (
-                "Expected string series to create artifacts, but found none"
+        # Collect expected artifact paths (string series are logged as {sanitized_path}/series.txt)
+        expected_artifact_paths = set()
+        for attr_path in test_data.string_series.keys():
+            sanitized = _sanitize_attribute_name(attr_path)
+            # String series are logged at {sanitized_path}/series.txt
+            expected_artifact_paths.add(f"{sanitized}/series.txt")
+
+        if expected_artifact_paths:
+            runs_with_string_series += 1
+
+            # For each expected path, verify it exists
+            # String series artifacts are stored as {sanitized_path}/series.txt
+            missing_paths = []
+            for expected_path in expected_artifact_paths:
+                found = expected_path in artifact_paths
+                if not found:
+                    missing_paths.append(expected_path)
+
+            assert len(missing_paths) == 0, (
+                f"Missing string series artifact paths for run {run_name}: {missing_paths}. "
+                f"Expected: {expected_artifact_paths}, "
+                f"Found: {artifact_paths}"
             )
+
+    # At least one run should have string series
+    assert runs_with_string_series > 0
 
 
 def test_mlflow_histogram_series_loaded(
@@ -377,19 +393,38 @@ def test_mlflow_histogram_series_loaded(
     test_data_by_run_name = {run_data.run_id: run_data for run_data in TEST_RUNS}
 
     # Verify histogram series are logged as artifacts
+    runs_with_histogram_series = 0
     for run in all_runs:
         # Match by run name instead of run_id (MLflow generates its own IDs)
         run_name = run.info.run_name
         test_data = test_data_by_run_name[run_name]
 
-        # Histogram series are typically logged as JSON artifacts
-        artifacts = mlflow_client.list_artifacts(run.info.run_id)
-        artifact_paths = {artifact.path for artifact in artifacts}
+        # Recursively list all artifacts to find nested paths
+        artifact_paths = _list_all_artifacts(mlflow_client, run.info.run_id)
 
-        # At least one histogram series should result in some artifact
-        if test_data.histogram_series:
-            # Histograms are typically logged as JSON files
-            json_artifacts = [a for a in artifacts if a.path.endswith(".json")]
-            assert len(json_artifacts) > 0 or len(artifact_paths) > 0, (
-                "Expected histogram series to create artifacts, but found none"
+        # Collect expected artifact paths (histogram series are logged as {sanitized_path}/histograms.json)
+        expected_artifact_paths = set()
+        for attr_path in test_data.histogram_series.keys():
+            sanitized = _sanitize_attribute_name(attr_path)
+            # Histogram series are logged at {sanitized_path}/histograms.json
+            expected_artifact_paths.add(f"{sanitized}/histograms.json")
+
+        if expected_artifact_paths:
+            runs_with_histogram_series += 1
+
+            # For each expected path, verify it exists
+            # Histogram series artifacts are stored as {sanitized_path}/histograms.json
+            missing_paths = []
+            for expected_path in expected_artifact_paths:
+                found = expected_path in artifact_paths
+                if not found:
+                    missing_paths.append(expected_path)
+
+            assert len(missing_paths) == 0, (
+                f"Missing histogram series artifact paths for run {run_name}: {missing_paths}. "
+                f"Expected: {expected_artifact_paths}, "
+                f"Found: {artifact_paths}"
             )
+
+    # At least one run should have histogram series
+    assert runs_with_histogram_series > 0

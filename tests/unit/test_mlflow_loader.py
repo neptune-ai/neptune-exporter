@@ -383,6 +383,45 @@ def test_upload_artifacts_file_series():
         assert any("test/file_series/step_" in path for path in artifact_paths)
 
 
+def test_upload_artifacts_file_set():
+    """Test file_set artifact upload (directory)."""
+    loader = MLflowLoader()
+
+    # Create test data
+    test_data = pd.DataFrame(
+        {
+            "attribute_path": ["test/file_set1", "test/file_set2"],
+            "attribute_type": ["file_set", "file_set"],
+            "file_value": [
+                {"path": "file_set1_dir"},
+                {"path": "file_set2_dir"},
+            ],
+        }
+    )
+
+    with (
+        patch("mlflow.log_artifact", spec=mlflow.log_artifact) as mock_log_artifact,
+        patch("pathlib.Path.is_dir", return_value=True),
+    ):
+        files_base_path = Path("/test/files")
+        loader.upload_artifacts(
+            test_data, "RUN-123", files_base_path, step_multiplier=100
+        )
+
+        # Verify artifacts were logged
+        assert mock_log_artifact.call_count == 2
+
+        calls = mock_log_artifact.call_args_list
+        # file_sets use positional argument for local_path, not keyword
+        file_paths = [call[0][0] for call in calls]
+        artifact_paths = [call[1]["artifact_path"] for call in calls]
+
+        assert "/test/files/file_set1_dir" in file_paths
+        assert "/test/files/file_set2_dir" in file_paths
+        assert "test/file_set1" in artifact_paths
+        assert "test/file_set2" in artifact_paths
+
+
 def test_upload_artifacts_string_series():
     """Test string series artifact upload."""
     loader = MLflowLoader()
@@ -479,8 +518,8 @@ def test_upload_artifacts_artifact_type():
             "attribute_path": ["test/artifact1", "test/artifact2"],
             "attribute_type": ["artifact", "artifact"],
             "file_value": [
-                {"path": "project/run/test/artifact1/artifact_files_list.json"},
-                {"path": "project/run/test/artifact2/artifact_files_list.json"},
+                {"path": "project/run/test/artifact1/files_list.json"},
+                {"path": "project/run/test/artifact2/files_list.json"},
             ],
         }
     )
@@ -501,13 +540,7 @@ def test_upload_artifacts_artifact_type():
         file_paths = [call[1]["local_path"] for call in calls]
         artifact_paths = [call[1]["artifact_path"] for call in calls]
 
-        assert (
-            "/test/files/project/run/test/artifact1/artifact_files_list.json"
-            in file_paths
-        )
-        assert (
-            "/test/files/project/run/test/artifact2/artifact_files_list.json"
-            in file_paths
-        )
+        assert "/test/files/project/run/test/artifact1/files_list.json" in file_paths
+        assert "/test/files/project/run/test/artifact2/files_list.json" in file_paths
         assert "test/artifact1" in artifact_paths
         assert "test/artifact2" in artifact_paths
