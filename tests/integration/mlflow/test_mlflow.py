@@ -148,46 +148,40 @@ def test_mlflow_parameters_loaded(
 
         # Verify int parameter
         int_key = find_param("test/param/int")
-        if int_key:
-            # MLflow may store ints as "42" or "42.0", so compare numerically
-            assert float(params[int_key]) == float(test_data.params["test/param/int"])
+        # MLflow may store ints as "42" or "42.0", so compare numerically
+        assert float(params[int_key]) == float(test_data.params["test/param/int"])
 
         # Verify float parameter
         float_key = find_param("test/param/float")
-        if float_key:
-            # MLflow stores floats as strings, compare with tolerance
-            expected = test_data.params["test/param/float"]
-            actual = float(params[float_key])
-            assert abs(actual - expected) < 0.001
+        # MLflow stores floats as strings, compare with tolerance
+        expected = test_data.params["test/param/float"]
+        actual = float(params[float_key])
+        assert abs(actual - expected) < 0.001
 
         # Verify string parameter
         string_key = find_param("test/param/string")
-        if string_key:
-            assert params[string_key] == str(test_data.params["test/param/string"])
+        assert params[string_key] == str(test_data.params["test/param/string"])
 
         # Verify bool parameter
         bool_key = find_param("test/param/bool")
-        if bool_key:
-            # MLflow stores bools as strings
-            assert params[bool_key].lower() in ("true", "false")
-            assert (params[bool_key].lower() == "true") == test_data.params[
-                "test/param/bool"
-            ]
+        # MLflow stores bools as strings
+        assert params[bool_key].lower() in ("true", "false")
+        assert (params[bool_key].lower() == "true") == test_data.params[
+            "test/param/bool"
+        ]
 
         # Verify datetime parameter (MLflow may convert to string)
         datetime_key = find_param("test/param/datetime")
-        if datetime_key:
-            # Just verify it exists and is a string (datetime conversion format may vary)
-            assert isinstance(params[datetime_key], str)
-            assert len(params[datetime_key]) > 0
+        # Just verify it exists and is a string (datetime conversion format may vary)
+        assert isinstance(params[datetime_key], str)
+        assert len(params[datetime_key]) > 0
 
         # Verify string_set parameter (MLflow may convert to string representation)
         string_set_key = find_param("test/param/string_set")
-        if string_set_key:
-            # MLflow may store string_set as a JSON string or comma-separated
-            value = params[string_set_key]
-            assert isinstance(value, str)
-            assert len(value) > 0
+        # MLflow may store string_set as a JSON string or comma-separated
+        value = params[string_set_key]
+        assert isinstance(value, str)
+        assert len(value) > 0
 
 
 def test_mlflow_metrics_loaded(

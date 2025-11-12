@@ -23,6 +23,7 @@ from decimal import Decimal
 
 from neptune_exporter.storage.parquet_reader import ParquetReader
 from neptune_exporter import model
+from neptune_exporter.utils import sanitize_path_part
 
 
 def test_list_projects_empty_directory():
@@ -118,10 +119,14 @@ def test_read_project_data():
         )
 
         # Create project directory and parquet files with new naming pattern
-        project_dir = temp_path / "test-project"
+        project_dir = temp_path / sanitize_path_part("test-project")
         project_dir.mkdir()
-        parquet_file_run1 = project_dir / "RUN-123_part_0.parquet"
-        parquet_file_run2 = project_dir / "RUN-456_part_0.parquet"
+        parquet_file_run1 = (
+            project_dir / f"{sanitize_path_part('RUN-123')}_part_0.parquet"
+        )
+        parquet_file_run2 = (
+            project_dir / f"{sanitize_path_part('RUN-456')}_part_0.parquet"
+        )
 
         table_run1 = pa.Table.from_pandas(test_data_run1, schema=model.SCHEMA)
         table_run2 = pa.Table.from_pandas(test_data_run2, schema=model.SCHEMA)
@@ -173,9 +178,9 @@ def test_check_run_exists():
         )
 
         # Create project directory and parquet file with new naming scheme
-        project_dir = temp_path / "test-project"
+        project_dir = temp_path / sanitize_path_part("test-project")
         project_dir.mkdir()
-        parquet_file = project_dir / "RUN-123_part_0.parquet"
+        parquet_file = project_dir / f"{sanitize_path_part('RUN-123')}_part_0.parquet"
 
         table = pa.Table.from_pandas(test_data, schema=model.SCHEMA)
         pq.write_table(table, parquet_file)
@@ -232,9 +237,9 @@ def test_read_project_data_with_attribute_type_filter():
         )
 
         # Create project directory and parquet file with new naming pattern
-        project_dir = temp_path / "test-project"
+        project_dir = temp_path / sanitize_path_part("test-project")
         project_dir.mkdir()
-        parquet_file = project_dir / "RUN-123_part_0.parquet"
+        parquet_file = project_dir / f"{sanitize_path_part('RUN-123')}_part_0.parquet"
 
         table = pa.Table.from_pandas(test_data, schema=model.SCHEMA)
         pq.write_table(table, parquet_file)
@@ -263,7 +268,7 @@ def test_list_runs():
     """Test listing runs in a project."""
     with TemporaryDirectory() as temp_dir:
         temp_path = Path(temp_dir)
-        project_dir = temp_path / "test-project"
+        project_dir = temp_path / sanitize_path_part("test-project")
         project_dir.mkdir()
 
         # Create test data for two runs
@@ -305,8 +310,12 @@ def test_list_runs():
             }
         )
 
-        parquet_file_run1 = project_dir / "RUN-123_part_0.parquet"
-        parquet_file_run2 = project_dir / "RUN-456_part_0.parquet"
+        parquet_file_run1 = (
+            project_dir / f"{sanitize_path_part('RUN-123')}_part_0.parquet"
+        )
+        parquet_file_run2 = (
+            project_dir / f"{sanitize_path_part('RUN-456')}_part_0.parquet"
+        )
 
         table_run1 = pa.Table.from_pandas(test_data_run1, schema=model.SCHEMA)
         table_run2 = pa.Table.from_pandas(test_data_run2, schema=model.SCHEMA)
@@ -314,18 +323,19 @@ def test_list_runs():
         pq.write_table(table_run2, parquet_file_run2)
 
         reader = ParquetReader(temp_path)
-        runs = reader.list_runs(project_dir)
+        runs = reader.list_run_files(project_dir)
 
         assert len(runs) == 2
-        assert "RUN-123" in runs
-        assert "RUN-456" in runs
+        # list_runs returns sanitized run IDs (with digest suffix)
+        assert sanitize_path_part("RUN-123") in runs
+        assert sanitize_path_part("RUN-456") in runs
 
 
 def test_read_run_data():
     """Test reading run data part by part."""
     with TemporaryDirectory() as temp_dir:
         temp_path = Path(temp_dir)
-        project_dir = temp_path / "test-project"
+        project_dir = temp_path / sanitize_path_part("test-project")
         project_dir.mkdir()
 
         # Create test data split across two parts
@@ -367,8 +377,9 @@ def test_read_run_data():
             }
         )
 
-        parquet_file_part0 = project_dir / "RUN-123_part_0.parquet"
-        parquet_file_part1 = project_dir / "RUN-123_part_1.parquet"
+        sanitized_run_id = sanitize_path_part("RUN-123")
+        parquet_file_part0 = project_dir / f"{sanitized_run_id}_part_0.parquet"
+        parquet_file_part1 = project_dir / f"{sanitized_run_id}_part_1.parquet"
 
         table_part0 = pa.Table.from_pandas(test_data_part0, schema=model.SCHEMA)
         table_part1 = pa.Table.from_pandas(test_data_part1, schema=model.SCHEMA)
@@ -376,7 +387,7 @@ def test_read_run_data():
         pq.write_table(table_part1, parquet_file_part1)
 
         reader = ParquetReader(temp_path)
-        parts = list(reader.read_run_data(project_dir, "RUN-123"))
+        parts = list(reader.read_run_data(project_dir, sanitized_run_id))
 
         assert len(parts) == 2
         assert len(parts[0]) == 1

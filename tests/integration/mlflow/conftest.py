@@ -13,6 +13,7 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
+from collections import defaultdict
 import json
 import pathlib
 import tempfile
@@ -31,6 +32,7 @@ from neptune_exporter.loaders.mlflow_loader import MLflowLoader
 from neptune_exporter.loader_manager import LoaderManager
 from neptune_exporter.storage.parquet_reader import ParquetReader
 from .data import TEST_PROJECT_ID, TEST_RUNS, TEST_NOW
+from neptune_exporter.utils import sanitize_path_part
 
 
 def _create_base_row(
@@ -108,9 +110,9 @@ def test_data_dir() -> pathlib.Path:
     files_path.mkdir(parents=True)
 
     # Create project directory
-    project_dir = data_path / TEST_PROJECT_ID
+    project_dir = data_path / sanitize_path_part(TEST_PROJECT_ID)
     project_dir.mkdir(parents=True)
-    project_files_dir = files_path / TEST_PROJECT_ID
+    project_files_dir = files_path / sanitize_path_part(TEST_PROJECT_ID)
     project_files_dir.mkdir(parents=True)
 
     # Prepare test data from data.py
@@ -255,9 +257,6 @@ def test_data_dir() -> pathlib.Path:
 
     # Group rows by run_id and write separate files for each run
     # New naming pattern: {run_id}_part_0.parquet
-    from collections import defaultdict
-    from neptune_exporter.utils import sanitize_path_part
-
     rows_by_run = defaultdict(list)
     for row in all_rows:
         rows_by_run[row["run_id"]].append(row)

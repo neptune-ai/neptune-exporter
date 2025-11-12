@@ -14,6 +14,9 @@
 # limitations under the License.
 
 
+import hashlib
+
+
 def sanitize_path_part(part: str) -> str:
     """Sanitize a string to be safe for use in file paths.
 
@@ -28,10 +31,17 @@ def sanitize_path_part(part: str) -> str:
 
     Examples:
         >>> sanitize_path_part("org/project")
-        "org_project"
+        "org_project-12345678"
         >>> sanitize_path_part("my-project_123")
-        "my-project_123"
+        "my-project_123-12345678"
         >>> sanitize_path_part("test@#$%")
-        "test____"
+        "test____-12345678"
     """
-    return "".join(c if c.isalnum() or c in ("_", "-") else "_" for c in part)
+    return "".join(
+        c if c.isalnum() or c in ("_", "-") else "_" for c in part
+    ) + _digest_suffix(part)
+
+
+def _digest_suffix(string: str) -> str:
+    digest = hashlib.blake2b(string.encode("utf-8"), digest_size=8).hexdigest()
+    return "-" + digest

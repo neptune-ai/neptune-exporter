@@ -1,3 +1,4 @@
+import hashlib
 import pytest
 from neptune_exporter.utils import sanitize_path_part
 
@@ -21,6 +22,11 @@ from neptune_exporter.utils import sanitize_path_part
 def test_sanitize_path_part(input_str: str, expected: str):
     """Test the sanitize_path_part function with various inputs."""
     result = sanitize_path_part(input_str)
-    assert result == expected, (
-        f"Expected '{expected}', got '{result}' for input '{input_str}'"
+    expected_with_digest = (
+        expected
+        + "-"
+        + hashlib.blake2b(input_str.encode("utf-8"), digest_size=8).hexdigest()
+    )
+    assert result == expected_with_digest, (
+        f"Expected '{expected_with_digest}', got '{result}' for input '{input_str}'"
     )

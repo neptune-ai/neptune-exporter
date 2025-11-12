@@ -88,7 +88,7 @@ class ParquetReader:
 
         return sorted(project_directories)
 
-    def list_runs(
+    def list_run_files(
         self, project_directory: Path, run_ids: Optional[list[str]] = None
     ) -> list[str]:
         """List all complete runs (those with part_0) in a project.
@@ -130,22 +130,22 @@ class ParquetReader:
         Reads run-by-run, yielding parts separately (max 1 part in memory at once).
         Only reads complete runs (those with part_0.parquet).
         """
-        all_runs = self.list_runs(project_directory, runs)
+        all_run_file_prefixes = self.list_run_files(project_directory, runs)
 
-        if not all_runs:
+        if not all_run_file_prefixes:
             self._logger.warning(f"No runs found in {project_directory}")
             return
 
-        for run_id in all_runs:
+        for run_file_prefix in all_run_file_prefixes:
             for part_table in self.read_run_data(
-                project_directory, run_id, attribute_types
+                project_directory, run_file_prefix, attribute_types
             ):
                 yield part_table
 
     def read_run_data(
         self,
         project_directory: Path,
-        run_id: str,
+        run_file_prefix: str,
         attribute_types: Optional[list[str]] = None,
         attribute_paths: Optional[list[str]] = None,
     ) -> Generator[pa.Table, None, None]:
@@ -158,12 +158,12 @@ class ParquetReader:
         Yields:
             PyArrow Table for each part (part_0, part_1, part_2, ...)
         """
-        part_files = self._get_run_files(project_directory, run_id)
+        run_part_files = self._get_run_files(project_directory, run_file_prefix)
 
-        if not part_files:
+        if not run_part_files:
             return
 
-        for part_file in part_files:
+        for part_file in run_part_files:
             try:
                 table = pq.read_table(part_file, schema=model.SCHEMA)
                 table = self._filter_attributes(
@@ -175,16 +175,18 @@ class ParquetReader:
                     yield table
             except Exception as e:
                 self._logger.error(
-                    f"Error reading part file {part_file} for run {run_id}: {e}"
+                    f"Error reading part file {part_file} for run {run_file_prefix}: {e}"
                 )
                 continue
 
-    def _get_run_files(self, project_directory: Path, run_id: str) -> list[Path]:
+    def _get_run_files(
+        self, project_directory: Path, run_file_prefix: str
+    ) -> list[Path]:
         """Get sorted list of all part files for a specific run.
 
         Args:
             project_directory: The project directory
-            run_id: The run ID (will be sanitized)
+            run_id: The run ID (already sanitized with digest)
 
         Returns:
             Sorted list of part file paths (part_0, part_1, part_2, ...)
@@ -192,8 +194,7 @@ class ParquetReader:
         if not project_directory.exists():
             return []
 
-        sanitized_run_id = sanitize_path_part(run_id)
-        pattern = f"{sanitized_run_id}_part_*.parquet"
+        pattern = f"{run_file_prefix}_part_*.parquet"
 
         part_files = []
         for file_path in project_directory.glob(pattern):
@@ -228,7 +229,7 @@ class ParquetReader:
         return table
 
     def read_run_metadata(
-        self, project_directory: Path, run_id: str
+        self, project_directory: Path, run_file_prefix: str
     ) -> Optional[RunMetadata]:
         """Read metadata from a run by reading all parts sequentially.
 
@@ -239,7 +240,7 @@ class ParquetReader:
 
         Args:
             project_directory: The project directory
-            run_id: The run ID
+            run_file_prefix: The run file prefix
 
         Returns:
             RunMetadata object, or None if run doesn't exist
@@ -256,7 +257,7 @@ class ParquetReader:
         # Read all parts to find metadata (usually in part_0, but read all for robustness)
         for part_table in self.read_run_data(
             project_directory,
-            run_id,
+            run_file_prefix,
             attribute_paths=[
                 "sys/custom_run_id",
                 "sys/experiment/name",

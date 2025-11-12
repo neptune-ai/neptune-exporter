@@ -1,6 +1,7 @@
 import pyarrow as pa
 from pathlib import Path
 from neptune_exporter.storage.parquet_writer import ParquetWriter
+from neptune_exporter.utils import sanitize_path_part
 
 
 def test_parquet_writer_init():
@@ -33,7 +34,11 @@ def test_parquet_writer_save(temp_dir):
         # Context manager will call finish_run() on exit
 
     # Check if file was created with new naming scheme
-    expected_file = base_path / "test-project" / "test-run_part_0.parquet"
+    expected_file = (
+        base_path
+        / sanitize_path_part("test-project")
+        / f"{sanitize_path_part('test-run')}_part_0.parquet"
+    )
     assert expected_file.exists()
 
 
@@ -59,7 +64,11 @@ def test_parquet_writer_context_manager(temp_dir):
         # Context manager will call finish_run() on exit
 
     # Check if file was created
-    expected_file = base_path / "test-project" / "test-run_part_0.parquet"
+    expected_file = (
+        base_path
+        / sanitize_path_part("test-project")
+        / f"{sanitize_path_part('test-run')}_part_0.parquet"
+    )
     assert expected_file.exists()
 
 
@@ -92,11 +101,13 @@ def test_parquet_writer_part_splitting(temp_dir):
     storage.close_all()
 
     # Check that multiple parts were created
-    project_dir = base_path / "test-project"
+    project_dir = base_path / sanitize_path_part("test-project")
     assert project_dir.exists()
 
     # List all parquet files for this run
-    parquet_files = list(project_dir.glob("test-run_part_*.parquet"))
+    parquet_files = list(
+        project_dir.glob(f"{sanitize_path_part('test-run')}_part_*.parquet")
+    )
     assert len(parquet_files) > 1, (
         f"Expected multiple parts, but found {len(parquet_files)} files: {parquet_files}"
     )
@@ -122,7 +133,7 @@ def test_parquet_writer_part_splitting(temp_dir):
         assert file_path.stat().st_size > 0, f"Part file {file_path} is empty"
 
     # Verify part_0 exists (run is complete)
-    part_0_file = project_dir / "test-run_part_0.parquet"
+    part_0_file = project_dir / f"{sanitize_path_part('test-run')}_part_0.parquet"
     assert part_0_file.exists(), "part_0 should exist for complete run"
 
 
@@ -156,17 +167,19 @@ def test_parquet_writer_runs_dont_split_across_parts(temp_dir):
     storage.close_all()
 
     # Check that parts were created for run-A
-    project_dir = base_path / "test-project"
+    project_dir = base_path / sanitize_path_part("test-project")
     assert project_dir.exists()
 
-    parquet_files = list(project_dir.glob("run-A_part_*.parquet"))
+    parquet_files = list(
+        project_dir.glob(f"{sanitize_path_part('run-A')}_part_*.parquet")
+    )
     # Should have at least 1 part (may have multiple if size limit exceeded)
     assert len(parquet_files) >= 1, (
         f"Expected at least one part for run-A, but found {len(parquet_files)} files: {parquet_files}"
     )
 
     # Verify part_0 exists (run is complete)
-    part_0_file = project_dir / "run-A_part_0.parquet"
+    part_0_file = project_dir / f"{sanitize_path_part('run-A')}_part_0.parquet"
     assert part_0_file.exists(), "part_0 should exist for complete run"
 
     # Verify the file is not empty
@@ -198,7 +211,11 @@ def test_parquet_writer_sanitizes_project_id(temp_dir):
         # Context manager will call finish_run() on exit
 
     # The file should be created with sanitized project ID and run ID
-    expected_file = base_path / "org_project" / "run_with_slashes_part_0.parquet"
+    expected_file = (
+        base_path
+        / sanitize_path_part("org/project")
+        / f"{sanitize_path_part('run/with/slashes')}_part_0.parquet"
+    )
     assert expected_file.exists(), (
         f"Expected file at {expected_file}, but it doesn't exist"
     )
@@ -234,12 +251,14 @@ def test_parquet_writer_renaming_moves_part_0_last(temp_dir):
         # Context manager will call finish_run() on exit
 
     # Verify part_0 exists (moved last)
-    project_dir = base_path / "test-project"
-    part_0_file = project_dir / "test-run_part_0.parquet"
+    project_dir = base_path / sanitize_path_part("test-project")
+    part_0_file = project_dir / f"{sanitize_path_part('test-run')}_part_0.parquet"
     assert part_0_file.exists(), "part_0 should exist after renaming"
 
     # Verify no .tmp files remain
-    tmp_files = list(project_dir.glob("*.tmp"))
+    tmp_files = list(
+        project_dir.glob(f"{sanitize_path_part('test-run')}_part_*.parquet.tmp")
+    )
     assert len(tmp_files) == 0, f"No .tmp files should remain, found: {tmp_files}"
 
 
@@ -308,14 +327,18 @@ def test_parquet_writer_cleanup_incomplete_run(temp_dir):
         }
     )
 
-    project_dir = base_path / "test-project"
+    project_dir = base_path / sanitize_path_part("test-project")
     project_dir.mkdir(parents=True)
 
     # Manually create some leftover .tmp files (simulating interrupted write)
     import pyarrow.parquet as pq
 
-    leftover_file_1 = project_dir / "test-run_part_0.parquet.tmp"
-    leftover_file_2 = project_dir / "test-run_part_1.parquet.tmp"
+    leftover_file_1 = (
+        project_dir / f"{sanitize_path_part('test-run')}_part_0.parquet.tmp"
+    )
+    leftover_file_2 = (
+        project_dir / f"{sanitize_path_part('test-run')}_part_1.parquet.tmp"
+    )
     pq.write_table(pa.Table.from_batches([data]), leftover_file_1)
     pq.write_table(pa.Table.from_batches([data]), leftover_file_2)
 
@@ -333,5 +356,5 @@ def test_parquet_writer_cleanup_incomplete_run(temp_dir):
     assert not leftover_file_2.exists(), "Leftover .tmp file should be deleted"
 
     # Verify new file was created
-    final_file = project_dir / "test-run_part_0.parquet"
+    final_file = project_dir / f"{sanitize_path_part('test-run')}_part_0.parquet"
     assert final_file.exists(), "New file should be created"

@@ -14,13 +14,18 @@
 # limitations under the License.
 
 from pathlib import Path
-from typing import Optional
+from typing import NewType, Optional
 from tqdm import tqdm
 import logging
 
 from neptune_exporter.storage.parquet_reader import ParquetReader, RunMetadata
 from neptune_exporter.loaders.loader import DataLoader
 from neptune_exporter.utils import sanitize_path_part
+
+
+SourceRunId = NewType("SourceRunId", str)
+TargetRunId = NewType("TargetRunId", str)
+RunFilePrefix = NewType("RunFilePrefix", str)
 
 
 class LoaderManager:
@@ -89,45 +94,51 @@ class LoaderManager:
         self._logger.info(f"Loading data from {project_directory} to target platform")
 
         # List all complete runs in the project
-        all_runs = self._parquet_reader.list_runs(project_directory, runs)
+        all_run_file_prefixes = self._parquet_reader.list_run_files(
+            project_directory, runs
+        )
 
-        if not all_runs:
+        if not all_run_file_prefixes:
             self._logger.warning(f"No complete runs found in {project_directory}")
             return
 
         # Track processed runs
-        processed_runs: set[str] = set()
+        processed_runs: set[RunFilePrefix] = set()
 
         # Track parent-child relationships for efficient lookup
-        parent_to_children: dict[str, list[str]] = {}
+        parent_to_children: dict[SourceRunId, list[RunFilePrefix]] = {}
 
         # Track target run IDs
-        run_id_to_target_run_id: dict[str, str] = {}
+        run_id_to_target_run_id: dict[SourceRunId, TargetRunId] = {}
 
         # Buffer runs waiting for their parent (store run IDs -> their metadata)
-        buffered_runs: dict[str, RunMetadata] = {}
+        buffered_runs: dict[RunFilePrefix, RunMetadata] = {}
 
         # Process runs one by one
-        for source_run_id in all_runs:
+        for source_run_file_prefix in all_run_file_prefixes:
             # Get project_id from first run's metadata if we don't have it yet
             metadata = self._parquet_reader.read_run_metadata(
-                project_directory, source_run_id
+                project_directory, source_run_file_prefix
             )
 
             if metadata is None:
                 self._logger.warning(
-                    f"Could not read metadata for run {source_run_id}, skipping"
+                    f"Could not read metadata for run {source_run_file_prefix}, skipping"
                 )
                 continue
 
-            parent_source_run_id = metadata.parent_source_run_id
+            parent_source_run_id = (
+                SourceRunId(metadata.parent_source_run_id)
+                if metadata.parent_source_run_id is not None
+                else None
+            )
 
             # Check if run can be processed immediately
             if parent_source_run_id is None or parent_source_run_id in processed_runs:
                 # Process immediately
                 self._process_run(
                     project_directory=project_directory,
-                    source_run_id=source_run_id,
+                    source_run_file_prefix=RunFilePrefix(source_run_file_prefix),
                     metadata=metadata,
                     processed_runs=processed_runs,
                     parent_to_children=parent_to_children,
@@ -136,22 +147,25 @@ class LoaderManager:
                 )
             else:
                 # Buffer for later (IDs and metadata, not data)
-                buffered_runs[source_run_id] = metadata
+                buffered_runs[RunFilePrefix(source_run_file_prefix)] = metadata
+
                 # Track parent-child relationship
                 if parent_source_run_id not in parent_to_children:
                     parent_to_children[parent_source_run_id] = []
-                parent_to_children[parent_source_run_id].append(source_run_id)
+                parent_to_children[parent_source_run_id].append(
+                    RunFilePrefix(source_run_file_prefix)
+                )
 
         # Process any remaining buffered runs (orphaned - parent not in dataset)
-        for source_run_id in list(buffered_runs.keys()):
+        for source_run_file_prefix in list(buffered_runs.keys()):
             try:
                 self._logger.warning(
-                    f"Processing orphaned run {source_run_id} (parent not found in dataset)"
+                    f"Processing orphaned run {source_run_file_prefix} (parent not found in dataset)"
                 )
-                metadata = buffered_runs[source_run_id]
+                metadata = buffered_runs[source_run_file_prefix]
                 self._process_run(
                     project_directory=project_directory,
-                    source_run_id=source_run_id,
+                    source_run_file_prefix=source_run_file_prefix,
                     metadata=metadata,
                     processed_runs=processed_runs,
                     parent_to_children=parent_to_children,
@@ -160,7 +174,7 @@ class LoaderManager:
                 )
             except Exception:
                 self._logger.error(
-                    f"Error processing orphaned run {source_run_id}",
+                    f"Error processing orphaned run {source_run_file_prefix}",
                     exc_info=True,
                 )
                 continue
@@ -168,12 +182,12 @@ class LoaderManager:
     def _process_run(
         self,
         project_directory: Path,
-        source_run_id: str,
+        source_run_file_prefix: RunFilePrefix,
         metadata: RunMetadata,
-        processed_runs: set[str],
-        parent_to_children: dict[str, list[str]],
-        run_id_to_target_run_id: dict[str, str],
-        buffered_runs: dict[str, RunMetadata],
+        processed_runs: set[RunFilePrefix],
+        parent_to_children: dict[SourceRunId, list[RunFilePrefix]],
+        run_id_to_target_run_id: dict[SourceRunId, TargetRunId],
+        buffered_runs: dict[RunFilePrefix, RunMetadata],
     ) -> None:
         """Process a single run and recursively process its buffered children.
 
@@ -181,7 +195,7 @@ class LoaderManager:
 
         Args:
             project_directory: Project directory
-            source_run_id: Source run ID from Neptune
+            source_run_file_prefix: Source run file prefix from Neptune
             metadata: Dictionary with run metadata (project_id, custom_run_id, etc.)
             processed_runs: Set of processed run IDs
             parent_to_children: Dictionary mapping parent to list of child IDs
@@ -189,15 +203,19 @@ class LoaderManager:
             buffered_runs: Dictionary of buffered runs waiting for parents (only IDs, not data)
         """
         project_id = metadata.project_id
-        original_run_id = metadata.run_id
+        original_run_id = SourceRunId(metadata.run_id)
         custom_run_id = metadata.custom_run_id or original_run_id
         experiment_name = metadata.experiment_name
-        parent_source_run_id = metadata.parent_source_run_id
+        parent_source_run_id = (
+            SourceRunId(metadata.parent_source_run_id)
+            if metadata.parent_source_run_id is not None
+            else None
+        )
         fork_step = metadata.fork_step
 
         # Read run data from disk (all parts), yielding one part at a time
         run_data_parts_generator = self._parquet_reader.read_run_data(
-            project_directory, source_run_id
+            project_directory, source_run_file_prefix
         )
 
         # Get or create experiment
@@ -211,7 +229,9 @@ class LoaderManager:
         # Get parent target run ID if parent exists
         parent_target_run_id = None
         if parent_source_run_id and parent_source_run_id in run_id_to_target_run_id:
-            parent_target_run_id = run_id_to_target_run_id[parent_source_run_id]
+            parent_target_run_id = run_id_to_target_run_id[
+                SourceRunId(parent_source_run_id)
+            ]
 
         # Create run in target platform
         target_run_id = self._data_loader.create_run(
@@ -222,7 +242,9 @@ class LoaderManager:
             fork_step=fork_step,
             step_multiplier=self._step_multiplier,
         )
-        run_id_to_target_run_id[source_run_id] = target_run_id
+        run_id_to_target_run_id[SourceRunId(original_run_id)] = TargetRunId(
+            target_run_id
+        )
 
         # Upload run data
         self._data_loader.upload_run_data(
@@ -233,16 +255,16 @@ class LoaderManager:
         )
 
         # Mark as processed
-        processed_runs.add(source_run_id)
+        processed_runs.add(source_run_file_prefix)
 
         # Recursively process all buffered children of this run
-        if source_run_id in parent_to_children:
-            for child_source_run_id in parent_to_children[source_run_id]:
-                if child_source_run_id in buffered_runs:
-                    child_metadata = buffered_runs.pop(child_source_run_id)
+        if original_run_id in parent_to_children:
+            for child_source_run_file_prefix in parent_to_children[original_run_id]:
+                if child_source_run_file_prefix in buffered_runs:
+                    child_metadata = buffered_runs.pop(child_source_run_file_prefix)
                     self._process_run(
                         project_directory=project_directory,
-                        source_run_id=child_source_run_id,
+                        source_run_file_prefix=child_source_run_file_prefix,
                         metadata=child_metadata,
                         processed_runs=processed_runs,
                         parent_to_children=parent_to_children,
