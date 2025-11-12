@@ -105,22 +105,20 @@ class ParquetWriter:
         """
         run_key = (project_id, run_id)
 
+        # Check if we need to create a new part
         if run_key not in self._run_writers:
             # Create first part for new run
             self._create_new_part(project_id, run_id, data)
-            return
-
-        writer_state = self._run_writers[run_key]
-
-        # Check if current part exceeds size limit and create new part if needed
-        if writer_state.get_compressed_size() > self._target_part_size_bytes:
-            # Close current part
-            writer_state.close()
-            # Create new part for this run
-            self._create_new_part(project_id, run_id, data)
-            return
+        else:
+            writer_state = self._run_writers[run_key]
+            # Check if current part exceeds size limit
+            if writer_state.get_compressed_size() > self._target_part_size_bytes:
+                # Close current part and create new part
+                writer_state.close()
+                self._create_new_part(project_id, run_id, data)
 
         # Write batch to current part
+        writer_state = self._run_writers[run_key]
         writer_state.writer.write_batch(data)
 
     def _cleanup_existing_parts(self, project_id: str, run_id: str) -> None:
@@ -202,9 +200,6 @@ class ParquetWriter:
                 current_part=current_part,
                 part_paths={current_part: table_path},
             )
-
-        # Write the data to the new part
-        writer.write_batch(data)
 
     def finish_run(self, project_id: str, run_id: str) -> None:
         """Signal that a run is complete.
