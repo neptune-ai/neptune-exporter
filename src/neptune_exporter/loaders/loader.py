@@ -16,7 +16,7 @@
 """Core loader protocol for data loading to target platforms."""
 
 from pathlib import Path
-from typing import Optional, Protocol
+from typing import Generator, Optional, Protocol
 import pyarrow as pa
 
 
@@ -62,31 +62,12 @@ class DataLoader(Protocol):
         """
         ...
 
-    def calculate_global_step_multiplier(
-        self, run_data: pa.Table, fork_step: Optional[float] = None
-    ) -> Optional[int]:
-        """
-        Calculate global step multiplier for converting decimal steps to integers.
-
-        Some loaders (like W&B) need a global multiplier across all series and fork_step.
-        Other loaders (like MLflow) calculate per-series and can return None.
-
-        Args:
-            run_data: PyArrow table containing run data
-            fork_step: Optional fork step to include in calculation
-
-        Returns:
-            Step multiplier (power of 10) or None if not needed/calculated globally
-        """
-        ...
-
     def upload_run_data(
         self,
-        run_data: pa.Table,
+        run_data: Generator[pa.Table, None, None],
         run_id: str,
         files_directory: Path,
-        fork_step: Optional[float] = None,
-        step_multiplier: Optional[int] = None,
+        step_multiplier: int,
     ) -> None:
         """
         Upload all data for a single run to the target platform.
@@ -95,8 +76,6 @@ class DataLoader(Protocol):
             run_data: PyArrow table containing run data
             run_id: Run ID in the target platform
             files_directory: Base directory for file artifacts
-            fork_step: Optional fork step if this is a forked run
-            step_multiplier: Optional step multiplier (calculated globally for W&B,
-                None for MLflow which calculates per-series)
+            step_multiplier: Step multiplier for converting decimal steps to integers
         """
         ...

@@ -229,12 +229,21 @@ def test_data_dir() -> pathlib.Path:
             row["file_value"] = {"path": dirname}
             all_rows.append(row)
 
-    # Create PyArrow table from all rows
-    table = pa.Table.from_pylist(all_rows, schema=model.SCHEMA)
+    # Group rows by run_id and write separate files for each run
+    # New naming pattern: {run_id}_part_0.parquet
+    from collections import defaultdict
+    from neptune_exporter.utils import sanitize_path_part
 
-    # Write to parquet file
-    parquet_file = project_dir / "part_0.parquet"
-    pq.write_table(table, parquet_file)
+    rows_by_run = defaultdict(list)
+    for row in all_rows:
+        rows_by_run[row["run_id"]].append(row)
+
+    # Write a separate parquet file for each run
+    for run_id, run_rows in rows_by_run.items():
+        run_table = pa.Table.from_pylist(run_rows, schema=model.SCHEMA)
+        sanitized_run_id = sanitize_path_part(run_id)
+        parquet_file = project_dir / f"{sanitized_run_id}_part_0.parquet"
+        pq.write_table(run_table, parquet_file)
 
     yield data_path
 
@@ -260,4 +269,5 @@ def loader_manager(
         parquet_reader=parquet_reader,
         data_loader=mlflow_loader,
         files_directory=files_directory,
+        step_multiplier=100,
     )

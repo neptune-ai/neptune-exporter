@@ -86,26 +86,6 @@ def test_get_experiment_name():
     )
 
 
-def test_determine_step_multiplier():
-    """Test step multiplier determination."""
-    loader = MLflowLoader()
-
-    # Test with decimal steps
-    steps_with_decimals = pd.Series([Decimal("1.0"), Decimal("2.5"), Decimal("3.14")])
-    multiplier = loader._determine_step_multiplier(steps_with_decimals)
-    assert multiplier == 100  # 10^2 for 2 decimal places
-
-    # Test with integer steps
-    steps_integers = pd.Series([Decimal("1"), Decimal("2"), Decimal("3")])
-    multiplier = loader._determine_step_multiplier(steps_integers)
-    assert multiplier == 1
-
-    # Test empty series
-    empty_steps = pd.Series([], dtype=object)
-    multiplier = loader._determine_step_multiplier(empty_steps)
-    assert multiplier == 1
-
-
 @patch("mlflow.get_experiment_by_name", spec=mlflow.get_experiment_by_name)
 @patch("mlflow.create_experiment", spec=mlflow.create_experiment)
 def test_create_experiment_new(mock_create, mock_get):
@@ -252,7 +232,7 @@ def test_upload_metrics():
         mock_client = Mock()
         mock_client_class.return_value = mock_client
 
-        loader.upload_metrics(test_data, "RUN-123")
+        loader.upload_metrics(test_data, "RUN-123", step_multiplier=100)
 
         # Verify log_batch was called twice (once for each metric group)
         assert mock_client.log_batch.call_count == 2
@@ -281,16 +261,23 @@ def test_upload_run_data():
     """Test uploading complete run data."""
     loader = MLflowLoader()
 
-    # Create test data
+    # Create test data with all required schema columns
     test_data = pd.DataFrame(
         {
+            "project_id": ["test-project"] * 3,
+            "run_id": ["RUN-123"] * 3,
             "attribute_path": ["test/param", "test/metric", "test/file"],
             "attribute_type": ["string", "float_series", "file"],
             "step": [None, Decimal("1.0"), None],
             "timestamp": [None, pd.Timestamp("2023-01-01"), None],
-            "string_value": ["test_value", None, None],
+            "int_value": [None, None, None],
             "float_value": [None, 0.5, None],
+            "string_value": ["test_value", None, None],
+            "bool_value": [None, None, None],
+            "datetime_value": [None, None, None],
+            "string_set_value": [None, None, None],
             "file_value": [None, None, {"path": "file.txt"}],
+            "histogram_value": [None, None, None],
         }
     )
 
@@ -307,12 +294,19 @@ def test_upload_run_data():
         mock_client = Mock()
         mock_client_class.return_value = mock_client
 
-        # Convert to PyArrow table
+        # Convert to PyArrow table with proper schema
         import pyarrow as pa
+        from neptune_exporter import model
 
-        table = pa.Table.from_pandas(test_data)
+        table = pa.Table.from_pandas(test_data, schema=model.SCHEMA)
 
-        loader.upload_run_data(table, "RUN-123", Path("/test/files"))
+        # upload_run_data now expects a generator of tables
+        def table_generator():
+            yield table
+
+        loader.upload_run_data(
+            table_generator(), "RUN-123", Path("/test/files"), step_multiplier=100
+        )
 
         # Verify methods were called
         mock_start_run.assert_called_once()
@@ -339,7 +333,9 @@ def test_upload_artifacts_files():
         patch("pathlib.Path.exists", return_value=True),
     ):
         files_base_path = Path("/test/files")
-        loader.upload_artifacts(test_data, "RUN-123", files_base_path)
+        loader.upload_artifacts(
+            test_data, "RUN-123", files_base_path, step_multiplier=100
+        )
 
         # Verify artifacts were logged
         assert mock_log_artifact.call_count == 2
@@ -373,7 +369,9 @@ def test_upload_artifacts_file_series():
         patch("pathlib.Path.exists", return_value=True),
     ):
         files_base_path = Path("/test/files")
-        loader.upload_artifacts(test_data, "RUN-123", files_base_path)
+        loader.upload_artifacts(
+            test_data, "RUN-123", files_base_path, step_multiplier=100
+        )
 
         # Verify artifacts were logged with step information
         assert mock_log_artifact.call_count == 2
@@ -412,7 +410,9 @@ def test_upload_artifacts_string_series():
         mock_temp_file.return_value.__enter__.return_value = mock_file
 
         files_base_path = Path("/test/files")
-        loader.upload_artifacts(test_data, "RUN-123", files_base_path)
+        loader.upload_artifacts(
+            test_data, "RUN-123", files_base_path, step_multiplier=100
+        )
 
         # Verify text was logged
         mock_log_text.assert_called_once()
@@ -421,8 +421,9 @@ def test_upload_artifacts_string_series():
 
         # Verify text content
         text_content = call_args[1]["text"]
-        assert "[1] value1" in text_content
-        assert "[2] value2" in text_content
+        # Steps are converted using step_multiplier (100), so 1.0 becomes 100, 2.0 becomes 200
+        assert "[100] value1" in text_content
+        assert "[200] value2" in text_content
 
 
 def test_upload_artifacts_histogram_series():
@@ -444,7 +445,9 @@ def test_upload_artifacts_histogram_series():
 
     with patch("mlflow.log_dict", spec=mlflow.log_dict) as mock_log_dict:
         files_base_path = Path("/test/files")
-        loader.upload_artifacts(test_data, "RUN-123", files_base_path)
+        loader.upload_artifacts(
+            test_data, "RUN-123", files_base_path, step_multiplier=100
+        )
 
         # Verify dict was logged
         mock_log_dict.assert_called_once()
@@ -459,7 +462,8 @@ def test_upload_artifacts_histogram_series():
         assert "histograms" in dictionary
         histogram_list = dictionary["histograms"]
         assert len(histogram_list) == 1
-        assert histogram_list[0]["step"] == 1
+        # Step is converted using step_multiplier (100), so 1.0 becomes 100
+        assert histogram_list[0]["step"] == 100
         assert histogram_list[0]["type"] == "histogram"
         assert histogram_list[0]["edges"] == [0.0, 1.0, 2.0]
         assert histogram_list[0]["values"] == [10, 20]

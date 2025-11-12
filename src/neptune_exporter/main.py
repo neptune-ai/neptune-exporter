@@ -284,6 +284,12 @@ def export(
     help="Run IDs to filter by. Can be specified multiple times.",
 )
 @click.option(
+    "--step-multiplier",
+    type=int,
+    help="Step multiplier for converting decimal steps to integers. Default: 10^6.",
+    default=10**6,
+)
+@click.option(
     "--loader",
     type=click.Choice(["mlflow", "wandb"], case_sensitive=False),
     default="mlflow",
@@ -316,6 +322,7 @@ def load(
     files_path: Path,
     project_ids: tuple[str, ...],
     runs: tuple[str, ...],
+    step_multiplier: int,
     loader: str,
     mlflow_tracking_uri: str | None,
     wandb_entity: str | None,
@@ -390,6 +397,7 @@ def load(
         parquet_reader=parquet_reader,
         data_loader=data_loader,
         files_directory=files_path,
+        step_multiplier=step_multiplier,
     )
 
     click.echo(f"Starting {loader_name} loading from {data_path.absolute()}")

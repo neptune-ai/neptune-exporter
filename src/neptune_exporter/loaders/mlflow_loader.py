@@ -18,7 +18,7 @@ import re
 import logging
 from decimal import Decimal
 from pathlib import Path
-from typing import Optional
+from typing import Generator, Optional
 import pandas as pd
 import pyarrow as pa
 import mlflow
@@ -95,24 +95,6 @@ class MLflowLoader:
             return 0
         return int(float(step) * step_multiplier)
 
-    def _determine_step_multiplier(self, steps: pd.Series) -> int:
-        """
-        Determine step multiplier based on actual data precision.
-
-        Since the data comes from decimal(18, 6) schema, we analyze the actual
-        precision used in the data to determine the appropriate multiplier.
-        """
-        valid_steps = steps.dropna()
-        if valid_steps.empty:
-            return 1
-
-        # Get decimal places for each step (only count negative exponents)
-        decimal_places = valid_steps.map(lambda step: -step.normalize().as_tuple()[2])
-
-        max_decimal_places = max(decimal_places.max(), 0)
-
-        return 10**max_decimal_places
-
     def create_experiment(self, project_id: str, experiment_name: str) -> str:
         """Create or get MLflow experiment for a Neptune project."""
         target_experiment_name = self._get_experiment_name(project_id, experiment_name)
@@ -170,45 +152,29 @@ class MLflowLoader:
             self._logger.error(f"Error creating run '{run_name}': {e}")
             raise
 
-    def calculate_global_step_multiplier(
-        self, run_data: pa.Table, fork_step: Optional[float] = None
-    ) -> Optional[int]:
-        """Calculate global step multiplier for MLflow.
-
-        MLflow calculates step multipliers per-series, so this returns None.
-
-        Args:
-            run_data: PyArrow table containing run data
-            fork_step: Ignored for MLflow (not used)
-
-        Returns:
-            None (MLflow calculates per-series)
-        """
-        return None
-
     def upload_run_data(
         self,
-        run_data: pa.Table,
+        run_data: Generator[pa.Table, None, None],
         run_id: str,
         files_directory: Path,
-        fork_step: Optional[float] = None,
-        step_multiplier: Optional[int] = None,
+        step_multiplier: int,
     ) -> None:
         """Upload all data for a single run to MLflow.
 
         Args:
-            fork_step: Ignored for MLflow (not used in parent relationships)
-            step_multiplier: Ignored for MLflow (calculates per-series)
+            step_multiplier: Step multiplier for converting decimal steps to integers
         """
         try:
             with mlflow.start_run(run_id=run_id):
-                run_df = run_data.to_pandas()
+                for run_data_part in run_data:
+                    run_df = run_data_part.to_pandas()
+                    self.upload_parameters(run_df, run_id)
+                    self.upload_metrics(run_df, run_id, step_multiplier)
+                    self.upload_artifacts(
+                        run_df, run_id, files_directory, step_multiplier
+                    )
 
-                self.upload_parameters(run_df, run_id)
-                self.upload_metrics(run_df, run_id)
-                self.upload_artifacts(run_df, run_id, files_directory)
-
-                self._logger.info(f"Successfully uploaded run {run_id} to MLflow")
+                    self._logger.info(f"Successfully uploaded run {run_id} to MLflow")
 
         except Exception as e:
             self._logger.error(f"Error uploading run {run_id}: {e}")
@@ -250,16 +216,15 @@ class MLflowLoader:
             mlflow.log_params(params)
             self._logger.info(f"Uploaded {len(params)} parameters for run {run_id}")
 
-    def upload_metrics(self, run_data: pd.DataFrame, run_id: str) -> None:
+    def upload_metrics(
+        self, run_data: pd.DataFrame, run_id: str, step_multiplier: int
+    ) -> None:
         """Upload metrics (float series) to MLflow run."""
         # Filter for float_series type
         metrics_data = run_data[run_data["attribute_type"] == "float_series"]
 
         if metrics_data.empty:
             return
-
-        # Determine step multiplier from actual data
-        step_multiplier = self._determine_step_multiplier(metrics_data["step"])
 
         mlflow_client = MlflowClient()
 
@@ -297,7 +262,11 @@ class MLflowLoader:
         self._logger.info(f"Uploaded metrics for run {run_id}")
 
     def upload_artifacts(
-        self, run_data: pd.DataFrame, run_id: str, files_base_path: Path
+        self,
+        run_data: pd.DataFrame,
+        run_id: str,
+        files_base_path: Path,
+        step_multiplier: int,
     ) -> None:
         """Upload files and series as artifacts to MLflow run."""
         # Handle regular files
@@ -317,7 +286,6 @@ class MLflowLoader:
         file_series_data = run_data[run_data["attribute_type"] == "file_series"]
         for attr_path, group in file_series_data.groupby("attribute_path"):
             attr_name = self._sanitize_attribute_name(attr_path)
-            step_multiplier = self._determine_step_multiplier(group["step"])
 
             for _, row in group.iterrows():
                 if pd.notna(row["file_value"]) and isinstance(row["file_value"], dict):
@@ -340,7 +308,6 @@ class MLflowLoader:
         string_series_data = run_data[run_data["attribute_type"] == "string_series"]
         for attr_path, group in string_series_data.groupby("attribute_path"):
             attr_name = self._sanitize_attribute_name(attr_path)
-            step_multiplier = self._determine_step_multiplier(group["step"])
 
             # Create a table-like structure
             series_text = []
@@ -365,7 +332,6 @@ class MLflowLoader:
         ]
         for attr_path, group in histogram_series_data.groupby("attribute_path"):
             attr_name = self._sanitize_attribute_name(attr_path)
-            step_multiplier = self._determine_step_multiplier(group["step"])
 
             # Prepare histogram data as JSON for better structure preservation
             histogram_data = []

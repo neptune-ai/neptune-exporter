@@ -96,26 +96,6 @@ def test_convert_step_to_int():
     assert loader._convert_step_to_int(Decimal("0"), 1000) == 0
 
 
-def test_determine_step_multiplier():
-    """Test step multiplier determination."""
-    loader = WandBLoader()
-
-    # Test with decimal steps
-    steps_with_decimals = pd.Series([Decimal("1.0"), Decimal("2.5"), Decimal("3.14")])
-    multiplier = loader._determine_step_multiplier(steps_with_decimals)
-    assert multiplier == 100
-
-    # Test with integer steps
-    steps_integers = pd.Series([Decimal("1"), Decimal("2"), Decimal("3")])
-    multiplier = loader._determine_step_multiplier(steps_integers)
-    assert multiplier == 1
-
-    # Test empty series
-    empty_steps = pd.Series([], dtype=object)
-    multiplier = loader._determine_step_multiplier(empty_steps)
-    assert multiplier == 1
-
-
 def test_create_experiment():
     """Test creating a W&B project (experiment)."""
     loader = WandBLoader(entity="test-entity")
@@ -428,20 +408,23 @@ def test_upload_run_data():
     """Test uploading complete run data."""
     loader = WandBLoader()
 
-    # Create test data
+    # Create test data with all required schema columns
     test_data = pd.DataFrame(
         {
+            "project_id": ["test-project"] * 3,
+            "run_id": ["RUN-123"] * 3,
             "attribute_path": ["test/param", "test/metric", "test/file"],
             "attribute_type": ["string", "float_series", "file"],
             "step": [None, Decimal("1.0"), None],
             "timestamp": [None, pd.Timestamp("2023-01-01"), None],
-            "string_value": ["test_value", None, None],
-            "float_value": [None, 0.5, None],
             "int_value": [None, None, None],
+            "float_value": [None, 0.5, None],
+            "string_value": ["test_value", None, None],
             "bool_value": [None, None, None],
             "datetime_value": [None, None, None],
             "string_set_value": [None, None, None],
             "file_value": [None, None, {"path": "file.txt"}],
+            "histogram_value": [None, None, None],
         }
     )
 
@@ -460,11 +443,19 @@ def test_upload_run_data():
         # Create run first
         loader.create_run("test-project", "test-run", "test-experiment")
 
-        # Convert to PyArrow table
-        table = pa.Table.from_pandas(test_data)
+        # Convert to PyArrow table with proper schema
+        from neptune_exporter import model
 
-        # Upload run data
-        loader.upload_run_data(table, "test-run-id", Path("/test/files"))
+        table = pa.Table.from_pandas(test_data, schema=model.SCHEMA)
+
+        # upload_run_data now expects a generator of tables
+        def table_generator():
+            yield table
+
+        # Upload run data with step_multiplier
+        loader.upload_run_data(
+            table_generator(), "test-run-id", Path("/test/files"), step_multiplier=100
+        )
 
         # Verify methods were called
         mock_run.config.update.assert_called_once()  # Parameters

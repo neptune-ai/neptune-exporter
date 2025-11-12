@@ -16,6 +16,7 @@
 import pandas as pd
 import pyarrow as pa
 import pyarrow.parquet as pq
+import pyarrow.compute as pc
 from pathlib import Path
 from tempfile import TemporaryDirectory
 from decimal import Decimal
@@ -72,72 +73,77 @@ def test_list_projects_with_data():
         assert projects[0].name == "test-project"
 
 
-def test_list_parquet_files():
-    """Test listing parquet files for a project."""
-    with TemporaryDirectory() as temp_dir:
-        temp_path = Path(temp_dir)
-        project_dir = temp_path / "test-project"
-        project_dir.mkdir()
-
-        # Create multiple parquet files
-        for i in range(3):
-            parquet_file = project_dir / f"part_{i}.parquet"
-            parquet_file.touch()
-
-        reader = ParquetReader(temp_path)
-        files = reader._list_parquet_files_in_project(project_dir)
-
-        assert len(files) == 3
-        assert all(
-            f.name.startswith("part_") and f.name.endswith(".parquet") for f in files
-        )
-
-
 def test_read_project_data():
     """Test reading project data with filters."""
     with TemporaryDirectory() as temp_dir:
         temp_path = Path(temp_dir)
 
-        # Create test data
-        test_data = pd.DataFrame(
+        # Create test data for two runs
+        test_data_run1 = pd.DataFrame(
             {
-                "project_id": ["test-project", "test-project"],
-                "run_id": ["RUN-123", "RUN-456"],
-                "attribute_path": ["test/param1", "test/param2"],
-                "attribute_type": ["string", "float"],
-                "step": [None, None],
-                "timestamp": [None, None],
-                "int_value": [None, None],
-                "float_value": [None, 3.14],
-                "string_value": ["test_value", None],
-                "bool_value": [None, None],
-                "datetime_value": [None, None],
-                "string_set_value": [None, None],
-                "file_value": [None, None],
-                "histogram_value": [None, None],
+                "project_id": ["test-project"],
+                "run_id": ["RUN-123"],
+                "attribute_path": ["test/param1"],
+                "attribute_type": ["string"],
+                "step": [None],
+                "timestamp": [None],
+                "int_value": [None],
+                "float_value": [None],
+                "string_value": ["test_value"],
+                "bool_value": [None],
+                "datetime_value": [None],
+                "string_set_value": [None],
+                "file_value": [None],
+                "histogram_value": [None],
             }
         )
 
-        # Create project directory and parquet file
+        test_data_run2 = pd.DataFrame(
+            {
+                "project_id": ["test-project"],
+                "run_id": ["RUN-456"],
+                "attribute_path": ["test/param2"],
+                "attribute_type": ["float"],
+                "step": [None],
+                "timestamp": [None],
+                "int_value": [None],
+                "float_value": [3.14],
+                "string_value": [None],
+                "bool_value": [None],
+                "datetime_value": [None],
+                "string_set_value": [None],
+                "file_value": [None],
+                "histogram_value": [None],
+            }
+        )
+
+        # Create project directory and parquet files with new naming pattern
         project_dir = temp_path / "test-project"
         project_dir.mkdir()
-        parquet_file = project_dir / "part_0.parquet"
+        parquet_file_run1 = project_dir / "RUN-123_part_0.parquet"
+        parquet_file_run2 = project_dir / "RUN-456_part_0.parquet"
 
-        table = pa.Table.from_pandas(test_data, schema=model.SCHEMA)
-        pq.write_table(table, parquet_file)
+        table_run1 = pa.Table.from_pandas(test_data_run1, schema=model.SCHEMA)
+        table_run2 = pa.Table.from_pandas(test_data_run2, schema=model.SCHEMA)
+        pq.write_table(table_run1, parquet_file_run1)
+        pq.write_table(table_run2, parquet_file_run2)
 
         # Test reader
         reader = ParquetReader(temp_path)
 
-        # Read all data
+        # Read all data (should yield parts separately)
         all_data = list(reader.read_project_data(project_dir))
-        assert len(all_data) == 1
-        assert len(all_data[0]) == 2
+        assert len(all_data) == 2  # Two parts (one per run)
+        # Check that we have data from both runs
+        all_run_ids = set()
+        for table in all_data:
+            run_ids = pc.unique(table["run_id"]).to_pylist()
+            all_run_ids.update(run_ids)
+        assert all_run_ids == {"RUN-123", "RUN-456"}
 
         # Read filtered data
         filtered_data = list(reader.read_project_data(project_dir, runs=["RUN-123"]))
-        assert len(filtered_data) == 1
-        assert len(filtered_data[0]) == 1
+        assert len(filtered_data) == 1  # One part for RUN-123
         assert filtered_data[0]["run_id"][0].as_py() == "RUN-123"
 
 
@@ -225,10 +231,10 @@ def test_read_project_data_with_attribute_type_filter():
             }
         )
 
-        # Create project directory and parquet file
+        # Create project directory and parquet file with new naming pattern
         project_dir = temp_path / "test-project"
         project_dir.mkdir()
-        parquet_file = project_dir / "part_0.parquet"
+        parquet_file = project_dir / "RUN-123_part_0.parquet"
 
         table = pa.Table.from_pandas(test_data, schema=model.SCHEMA)
         pq.write_table(table, parquet_file)
@@ -251,3 +257,184 @@ def test_read_project_data_with_attribute_type_filter():
         assert len(series_data) == 1
         assert len(series_data[0]) == 1
         assert series_data[0]["attribute_type"][0].as_py() == "float_series"
+
+
+def test_list_runs():
+    """Test listing runs in a project."""
+    with TemporaryDirectory() as temp_dir:
+        temp_path = Path(temp_dir)
+        project_dir = temp_path / "test-project"
+        project_dir.mkdir()
+
+        # Create test data for two runs
+        test_data_run1 = pd.DataFrame(
+            {
+                "project_id": ["test-project"],
+                "run_id": ["RUN-123"],
+                "attribute_path": ["test/param1"],
+                "attribute_type": ["string"],
+                "step": [None],
+                "timestamp": [None],
+                "int_value": [None],
+                "float_value": [None],
+                "string_value": ["test_value"],
+                "bool_value": [None],
+                "datetime_value": [None],
+                "string_set_value": [None],
+                "file_value": [None],
+                "histogram_value": [None],
+            }
+        )
+
+        test_data_run2 = pd.DataFrame(
+            {
+                "project_id": ["test-project"],
+                "run_id": ["RUN-456"],
+                "attribute_path": ["test/param2"],
+                "attribute_type": ["float"],
+                "step": [None],
+                "timestamp": [None],
+                "int_value": [None],
+                "float_value": [3.14],
+                "string_value": [None],
+                "bool_value": [None],
+                "datetime_value": [None],
+                "string_set_value": [None],
+                "file_value": [None],
+                "histogram_value": [None],
+            }
+        )
+
+        parquet_file_run1 = project_dir / "RUN-123_part_0.parquet"
+        parquet_file_run2 = project_dir / "RUN-456_part_0.parquet"
+
+        table_run1 = pa.Table.from_pandas(test_data_run1, schema=model.SCHEMA)
+        table_run2 = pa.Table.from_pandas(test_data_run2, schema=model.SCHEMA)
+        pq.write_table(table_run1, parquet_file_run1)
+        pq.write_table(table_run2, parquet_file_run2)
+
+        reader = ParquetReader(temp_path)
+        runs = reader.list_runs(project_dir)
+
+        assert len(runs) == 2
+        assert "RUN-123" in runs
+        assert "RUN-456" in runs
+
+
+def test_read_run_data():
+    """Test reading run data part by part."""
+    with TemporaryDirectory() as temp_dir:
+        temp_path = Path(temp_dir)
+        project_dir = temp_path / "test-project"
+        project_dir.mkdir()
+
+        # Create test data split across two parts
+        test_data_part0 = pd.DataFrame(
+            {
+                "project_id": ["test-project"],
+                "run_id": ["RUN-123"],
+                "attribute_path": ["test/param1"],
+                "attribute_type": ["string"],
+                "step": [None],
+                "timestamp": [None],
+                "int_value": [None],
+                "float_value": [None],
+                "string_value": ["value1"],
+                "bool_value": [None],
+                "datetime_value": [None],
+                "string_set_value": [None],
+                "file_value": [None],
+                "histogram_value": [None],
+            }
+        )
+
+        test_data_part1 = pd.DataFrame(
+            {
+                "project_id": ["test-project"],
+                "run_id": ["RUN-123"],
+                "attribute_path": ["test/param2"],
+                "attribute_type": ["string"],
+                "step": [None],
+                "timestamp": [None],
+                "int_value": [None],
+                "float_value": [None],
+                "string_value": ["value2"],
+                "bool_value": [None],
+                "datetime_value": [None],
+                "string_set_value": [None],
+                "file_value": [None],
+                "histogram_value": [None],
+            }
+        )
+
+        parquet_file_part0 = project_dir / "RUN-123_part_0.parquet"
+        parquet_file_part1 = project_dir / "RUN-123_part_1.parquet"
+
+        table_part0 = pa.Table.from_pandas(test_data_part0, schema=model.SCHEMA)
+        table_part1 = pa.Table.from_pandas(test_data_part1, schema=model.SCHEMA)
+        pq.write_table(table_part0, parquet_file_part0)
+        pq.write_table(table_part1, parquet_file_part1)
+
+        reader = ParquetReader(temp_path)
+        parts = list(reader.read_run_data(project_dir, "RUN-123"))
+
+        assert len(parts) == 2
+        assert len(parts[0]) == 1
+        assert len(parts[1]) == 1
+        assert parts[0]["attribute_path"][0].as_py() == "test/param1"
+        assert parts[1]["attribute_path"][0].as_py() == "test/param2"
+
+
+def test_read_run_metadata():
+    """Test reading run metadata."""
+    with TemporaryDirectory() as temp_dir:
+        temp_path = Path(temp_dir)
+        project_dir = temp_path / "test-project"
+        project_dir.mkdir()
+
+        # Create test data with metadata attributes
+        test_data = pd.DataFrame(
+            {
+                "project_id": ["test-project"] * 5,
+                "run_id": ["RUN-123"] * 5,
+                "attribute_path": [
+                    "sys/custom_run_id",
+                    "sys/experiment/name",
+                    "sys/forking/parent",
+                    "sys/forking/step",
+                    "test/param",
+                ],
+                "attribute_type": ["string", "string", "string", "float", "string"],
+                "step": [None, None, None, None, None],
+                "timestamp": [None, None, None, None, None],
+                "int_value": [None, None, None, None, None],
+                "float_value": [None, None, None, 10.5, None],
+                "string_value": [
+                    "custom-run-123",
+                    "my-experiment",
+                    "RUN-456",
+                    None,
+                    "test_value",
+                ],
+                "bool_value": [None, None, None, None, None],
+                "datetime_value": [None, None, None, None, None],
+                "string_set_value": [None, None, None, None, None],
+                "file_value": [None, None, None, None, None],
+                "histogram_value": [None, None, None, None, None],
+            }
+        )
+
+        parquet_file = project_dir / "RUN-123_part_0.parquet"
+        table = pa.Table.from_pandas(test_data, schema=model.SCHEMA)
+        pq.write_table(table, parquet_file)
+
+        reader = ParquetReader(temp_path)
+        metadata = reader.read_run_metadata(project_dir, "RUN-123")
+
+        assert metadata is not None
+        assert metadata.project_id == "test-project"
+        assert metadata.run_id == "RUN-123"
+        assert metadata.custom_run_id == "custom-run-123"
+        assert metadata.experiment_name == "my-experiment"
+        assert metadata.parent_source_run_id == "RUN-456"
+        assert metadata.fork_step == 10.5

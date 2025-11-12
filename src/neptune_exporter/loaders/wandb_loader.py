@@ -18,7 +18,7 @@ import re
 import logging
 from decimal import Decimal
 from pathlib import Path
-from typing import Optional, Any
+from typing import Generator, Optional, Any
 import pandas as pd
 import pyarrow as pa
 import wandb
@@ -105,66 +105,6 @@ class WandBLoader:
             return 0
         return int(float(step) * step_multiplier)
 
-    def _determine_step_multiplier(self, steps: pd.Series) -> int:
-        """
-        Determine step multiplier based on actual data precision.
-
-        Since the data comes from decimal(18, 6) schema, we analyze the actual
-        precision used in the data to determine the appropriate multiplier.
-        """
-        valid_steps = steps.dropna()
-        if valid_steps.empty:
-            return 1
-
-        # Get decimal places for each step (only count negative exponents)
-        decimal_places = valid_steps.map(lambda step: -step.normalize().as_tuple()[2])
-
-        max_decimal_places = max(decimal_places.max(), 0)
-
-        return 10**max_decimal_places
-
-    def calculate_global_step_multiplier(
-        self, run_data: pa.Table, fork_step: Optional[float] = None
-    ) -> Optional[int]:
-        """Calculate global step multiplier for W&B run.
-
-        W&B needs a global multiplier across all series and fork_step to ensure
-        consistent step conversion throughout the run.
-
-        Args:
-            run_data: PyArrow table containing run data
-            fork_step: Optional fork step to include in calculation
-
-        Returns:
-            Step multiplier (power of 10) calculated from all series + fork_step
-        """
-        run_df = run_data.to_pandas()
-        all_steps = []
-
-        # Collect steps from all series types at once
-        series_types = [
-            "float_series",
-            "string_series",
-            "histogram_series",
-            "file_series",
-        ]
-        series_data = run_df[run_df["attribute_type"].isin(series_types)]
-        if not series_data.empty and "step" in series_data.columns:
-            valid_steps = series_data["step"].dropna()
-            if not valid_steps.empty:
-                all_steps.extend(valid_steps.tolist())
-
-        # Add fork_step if provided
-        if fork_step is not None:
-            all_steps.append(Decimal(str(fork_step)))
-
-        if not all_steps:
-            return 1
-
-        # Calculate multiplier from all collected steps
-        steps_series = pd.Series(all_steps)
-        return self._determine_step_multiplier(steps_series)
-
     def create_experiment(self, project_id: str, experiment_name: str) -> str:
         """
         Neptune experiment_name maps to W&B group (set in create_run).
@@ -240,17 +180,15 @@ class WandBLoader:
 
     def upload_run_data(
         self,
-        run_data: pa.Table,
+        run_data: Generator[pa.Table, None, None],
         run_id: str,
         files_directory: Path,
-        fork_step: Optional[float] = None,
-        step_multiplier: Optional[int] = None,
+        step_multiplier: int,
     ) -> None:
         """Upload all data for a single run to W&B.
 
         Args:
-            fork_step: Optional fork step (used for logging context)
-            step_multiplier: Step multiplier from create_run (already calculated in LoaderManager)
+            step_multiplier: Step multiplier for converting decimal steps to integers
         """
         try:
             # Note: We assume the run is already active from create_run
@@ -261,20 +199,12 @@ class WandBLoader:
                 )
                 raise RuntimeError(f"Run {run_id} is not active")
 
-            run_df = run_data.to_pandas()
+            for run_data_part in run_data:
+                run_df = run_data_part.to_pandas()
 
-            # Use step_multiplier passed from LoaderManager (already calculated)
-            # Fallback to calculating if somehow not provided (shouldn't happen)
-            if step_multiplier is None:
-                step_multiplier = self.calculate_global_step_multiplier(
-                    run_data, fork_step
-                )
-                if step_multiplier is None:
-                    step_multiplier = 1
-
-            self.upload_parameters(run_df, run_id)
-            self.upload_metrics(run_df, run_id, step_multiplier)
-            self.upload_artifacts(run_df, run_id, files_directory, step_multiplier)
+                self.upload_parameters(run_df, run_id)
+                self.upload_metrics(run_df, run_id, step_multiplier)
+                self.upload_artifacts(run_df, run_id, files_directory, step_multiplier)
 
             # Finish the run
             self._active_run.finish()
