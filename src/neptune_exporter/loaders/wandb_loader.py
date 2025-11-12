@@ -306,13 +306,17 @@ class WandBLoader:
             raise RuntimeError("No active run")
 
         # Handle regular files
-        file_data = run_data[run_data["attribute_type"].isin(["file", "artifact"])]
+        file_data = run_data[
+            run_data["attribute_type"].isin(["file", "file_set", "artifact"])
+        ]
         for _, row in file_data.iterrows():
             if pd.notna(row["file_value"]) and isinstance(row["file_value"], dict):
                 file_path = files_base_path / row["file_value"]["path"]
                 if file_path.exists():
                     attr_name = self._sanitize_attribute_name(row["attribute_path"])
-                    artifact = wandb.Artifact(name=attr_name, type="file")
+                    artifact = wandb.Artifact(
+                        name=attr_name, type=row["attribute_type"]
+                    )
                     if file_path.is_file():
                         artifact.add_file(str(file_path))
                     else:
@@ -325,7 +329,6 @@ class WandBLoader:
         file_series_data = run_data[run_data["attribute_type"] == "file_series"]
         for attr_path, group in file_series_data.groupby("attribute_path"):
             attr_name = self._sanitize_attribute_name(attr_path)
-            # Use global step multiplier
 
             for _, row in group.iterrows():
                 if pd.notna(row["file_value"]) and isinstance(row["file_value"], dict):
