@@ -51,7 +51,7 @@ def get_test_runs() -> list[RunData]:
             RunData(
                 run_id=run_id,
                 params={
-                    "sys/experiment/name": TEST_EXPERIMENT_NAME,
+                    "sys/name": TEST_EXPERIMENT_NAME,
                     "test/param/int": 42 + i,
                     "test/param/float": 3.14 + i,
                     "test/param/string": f"test-value-{i}",

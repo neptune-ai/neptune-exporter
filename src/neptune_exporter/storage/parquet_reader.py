@@ -233,7 +233,7 @@ class ParquetReader:
     ) -> Optional[RunMetadata]:
         """Read metadata from a run by reading all parts sequentially.
 
-        Metadata fields: project_id, run_id, sys/custom_run_id, sys/experiment/name,
+        Metadata fields: project_id, run_id, sys/custom_run_id, sys/name,
         sys/forking/parent, sys/forking/step.
 
         Usually metadata is in part_0, but reads all parts if needed for robustness.
@@ -260,7 +260,7 @@ class ParquetReader:
             run_file_prefix,
             attribute_paths=[
                 "sys/custom_run_id",
-                "sys/experiment/name",
+                "sys/name",
                 "sys/forking/parent",
                 "sys/forking/step",
             ],
@@ -285,9 +285,7 @@ class ParquetReader:
                     metadata["custom_run_id"] = custom_run_id
 
             if metadata["experiment_name"] is None:
-                experiment_name = self._get_attribute_value(
-                    part_table, "sys/experiment/name"
-                )
+                experiment_name = self._get_attribute_value(part_table, "sys/name")
                 if experiment_name:
                     metadata["experiment_name"] = experiment_name
 

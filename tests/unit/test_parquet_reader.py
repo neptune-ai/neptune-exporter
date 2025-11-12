@@ -410,7 +410,7 @@ def test_read_run_metadata():
                 "run_id": ["RUN-123"] * 5,
                 "attribute_path": [
                     "sys/custom_run_id",
-                    "sys/experiment/name",
+                    "sys/name",
                     "sys/forking/parent",
                     "sys/forking/step",
                     "test/param",

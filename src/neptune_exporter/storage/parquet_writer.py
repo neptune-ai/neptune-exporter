@@ -30,7 +30,9 @@ class RunWriter:
     writer: pq.ParquetWriter
     current_file_path: Path
     current_part: int = 0
-    part_paths: list[Path] = field(default_factory=list)
+    part_paths: dict[int, Path] = field(
+        default_factory=dict
+    )  # part number -> file path
 
     def close(self) -> None:
         """Close the writer."""
@@ -170,9 +172,7 @@ class ParquetWriter:
 
         # Sanitize project_id and run_id for safe file path usage
         sanitized_project_id = sanitize_path_part(project_id)
-        sanitized_run_id = sanitize_path_part(
-            run_id
-        )  # !! can sanitization result in collisions?
+        sanitized_run_id = sanitize_path_part(run_id)
 
         # Create temporary file path: run_id_part_N.parquet.tmp
         table_path = (
@@ -191,7 +191,7 @@ class ParquetWriter:
             writer_state.writer = writer
             writer_state.current_file_path = table_path
             writer_state.current_part = current_part
-            writer_state.part_paths.append(table_path)
+            writer_state.part_paths[current_part] = table_path
         else:
             # Create new run writer
             self._run_writers[run_key] = RunWriter(
@@ -200,7 +200,7 @@ class ParquetWriter:
                 writer=writer,
                 current_file_path=table_path,
                 current_part=current_part,
-                part_paths=[table_path],
+                part_paths={current_part: table_path},
             )
 
         # Write the data to the new part
@@ -234,7 +234,7 @@ class ParquetWriter:
         # Rename all parts for this run
         self._rename_run_parts(part_paths)
 
-    def _rename_run_parts(self, part_paths: list[Path]) -> None:
+    def _rename_run_parts(self, part_paths: dict[int, Path]) -> None:
         """Rename all .tmp files to final location, moving part_0 last.
 
         Args:
@@ -243,25 +243,12 @@ class ParquetWriter:
         if not part_paths:
             return
 
-        # Sort parts by part number (extract from filename)
-        def get_part_number(path: Path) -> int:
-            # Extract part number from filename like "run_id_part_N.parquet.tmp"
-            stem = path.stem  # "run_id_part_N.parquet"
-            if stem.endswith(".parquet"):
-                stem = stem[:-8]  # Remove ".parquet"
-            # Split on "_part_" and get the last part
-            parts = stem.rsplit("_part_", 1)
-            if len(parts) == 2:
-                return int(parts[1])
-            raise ValueError(f"Could not extract part number from {path}")
-
-        sorted_parts = sorted(part_paths, key=get_part_number, reverse=True)
+        sorted_parts = sorted(part_paths.keys(), reverse=True)
 
         # Rename parts in reverse order, moving part_0 last to indicate completion
-        for part_path in sorted_parts:
-            # Remove .tmp extension
-            final_path = part_path.with_suffix("")  # Remove .tmp
-            part_path.rename(final_path)
+        for part_number in sorted_parts:
+            part_path = part_paths[part_number]
+            part_path.rename(part_path.with_suffix(""))
 
     def close_all(self) -> None:
         """Close all open writers."""
