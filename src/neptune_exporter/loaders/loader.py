@@ -13,16 +13,18 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
-"""Core loader protocol for data loading to target platforms."""
+"""Core loader abstract base class for data loading to target platforms."""
 
+from abc import ABC, abstractmethod
 from pathlib import Path
-from typing import Generator, Optional, Protocol
+from typing import Generator, Optional
 import pyarrow as pa
 
 
-class DataLoader(Protocol):
-    """Protocol for data loaders that upload Neptune data to target platforms."""
+class DataLoader(ABC):
+    """Abstract base class for data loaders that upload Neptune data to target platforms."""
 
+    @abstractmethod
     def create_experiment(self, project_id: str, experiment_name: str) -> str:
         """
         Create or get an experiment/project in the target platform.
@@ -34,8 +36,9 @@ class DataLoader(Protocol):
         Returns:
             Experiment/project ID in the target platform
         """
-        ...
+        pass
 
+    @abstractmethod
     def create_run(
         self,
         project_id: str,
@@ -60,8 +63,9 @@ class DataLoader(Protocol):
         Returns:
             Run ID in the target platform
         """
-        ...
+        pass
 
+    @abstractmethod
     def upload_run_data(
         self,
         run_data: Generator[pa.Table, None, None],
@@ -78,4 +82,4 @@ class DataLoader(Protocol):
             files_directory: Base directory for file artifacts
             step_multiplier: Step multiplier for converting decimal steps to integers
         """
-        ...
+        pass

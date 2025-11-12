@@ -26,8 +26,10 @@ from mlflow.tracking import MlflowClient
 from mlflow.entities import Metric
 from mlflow.utils.mlflow_tags import MLFLOW_PARENT_RUN_ID
 
+from neptune_exporter.loaders.loader import DataLoader
 
-class MLflowLoader:
+
+class MLflowLoader(DataLoader):
     """Loads Neptune data from parquet files into MLflow."""
 
     def __init__(

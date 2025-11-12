@@ -32,7 +32,7 @@ import neptune.exceptions
 from neptune import management
 
 from neptune_exporter import model
-from neptune_exporter.exporters.exporter import ProjectId, RunId
+from neptune_exporter.exporters.exporter import NeptuneExporter, ProjectId, RunId
 
 _ATTRIBUTE_TYPE_MAP = {
     na.String: "string",
@@ -68,7 +68,7 @@ _FILE_SET_TYPES: Sequence[str] = ("file_set",)
 _ARTIFACT_TYPES: Sequence[str] = ("artifact",)
 
 
-class Neptune2Exporter:
+class Neptune2Exporter(NeptuneExporter):
     def __init__(
         self,
         api_token: Optional[str] = None,

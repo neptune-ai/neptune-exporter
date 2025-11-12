@@ -27,7 +27,7 @@ from concurrent.futures import ThreadPoolExecutor, as_completed
 import logging
 
 from neptune_exporter import model
-from neptune_exporter.exporters.exporter import ProjectId, RunId
+from neptune_exporter.exporters.exporter import NeptuneExporter, ProjectId, RunId
 
 
 _PARAMETER_TYPES: Sequence[str] = (
@@ -47,7 +47,7 @@ _FILE_TYPES: Sequence[str] = ("file",)
 _FILE_SERIES_TYPES: Sequence[str] = ("file_series",)
 
 
-class Neptune3Exporter:
+class Neptune3Exporter(NeptuneExporter):
     def __init__(
         self,
         api_token: Optional[str] = None,

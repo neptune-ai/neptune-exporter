@@ -13,9 +13,10 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
-"""Core exporter protocol and types."""
+"""Core exporter abstract base class and types."""
 
-from typing import Generator, NewType, Optional, Protocol, Sequence
+from abc import ABC, abstractmethod
+from typing import Generator, NewType, Optional, Sequence
 from pathlib import Path
 import pyarrow as pa
 
@@ -24,19 +25,22 @@ ProjectId = NewType("ProjectId", str)
 RunId = NewType("RunId", str)
 
 
-class NeptuneExporter(Protocol):
-    """Protocol for Neptune data exporters."""
+class NeptuneExporter(ABC):
+    """Abstract base class for Neptune data exporters."""
 
+    @abstractmethod
     def list_projects(self) -> list[ProjectId]:
         """List Neptune projects."""
-        ...
+        pass
 
+    @abstractmethod
     def list_runs(
         self, project_id: ProjectId, runs: Optional[str] = None
     ) -> list[RunId]:
         """List Neptune runs."""
-        ...
+        pass
 
+    @abstractmethod
     def download_parameters(
         self,
         project_id: ProjectId,
@@ -44,8 +48,9 @@ class NeptuneExporter(Protocol):
         attributes: None | str | Sequence[str],
     ) -> Generator[pa.RecordBatch, None, None]:
         """Download parameters from Neptune runs."""
-        ...
+        pass
 
+    @abstractmethod
     def download_metrics(
         self,
         project_id: ProjectId,
@@ -53,8 +58,9 @@ class NeptuneExporter(Protocol):
         attributes: None | str | Sequence[str],
     ) -> Generator[pa.RecordBatch, None, None]:
         """Download metrics from Neptune runs."""
-        ...
+        pass
 
+    @abstractmethod
     def download_series(
         self,
         project_id: ProjectId,
@@ -62,8 +68,9 @@ class NeptuneExporter(Protocol):
         attributes: None | str | Sequence[str],
     ) -> Generator[pa.RecordBatch, None, None]:
         """Download series data from Neptune runs."""
-        ...
+        pass
 
+    @abstractmethod
     def download_files(
         self,
         project_id: ProjectId,
@@ -72,4 +79,4 @@ class NeptuneExporter(Protocol):
         destination: Path,
     ) -> Generator[pa.RecordBatch, None, None]:
         """Download files from Neptune runs."""
-        ...
+        pass

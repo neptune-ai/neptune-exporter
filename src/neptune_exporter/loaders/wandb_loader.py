@@ -23,8 +23,10 @@ import pandas as pd
 import pyarrow as pa
 import wandb
 
+from neptune_exporter.loaders.loader import DataLoader
 
-class WandBLoader:
+
+class WandBLoader(DataLoader):
     """Loads Neptune data from parquet files into Weights & Biases."""
 
     def __init__(
