@@ -1,5 +1,7 @@
 from typing import Generator
+import json
 import pyarrow as pa
+import pyarrow.compute as pc
 from neptune_exporter import model
 from neptune_exporter.exporters.neptune2 import Neptune2Exporter
 from .data import TEST_DATA
@@ -41,8 +43,6 @@ def test_neptune2_download_parameters(api_token, project, test_runs):
         for path in item.config.keys():
             expected_paths.add(path)
         for path in item.string_sets.keys():
-            expected_paths.add(path)
-        for path in item.artifacts.keys():
             expected_paths.add(path)
 
     actual_paths = set(parameters.column("attribute_path").to_pylist())
@@ -164,9 +164,32 @@ def test_neptune2_download_files(api_token, project, test_runs, temp_dir):
             expected_paths.add(path)
         for path in item.file_sets.keys():
             expected_paths.add(path)
+        for path in item.artifacts.keys():
+            expected_paths.add(path)
 
     actual_paths = set(files.column("attribute_path").to_pylist())
     assert expected_paths.issubset(actual_paths)
+
+    # Verify artifact JSON files are created and contain valid data
+    mask = pc.equal(files["attribute_type"], "artifact")
+    artifact_data = files.filter(mask)
+    for row in artifact_data.to_pylist():
+        file_path = temp_dir / row["file_value"]["path"]
+        assert file_path.exists(), f"Artifact JSON file not found: {file_path}"
+        assert file_path.name == "files_list.json", (
+            f"Expected files_list.json, got {file_path.name}"
+        )
+
+        # Verify JSON file is valid and contains expected structure
+        with open(file_path, "r") as f:
+            artifact_list = json.load(f)
+        assert isinstance(artifact_list, list), "Artifact list should be a list"
+        # Each item should have the expected structure from ArtifactFileData.to_dto()
+        for item in artifact_list:
+            assert "filePath" in item, "Artifact file data should have filePath"
+            assert "fileHash" in item, "Artifact file data should have fileHash"
+            assert "type" in item, "Artifact file data should have type"
+            assert "metadata" in item, "Artifact file data should have metadata"
 
 
 def _to_table(parameters: Generator[pa.RecordBatch, None, None]) -> pa.Table:

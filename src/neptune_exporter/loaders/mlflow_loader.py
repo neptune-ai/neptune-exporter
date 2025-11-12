@@ -270,7 +270,7 @@ class MLflowLoader:
     ) -> None:
         """Upload files and series as artifacts to MLflow run."""
         # Handle regular files
-        file_data = run_data[run_data["attribute_type"] == "file"]
+        file_data = run_data[run_data["attribute_type"].isin(["file", "artifact"])]
         for _, row in file_data.iterrows():
             if pd.notna(row["file_value"]) and isinstance(row["file_value"], dict):
                 file_path = files_base_path / row["file_value"]["path"]
@@ -303,6 +303,17 @@ class MLflowLoader:
                         mlflow.log_artifact(str(file_path), artifact_path=artifact_path)
                     else:
                         self._logger.warning(f"File not found: {file_path}")
+
+        # Handle file sets
+        file_sets_data = run_data[run_data["attribute_type"] == "file_set"]
+        for _, row in file_sets_data.iterrows():
+            if pd.notna(row["file_value"]) and isinstance(row["file_value"], dict):
+                file_set_path = files_base_path / row["file_value"]["path"]
+                if file_set_path.is_dir():
+                    attr_name = self._sanitize_attribute_name(row["attribute_path"])
+                    mlflow.log_artifact(str(file_set_path), artifact_path=attr_name)
+                else:
+                    self._logger.warning(f"File set not found: {file_set_path}")
 
         # Handle string series as text artifacts
         string_series_data = run_data[run_data["attribute_type"] == "string_series"]

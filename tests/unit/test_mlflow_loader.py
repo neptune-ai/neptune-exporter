@@ -467,3 +467,47 @@ def test_upload_artifacts_histogram_series():
         assert histogram_list[0]["type"] == "histogram"
         assert histogram_list[0]["edges"] == [0.0, 1.0, 2.0]
         assert histogram_list[0]["values"] == [10, 20]
+
+
+def test_upload_artifacts_artifact_type():
+    """Test artifact type upload (JSON file containing artifact metadata)."""
+    loader = MLflowLoader()
+
+    # Create test data with artifact type
+    test_data = pd.DataFrame(
+        {
+            "attribute_path": ["test/artifact1", "test/artifact2"],
+            "attribute_type": ["artifact", "artifact"],
+            "file_value": [
+                {"path": "project/run/test/artifact1/artifact_files_list.json"},
+                {"path": "project/run/test/artifact2/artifact_files_list.json"},
+            ],
+        }
+    )
+
+    with (
+        patch("mlflow.log_artifact", spec=mlflow.log_artifact) as mock_log_artifact,
+        patch("pathlib.Path.exists", return_value=True),
+    ):
+        files_base_path = Path("/test/files")
+        loader.upload_artifacts(
+            test_data, "RUN-123", files_base_path, step_multiplier=100
+        )
+
+        # Verify artifacts were logged
+        assert mock_log_artifact.call_count == 2
+
+        calls = mock_log_artifact.call_args_list
+        file_paths = [call[1]["local_path"] for call in calls]
+        artifact_paths = [call[1]["artifact_path"] for call in calls]
+
+        assert (
+            "/test/files/project/run/test/artifact1/artifact_files_list.json"
+            in file_paths
+        )
+        assert (
+            "/test/files/project/run/test/artifact2/artifact_files_list.json"
+            in file_paths
+        )
+        assert "test/artifact1" in artifact_paths
+        assert "test/artifact2" in artifact_paths

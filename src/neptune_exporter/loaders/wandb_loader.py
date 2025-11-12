@@ -306,7 +306,7 @@ class WandBLoader:
             raise RuntimeError("No active run")
 
         # Handle regular files
-        file_data = run_data[run_data["attribute_type"] == "file"]
+        file_data = run_data[run_data["attribute_type"].isin(["file", "artifact"])]
         for _, row in file_data.iterrows():
             if pd.notna(row["file_value"]) and isinstance(row["file_value"], dict):
                 file_path = files_base_path / row["file_value"]["path"]

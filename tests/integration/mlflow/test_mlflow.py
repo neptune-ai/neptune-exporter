@@ -29,6 +29,24 @@ def _sanitize_attribute_name(attribute_path: str) -> str:
     return sanitized
 
 
+def _list_all_artifacts(
+    mlflow_client: MlflowClient, run_id: str, path: str = ""
+) -> set[str]:
+    """Recursively list all artifact paths in an MLflow run."""
+    artifacts = mlflow_client.list_artifacts(run_id, path=path)
+    all_paths = set()
+
+    for artifact in artifacts:
+        artifact_path = artifact.path
+        all_paths.add(artifact_path)
+
+        # If it's a directory (is_dir is True), recursively list its contents
+        if artifact.is_dir:
+            all_paths.update(_list_all_artifacts(mlflow_client, run_id, artifact_path))
+
+    return all_paths
+
+
 def test_mlflow_load_all_runs(
     loader_manager, mlflow_client: MlflowClient, test_data_dir
 ):
@@ -111,27 +129,22 @@ def test_mlflow_parameters_loaded(
     )
 
     # Create a mapping of run name to test data (MLflow generates its own run IDs)
-    test_data_by_run_name = {
-        f"{TEST_PROJECT_ID}/{run_data.run_id}": run_data for run_data in TEST_RUNS
-    }
+    test_data_by_run_name = {run_data.run_id: run_data for run_data in TEST_RUNS}
 
     # Verify parameters for each run match test data
     for run in all_runs:
         # Match by run name instead of run_id (MLflow generates its own IDs)
         run_name = run.info.run_name
-        if run_name not in test_data_by_run_name:
-            continue  # Skip if run name doesn't match
-
         test_data = test_data_by_run_name[run_name]
         params = run.data.params
 
         # Helper to find parameter by partial name match (MLflow may sanitize)
-        def find_param(key_pattern: str) -> str | None:
+        def find_param(key_pattern: str) -> str:
             key_lower = key_pattern.lower()
             for key in params:
                 if key_lower in key.lower() or key.lower() in key_lower:
                     return key
-            return None
+            raise ValueError(f"Parameter {key_pattern} not found in {params}")
 
         # Verify int parameter
         int_key = find_param("test/param/int")
@@ -176,11 +189,6 @@ def test_mlflow_parameters_loaded(
             assert isinstance(value, str)
             assert len(value) > 0
 
-        # Verify artifact parameter (neptune2 only, stored as string)
-        artifact_key = find_param("test/param/artifact")
-        if artifact_key:
-            assert params[artifact_key] == str(test_data.params["test/param/artifact"])
-
 
 def test_mlflow_metrics_loaded(
     loader_manager, mlflow_client: MlflowClient, test_data_dir
@@ -196,17 +204,12 @@ def test_mlflow_metrics_loaded(
     )
 
     # Create a mapping of run name to test data (MLflow generates its own run IDs)
-    test_data_by_run_name = {
-        f"{TEST_PROJECT_ID}/{run_data.run_id}": run_data for run_data in TEST_RUNS
-    }
+    test_data_by_run_name = {run_data.run_id: run_data for run_data in TEST_RUNS}
 
     # Verify metrics for each run match test data
     for run in all_runs:
         # Match by run name instead of run_id (MLflow generates its own IDs)
         run_name = run.info.run_name
-        if run_name not in test_data_by_run_name:
-            continue  # Skip if run name doesn't match
-
         test_data = test_data_by_run_name[run_name]
         assert len(run.data.metrics) > 0
 
@@ -221,39 +224,30 @@ def test_mlflow_metrics_loaded(
                 ):
                     metric_name = key
                     break
-
-            if metric_name:
-                metric_history = mlflow_client.get_metric_history(
-                    run.info.run_id, metric_name
-                )
-                assert len(metric_history) > 0
-
-                # Verify steps are integers and non-negative
-                for metric in metric_history:
-                    assert isinstance(metric.step, int)
-                    assert metric.step >= 0
-
-                # Build expected and actual sequences sorted by step
-                expected_by_step = {int(step): value for step, value in expected_series}
-                actual_by_step = {
-                    metric.step: metric.value for metric in metric_history
-                }
-
-                # Get all steps that exist in both, sorted for consistent ordering
-                common_steps = sorted(
-                    set(expected_by_step.keys()) & set(actual_by_step.keys())
+            if not metric_name:
+                raise ValueError(
+                    f"Metric {metric_attr_path} not found in {run.data.metrics}"
                 )
 
-                if common_steps:
-                    # Build lists of values for comparison
-                    expected_values = [expected_by_step[step] for step in common_steps]
-                    actual_values = [actual_by_step[step] for step in common_steps]
+            metric_history = mlflow_client.get_metric_history(
+                run.info.run_id, metric_name
+            )
+            assert len(metric_history) > 0
 
-                    # Round to 3 decimal places for comparison (handles floating point tolerance)
-                    # This allows pytest to show a proper diff when lists don't match
-                    expected_rounded = [round(v, 3) for v in expected_values]
-                    actual_rounded = [round(v, 3) for v in actual_values]
-                    assert expected_rounded == actual_rounded
+            # Verify steps are integers and non-negative
+            for metric in metric_history:
+                assert isinstance(metric.step, int)
+                assert metric.step >= 0
+
+            # Build expected and actual sequences sorted by step
+            expected_by_step = {int(step): value for step, value in expected_series}
+            actual_by_step = {metric.step: metric.value for metric in metric_history}
+
+            # Round to 3 decimal places for comparison (handles floating point tolerance)
+            # This allows pytest to show a proper diff when lists don't match
+            expected_rounded = [round(v, 3) for v in expected_by_step.values()]
+            actual_rounded = [round(v, 3) for v in actual_by_step.values()]
+            assert expected_rounded == actual_rounded
 
 
 def test_mlflow_artifacts_loaded(
@@ -281,12 +275,15 @@ def test_mlflow_artifacts_loaded(
             continue
 
         test_data = test_data_by_run_name[run_name]
-        artifacts = mlflow_client.list_artifacts(run.info.run_id)
+        artifact_paths = _list_all_artifacts(mlflow_client, run.info.run_id)
 
         # Collect expected artifact attribute paths (MLflow stores them under sanitized paths)
         # MLflowLoader uses attribute_path as artifact_path, so artifacts are under subdirectories
         expected_artifact_paths = set()
         for attr_path in test_data.files.keys():
+            sanitized = _sanitize_attribute_name(attr_path)
+            expected_artifact_paths.add(sanitized)
+        for attr_path in test_data.artifacts.keys():
             sanitized = _sanitize_attribute_name(attr_path)
             expected_artifact_paths.add(sanitized)
         for attr_path in test_data.file_series.keys():
@@ -299,20 +296,26 @@ def test_mlflow_artifacts_loaded(
         if expected_artifact_paths:
             runs_with_artifacts += 1
 
-            # Verify at least some expected artifact paths are present
-            # MLflow artifacts can be at root or in subdirectories
-            artifact_paths = {artifact.path for artifact in artifacts}
-            # Check if any artifact path contains or matches our expected paths
-            found_paths = {
-                path
-                for path in artifact_paths
-                for expected in expected_artifact_paths
-                if expected in path or path.endswith(expected)
-            }
+            # For each expected path, verify there's at least one artifact that matches it
+            # Artifacts can be stored as:
+            # - Direct match: `sanitized_path` (directory)
+            # - File in directory: `sanitized_path/filename`
+            # - For file_series: `sanitized_path/step_X/filename`
+            missing_paths = []
+            for expected_path in expected_artifact_paths:
+                # Check if any artifact path starts with the expected path or is the expected path
+                found = any(
+                    artifact_path == expected_path
+                    or artifact_path.startswith(f"{expected_path}/")
+                    for artifact_path in artifact_paths
+                )
+                if not found:
+                    missing_paths.append(expected_path)
 
-            assert len(found_paths) > 0 or len(artifact_paths) > 0, (
-                f"Expected artifact paths {expected_artifact_paths} "
-                f"not found in {artifact_paths}"
+            assert len(missing_paths) == 0, (
+                f"Missing artifact paths for run {run_name}: {missing_paths}. "
+                f"Expected: {expected_artifact_paths}, "
+                f"Found: {artifact_paths}"
             )
 
     # At least one run should have artifacts
@@ -333,17 +336,12 @@ def test_mlflow_string_series_loaded(
     )
 
     # Create a mapping of run name to test data (MLflow generates its own run IDs)
-    test_data_by_run_name = {
-        f"{TEST_PROJECT_ID}/{run_data.run_id}": run_data for run_data in TEST_RUNS
-    }
+    test_data_by_run_name = {run_data.run_id: run_data for run_data in TEST_RUNS}
 
     # Verify string series are logged as artifacts or text files
     for run in all_runs:
         # Match by run name instead of run_id (MLflow generates its own IDs)
         run_name = run.info.run_name
-        if run_name not in test_data_by_run_name:
-            continue
-
         test_data = test_data_by_run_name[run_name]
 
         # String series may be logged as text artifacts
@@ -376,17 +374,12 @@ def test_mlflow_histogram_series_loaded(
     )
 
     # Create a mapping of run name to test data (MLflow generates its own run IDs)
-    test_data_by_run_name = {
-        f"{TEST_PROJECT_ID}/{run_data.run_id}": run_data for run_data in TEST_RUNS
-    }
+    test_data_by_run_name = {run_data.run_id: run_data for run_data in TEST_RUNS}
 
     # Verify histogram series are logged as artifacts
     for run in all_runs:
         # Match by run name instead of run_id (MLflow generates its own IDs)
         run_name = run.info.run_name
-        if run_name not in test_data_by_run_name:
-            continue
-
         test_data = test_data_by_run_name[run_name]
 
         # Histogram series are typically logged as JSON artifacts

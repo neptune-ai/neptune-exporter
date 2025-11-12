@@ -36,6 +36,7 @@ class RunData:
     string_series: dict[str, list[tuple[Decimal, str]]]
     histogram_series: dict[str, list[tuple[Decimal, dict[str, Any]]]]
     files: dict[str, str]  # attribute_path -> filename
+    artifacts: dict[str, str]  # attribute_path -> filename
     file_series: dict[
         str, list[tuple[Decimal, str]]
     ]  # attribute_path -> [(step, filename), ...]
@@ -57,7 +58,6 @@ def get_test_runs() -> list[RunData]:
                     "test/param/bool": i % 2 == 0,
                     "test/param/datetime": TEST_NOW,
                     "test/param/string_set": [f"tag-{i}-{j}" for j in range(3)],
-                    "test/param/artifact": f"artifact-hash-{i}",  # neptune2 only
                 },
                 metrics={
                     "test/metric/accuracy": [
@@ -86,6 +86,9 @@ def get_test_runs() -> list[RunData]:
                 },
                 files={
                     "test/file/data": f"test_file_{run_id}.txt",
+                },
+                artifacts={
+                    "test/artifact/data": f"test_artifact_{run_id}/files_list.json",
                 },
                 file_series={
                     "test/file_series/data": [

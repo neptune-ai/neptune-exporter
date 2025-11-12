@@ -25,6 +25,7 @@ from pathlib import Path
 from typing import Any, Generator, Optional, Sequence
 import re
 import logging
+import json
 
 import neptune
 import neptune.exceptions
@@ -39,7 +40,7 @@ _ATTRIBUTE_TYPE_MAP = {
     na.Integer: "int",
     na.Datetime: "datetime",
     na.Boolean: "bool",
-    na.Artifact: "artifact",  # could add a separate column
+    na.Artifact: "artifact",  # save as a file
     na.File: "file",
     na.GitRef: "git_ref",  # ignore, seems not to be implemented
     na.NotebookRef: "notebook_ref",  # ignore, not implemented
@@ -58,13 +59,13 @@ _PARAMETER_TYPES: Sequence[str] = (
     "bool",
     "datetime",
     "string_set",
-    "artifact",
 )
 _METRIC_TYPES: Sequence[str] = ("float_series",)
 _SERIES_TYPES: Sequence[str] = ("string_series",)
 _FILE_TYPES: Sequence[str] = ("file",)
 _FILE_SERIES_TYPES: Sequence[str] = ("file_series",)
 _FILE_SET_TYPES: Sequence[str] = ("file_set",)
+_ARTIFACT_TYPES: Sequence[str] = ("artifact",)
 
 
 class Neptune2Exporter:
@@ -171,8 +172,6 @@ class Neptune2Exporter:
 
                 if attribute_type == "string_set":
                     value = attribute.fetch()
-                elif attribute_type == "artifact":
-                    value = attribute.fetch().hash
                 else:
                     value = get_value(all_parameter_values, attribute._path)
 
@@ -232,8 +231,6 @@ class Neptune2Exporter:
                 result_df.loc[mask, "datetime_value"] = result_df.loc[mask, "value"]
             elif attr_type == "string_set":
                 result_df.loc[mask, "string_set_value"] = result_df.loc[mask, "value"]
-            elif attr_type == "artifact":
-                result_df.loc[mask, "string_value"] = result_df.loc[mask, "value"]
             else:
                 raise ValueError(f"Unsupported parameter type: {attr_type}")
 
@@ -497,6 +494,34 @@ class Neptune2Exporter:
                             "attribute_type": attribute_type,
                             "file_value": {
                                 "path": str(file_path.relative_to(destination))
+                            },
+                        }
+                    )
+                elif attribute_type in _ARTIFACT_TYPES:
+                    artifact_attribute = cast(na.Artifact, attribute)
+
+                    artifact_path = destination / project_id / run_id / attribute_path
+                    artifact_path.mkdir(parents=True, exist_ok=True)
+                    artifact_files_list = artifact_attribute.fetch_files_list()
+
+                    # Serialize the artifact file list to JSON
+                    files_list_data_path = artifact_path / "files_list.json"
+                    serialized_data = [
+                        file_data.to_dto() for file_data in artifact_files_list
+                    ]
+                    with open(files_list_data_path, "w") as opened:
+                        json.dump(serialized_data, opened)
+
+                    all_data_dfs.append(
+                        {
+                            "run_id": run_id,
+                            "step": None,
+                            "attribute_path": attribute_path,
+                            "attribute_type": attribute_type,
+                            "file_value": {
+                                "path": str(
+                                    files_list_data_path.relative_to(destination)
+                                )
                             },
                         }
                     )

@@ -13,6 +13,7 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
+import json
 import pathlib
 import tempfile
 import shutil
@@ -109,6 +110,8 @@ def test_data_dir() -> pathlib.Path:
     # Create project directory
     project_dir = data_path / TEST_PROJECT_ID
     project_dir.mkdir(parents=True)
+    project_files_dir = files_path / TEST_PROJECT_ID
+    project_files_dir.mkdir(parents=True)
 
     # Prepare test data from data.py
     all_rows = []
@@ -139,9 +142,6 @@ def test_data_dir() -> pathlib.Path:
                 row["attribute_type"] = "string_set"
                 row["string_set_value"] = value
             else:
-                # string or artifact (both stored as string_value)
-                if "artifact" in attr_path:
-                    row["attribute_type"] = "artifact"
                 row["string_value"] = str(value)
             all_rows.append(row)
 
@@ -183,7 +183,7 @@ def test_data_dir() -> pathlib.Path:
 
         # Files
         for attr_path, filename in run_data.files.items():
-            test_file_path = files_path / filename
+            test_file_path = project_files_dir / filename
             test_file_path.write_text(f"Test file content for {run_data.run_id}")
             row = _create_base_row(
                 run_id=run_data.run_id,
@@ -193,10 +193,34 @@ def test_data_dir() -> pathlib.Path:
             row["file_value"] = {"path": filename}
             all_rows.append(row)
 
+        # Artifacts
+        for attr_path, filename in run_data.artifacts.items():
+            test_file_path = project_files_dir / filename
+            test_file_path.parent.mkdir(parents=True, exist_ok=True)
+            test_file_path.write_text(
+                json.dumps(
+                    [
+                        {
+                            "filePath": f"test_artifact_{run_data.run_id}.txt",
+                            "fileHash": "1234567890",
+                            "type": "file",
+                            "metadata": {},
+                        }
+                    ]
+                )
+            )
+            row = _create_base_row(
+                run_id=run_data.run_id,
+                attr_path=attr_path,
+                attr_type="artifact",
+            )
+            row["file_value"] = {"path": filename}
+            all_rows.append(row)
+
         # File series
         for attr_path, series in run_data.file_series.items():
             for step, filename in series:
-                test_file_path = files_path / filename
+                test_file_path = project_files_dir / filename
                 test_file_path.write_text(
                     f"Test file series content for {run_data.run_id} at step {step}"
                 )
@@ -213,7 +237,7 @@ def test_data_dir() -> pathlib.Path:
         # File sets
         for attr_path, dirname in run_data.file_sets.items():
             # Create a directory with multiple files for file_set
-            file_set_dir = files_path / dirname
+            file_set_dir = project_files_dir / dirname
             file_set_dir.mkdir(parents=True, exist_ok=True)
             # Create a few files in the directory
             for file_idx in range(2):

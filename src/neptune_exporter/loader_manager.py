@@ -195,8 +195,7 @@ class LoaderManager:
         parent_source_run_id = metadata.parent_source_run_id
         fork_step = metadata.fork_step
 
-        # Read run data from disk (all parts)
-        # We need to combine all parts since upload_run_data expects a single table
+        # Read run data from disk (all parts), yielding one part at a time
         run_data_parts_generator = self._parquet_reader.read_run_data(
             project_directory, source_run_id
         )
