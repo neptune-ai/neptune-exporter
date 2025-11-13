@@ -375,6 +375,12 @@ def load(
     # Create appropriate loader based on --loader flag
     data_loader: DataLoader
     if loader == "mlflow":
+        if not mlflow_tracking_uri:
+            mlflow_tracking_uri = os.getenv("MLFLOW_TRACKING_URI")
+            if not mlflow_tracking_uri:
+                raise click.BadParameter(
+                    "MLflow tracking URI is required when using --loader mlflow. You can set it as an environment variable MLFLOW_TRACKING_URI or provide it with --mlflow-tracking-uri."
+                )
         data_loader = MLflowLoader(
             tracking_uri=mlflow_tracking_uri,
             name_prefix=name_prefix,
@@ -382,6 +388,18 @@ def load(
         )
         loader_name = "MLflow"
     elif loader == "wandb":
+        if not wandb_entity:
+            wandb_entity = os.getenv("WANDB_ENTITY")
+            if not wandb_entity:
+                raise click.BadParameter(
+                    "W&B entity is required when using --loader wandb. You can set it as an environment variable WANDB_ENTITY or provide it with --wandb-entity."
+                )
+        if not wandb_api_key:
+            wandb_api_key = os.getenv("WANDB_API_KEY")
+            if not wandb_api_key:
+                raise click.BadParameter(
+                    "W&B API key is required when using --loader wandb. You can set it as an environment variable WANDB_API_KEY or provide it with --wandb-api-key."
+                )
         data_loader = WandBLoader(
             entity=wandb_entity,
             api_key=wandb_api_key,

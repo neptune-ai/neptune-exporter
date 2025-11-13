@@ -293,23 +293,37 @@ class LoaderManager:
         if parent_source_run_id and parent_source_run_id in run_id_to_target_run_id:
             parent_target_run_id = run_id_to_target_run_id[parent_source_run_id]
 
-        # Create run in target platform
-        target_run_id = self._data_loader.create_run(
+        # Check if run already exists (for resumable loading)
+        target_run_id = self._data_loader.find_run(
             project_id=project_id,
             run_name=custom_run_id,
             experiment_id=target_experiment_id,
-            parent_run_id=parent_target_run_id,
-            fork_step=fork_step,
-            step_multiplier=self._step_multiplier,
-        )
-        run_id_to_target_run_id[SourceRunId(original_run_id)] = TargetRunId(
-            target_run_id
         )
 
-        # Upload run data
-        self._data_loader.upload_run_data(
-            run_data=run_data_parts_generator,
-            run_id=target_run_id,
-            files_directory=self._files_directory / sanitize_path_part(project_id),
-            step_multiplier=self._step_multiplier,
+        # Create run if it doesn't exist
+        if target_run_id is None:
+            target_run_id = self._data_loader.create_run(
+                project_id=project_id,
+                run_name=custom_run_id,
+                experiment_id=target_experiment_id,
+                parent_run_id=parent_target_run_id,
+                fork_step=fork_step,
+                step_multiplier=self._step_multiplier,
+            )
+            # Upload run data only for newly created runs
+            self._data_loader.upload_run_data(
+                run_data=run_data_parts_generator,
+                run_id=target_run_id,
+                files_directory=self._files_directory / sanitize_path_part(project_id),
+                step_multiplier=self._step_multiplier,
+            )
+            self._logger.info(f"Created and uploaded run '{custom_run_id}'")
+        else:
+            self._logger.info(
+                f"Found existing run '{custom_run_id}' with ID {target_run_id}, skipping upload"
+            )
+
+        # Store mapping for parent/child relationships
+        run_id_to_target_run_id[SourceRunId(original_run_id)] = TargetRunId(
+            target_run_id
         )

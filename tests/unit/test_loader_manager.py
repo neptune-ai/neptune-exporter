@@ -97,6 +97,7 @@ def test_topological_sort_parent_before_child():
     mock_loader.create_run.side_effect = track_create_run
     mock_loader.create_experiment.return_value = "exp-1"
     mock_loader.upload_run_data.return_value = None
+    mock_loader.find_run.return_value = None
 
     # Execute
     manager._load_project(project_dir, runs=None)
@@ -176,6 +177,7 @@ def test_topological_sort_multiple_levels():
     mock_loader.create_run.side_effect = track_create_run
     mock_loader.create_experiment.return_value = "exp-1"
     mock_loader.upload_run_data.return_value = None
+    mock_loader.find_run.return_value = None
 
     # Execute
     manager._load_project(project_dir, runs=None)
@@ -338,6 +340,7 @@ def test_topological_sort_multiple_children():
     mock_loader.create_run.side_effect = track_create_run
     mock_loader.create_experiment.return_value = "exp-1"
     mock_loader.upload_run_data.return_value = None
+    mock_loader.find_run.return_value = None
 
     # Execute
     manager._load_project(project_dir, runs=None)
@@ -393,6 +396,7 @@ def test_topological_sort_orphaned_run():
     mock_loader.create_run.side_effect = track_create_run
     mock_loader.create_experiment.return_value = "exp-1"
     mock_loader.upload_run_data.return_value = None
+    mock_loader.find_run.return_value = None
 
     # Execute
     manager._load_project(project_dir, runs=None)
@@ -475,6 +479,7 @@ def test_topological_sort_mixed_orphaned_and_normal():
     mock_loader.create_run.side_effect = track_create_run
     mock_loader.create_experiment.return_value = "exp-1"
     mock_loader.upload_run_data.return_value = None
+    mock_loader.find_run.return_value = None
 
     # Execute
     manager._load_project(project_dir, runs=None)
@@ -557,6 +562,7 @@ def test_topological_sort_missing_metadata():
     mock_loader.create_run.side_effect = track_create_run
     mock_loader.create_experiment.return_value = "exp-1"
     mock_loader.upload_run_data.return_value = None
+    mock_loader.find_run.return_value = None
 
     # Execute
     manager._load_project(project_dir, runs=None)
@@ -601,6 +607,8 @@ def test_process_run_custom_run_id():
     mock_loader.create_run.return_value = "target-run-1"
     mock_loader.create_experiment.return_value = None
     mock_loader.upload_run_data.return_value = None
+    # Mock find_run to return None (runs don't exist yet)
+    mock_loader.find_run.return_value = None
 
     manager._load_project(project_dir, runs=None)
 
@@ -665,6 +673,7 @@ def test_process_run_experiment_creation():
     mock_loader.create_experiment.return_value = "exp-123"
     mock_loader.create_run.return_value = "target-run-1"
     mock_loader.upload_run_data.return_value = None
+    mock_loader.find_run.return_value = None
 
     manager._load_project(project_dir, runs=None)
 
@@ -743,6 +752,7 @@ def test_process_run_parent_lookup():
     mock_loader.create_run.side_effect = ["target-parent-1", "target-child-2"]
     mock_loader.create_experiment.return_value = None
     mock_loader.upload_run_data.return_value = None
+    mock_loader.find_run.return_value = None
 
     manager._load_project(project_dir, runs=None)
 
@@ -789,6 +799,8 @@ def test_process_run_fork_step_and_multiplier():
     mock_loader.create_run.return_value = "target-run-1"
     mock_loader.create_experiment.return_value = None
     mock_loader.upload_run_data.return_value = None
+    # Mock find_run to return None (runs don't exist yet)
+    mock_loader.find_run.return_value = None
 
     manager._load_project(project_dir, runs=None)
 
@@ -836,6 +848,7 @@ def test_process_run_files_directory():
     mock_loader.create_run.return_value = "target-run-1"
     mock_loader.create_experiment.return_value = None
     mock_loader.upload_run_data.return_value = None
+    mock_loader.find_run.return_value = None
 
     manager._load_project(project_dir, runs=None)
 
@@ -893,6 +906,7 @@ def test_load_multiple_projects():
     mock_loader.create_run.side_effect = ["target-run-1", "target-run-2"]
     mock_loader.create_experiment.return_value = None
     mock_loader.upload_run_data.return_value = None
+    mock_loader.find_run.return_value = None
 
     manager.load(project_ids=None, runs=None)
 
@@ -936,6 +950,7 @@ def test_load_error_handling_project_failure():
     ]
     mock_reader.read_run_metadata.return_value = metadata2
     mock_reader.read_run_data.return_value = iter([pa.table({"col": [1]})])
+    mock_loader.find_run.return_value = None
 
     mock_loader.create_run.return_value = "target-run-2"
     mock_loader.create_experiment.return_value = None
@@ -996,6 +1011,7 @@ def test_load_error_handling_run_failure():
     ]
     mock_loader.create_experiment.return_value = None
     mock_loader.upload_run_data.return_value = None
+    mock_loader.find_run.return_value = None
 
     # Should not raise, should continue processing
     manager._load_project(project_dir, runs=None)
@@ -1026,3 +1042,185 @@ def test_load_no_projects():
 
     # Verify no runs were created
     mock_loader.create_run.assert_not_called()
+
+
+def test_process_run_finds_existing_run():
+    """Test that find_run is called and existing runs are reused."""
+    mock_reader = Mock(spec=ParquetReader)
+    mock_loader = Mock(spec=DataLoader)
+    files_dir = Path("/tmp/files")
+    project_dir = Path("/tmp/data/project1")
+
+    manager = LoaderManager(
+        parquet_reader=mock_reader,
+        data_loader=mock_loader,
+        files_directory=files_dir,
+        step_multiplier=100,
+    )
+
+    run_id = "RUN-123"
+    existing_target_run_id = "existing-target-run-123"
+
+    metadata = RunMetadata(
+        project_id="project1",
+        run_id=run_id,
+        custom_run_id=None,
+        experiment_name=None,
+        parent_source_run_id=None,
+        fork_step=None,
+    )
+
+    mock_reader.list_run_files.return_value = [run_id]
+    mock_reader.read_run_metadata.return_value = metadata
+    mock_reader.read_run_data.return_value = iter([pa.table({"col": [1]})])
+
+    # Mock find_run to return existing run
+    mock_loader.find_run.return_value = existing_target_run_id
+    mock_loader.create_experiment.return_value = None
+
+    manager._load_project(project_dir, runs=None)
+
+    # Verify find_run was called
+    mock_loader.find_run.assert_called_once_with(
+        project_id="project1",
+        run_name=run_id,
+        experiment_id=None,
+    )
+
+    # Verify create_run was NOT called (run already exists)
+    mock_loader.create_run.assert_not_called()
+
+    # Verify upload_run_data was NOT called (run already exists)
+    mock_loader.upload_run_data.assert_not_called()
+
+
+def test_process_run_creates_new_run_when_not_found():
+    """Test that new runs are created when find_run returns None."""
+    mock_reader = Mock(spec=ParquetReader)
+    mock_loader = Mock(spec=DataLoader)
+    files_dir = Path("/tmp/files")
+    project_dir = Path("/tmp/data/project1")
+
+    manager = LoaderManager(
+        parquet_reader=mock_reader,
+        data_loader=mock_loader,
+        files_directory=files_dir,
+        step_multiplier=100,
+    )
+
+    run_id = "RUN-123"
+    new_target_run_id = "new-target-run-123"
+
+    metadata = RunMetadata(
+        project_id="project1",
+        run_id=run_id,
+        custom_run_id=None,
+        experiment_name=None,
+        parent_source_run_id=None,
+        fork_step=None,
+    )
+
+    mock_reader.list_run_files.return_value = [run_id]
+    mock_reader.read_run_metadata.return_value = metadata
+    mock_reader.read_run_data.return_value = iter([pa.table({"col": [1]})])
+
+    # Mock find_run to return None (run doesn't exist)
+    mock_loader.find_run.return_value = None
+    mock_loader.create_experiment.return_value = None
+    mock_loader.create_run.return_value = new_target_run_id
+    mock_loader.upload_run_data.return_value = None
+
+    manager._load_project(project_dir, runs=None)
+
+    # Verify find_run was called
+    mock_loader.find_run.assert_called_once_with(
+        project_id="project1",
+        run_name=run_id,
+        experiment_id=None,
+    )
+
+    # Verify create_run was called
+    mock_loader.create_run.assert_called_once()
+
+    # Verify upload_run_data was called
+    mock_loader.upload_run_data.assert_called_once()
+
+
+def test_process_run_uses_existing_run_for_parent_relationships():
+    """Test that existing runs are used for parent/child relationships."""
+    mock_reader = Mock(spec=ParquetReader)
+    mock_loader = Mock(spec=DataLoader)
+    files_dir = Path("/tmp/files")
+    project_dir = Path("/tmp/data/project1")
+
+    manager = LoaderManager(
+        parquet_reader=mock_reader,
+        data_loader=mock_loader,
+        files_directory=files_dir,
+        step_multiplier=100,
+    )
+
+    parent_id = "PARENT-1"
+    child_id = "CHILD-2"
+    existing_parent_target_id = "existing-parent-123"
+    existing_child_target_id = "existing-child-456"
+
+    parent_metadata = RunMetadata(
+        project_id="project1",
+        run_id=parent_id,
+        custom_run_id=None,
+        experiment_name=None,
+        parent_source_run_id=None,
+        fork_step=None,
+    )
+
+    child_metadata = RunMetadata(
+        project_id="project1",
+        run_id=child_id,
+        custom_run_id=None,
+        experiment_name=None,
+        parent_source_run_id=parent_id,
+        fork_step=None,
+    )
+
+    mock_reader.list_run_files.return_value = [parent_id, child_id]
+    mock_reader.read_run_metadata.side_effect = [parent_metadata, child_metadata]
+    mock_reader.read_run_data.return_value = iter([pa.table({"col": [1]})])
+
+    # Mock find_run to return existing runs for both
+    def find_run_side_effect(project_id, run_name, experiment_id):
+        if run_name == parent_id:
+            return existing_parent_target_id
+        elif run_name == child_id:
+            return existing_child_target_id
+        return None
+
+    mock_loader.find_run.side_effect = find_run_side_effect
+    mock_loader.create_experiment.return_value = None
+
+    manager._load_project(project_dir, runs=None)
+
+    # Verify find_run was called for both runs
+    assert mock_loader.find_run.call_count == 2
+
+    # Verify create_run was NOT called (both runs exist)
+    mock_loader.create_run.assert_not_called()
+
+    # Verify upload_run_data was NOT called (both runs exist)
+    mock_loader.upload_run_data.assert_not_called()
+
+    # Verify parent/child mapping was stored correctly
+    # (This is internal, but we can verify by checking that find_run was called with correct names)
+    parent_call = [
+        call_args
+        for call_args in mock_loader.find_run.call_args_list
+        if call_args[1]["run_name"] == parent_id
+    ][0]
+    child_call = [
+        call_args
+        for call_args in mock_loader.find_run.call_args_list
+        if call_args[1]["run_name"] == child_id
+    ][0]
+
+    assert parent_call[1]["project_id"] == "project1"
+    assert child_call[1]["project_id"] == "project1"

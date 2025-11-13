@@ -96,23 +96,18 @@ def test_mlflow_load_specific_runs(
     loader_manager, mlflow_client: MlflowClient, test_data_dir
 ):
     """Test loading specific runs to MLflow."""
-    # Get runs before loading
-    experiments_before = mlflow_client.search_experiments()
-    runs_before = mlflow_client.search_runs(
-        experiment_ids=[exp.experiment_id for exp in experiments_before],
-        max_results=100,
-    )
-    runs_before_count = len(runs_before)
-
     # Load only first run
     loader_manager.load(project_ids=[TEST_PROJECT_ID], runs=[TEST_RUNS[0].run_id])
 
     # Verify one new run was added
     experiments_after = mlflow_client.search_experiments()
-    all_runs = mlflow_client.search_runs(
-        experiment_ids=[exp.experiment_id for exp in experiments_after], max_results=100
+    found_runs = mlflow_client.search_runs(
+        experiment_ids=[exp.experiment_id for exp in experiments_after],
+        filter_string=f"attributes.run_name = '{TEST_RUNS[0].run_id}'",
+        max_results=100,
     )
-    assert len(all_runs) == runs_before_count + 1
+    assert len(found_runs) == 1
+    assert found_runs[0].info.run_name == TEST_RUNS[0].run_id
 
 
 def test_mlflow_parameters_loaded(
@@ -422,3 +417,93 @@ def test_mlflow_histogram_series_loaded(
 
     # At least one run should have histogram series
     assert runs_with_histogram_series > 0
+
+
+def test_mlflow_resumable_loading(
+    loader_manager, mlflow_client: MlflowClient, test_data_dir
+):
+    """Test that loading is resumable - existing runs are found and skipped."""
+    # Load data first time
+    loader_manager.load(project_ids=[TEST_PROJECT_ID], runs=None)
+
+    # Get all runs after first load
+    experiments = mlflow_client.search_experiments()
+    all_runs_first = mlflow_client.search_runs(
+        experiment_ids=[exp.experiment_id for exp in experiments], max_results=100
+    )
+    runs_count_first = len(all_runs_first)
+
+    # Load again - should find existing runs and skip them
+    loader_manager.load(project_ids=[TEST_PROJECT_ID], runs=None)
+
+    # Get all runs after second load
+    experiments_after = mlflow_client.search_experiments()
+    all_runs_second = mlflow_client.search_runs(
+        experiment_ids=[exp.experiment_id for exp in experiments_after], max_results=100
+    )
+    runs_count_second = len(all_runs_second)
+
+    # Should have the same number of runs (no duplicates created)
+    assert runs_count_second == runs_count_first
+
+    # Verify run names match (runs were found, not recreated)
+    first_run_names = {run.info.run_name for run in all_runs_first}
+    second_run_names = {run.info.run_name for run in all_runs_second}
+    assert first_run_names == second_run_names
+
+
+def test_mlflow_find_run_by_name(
+    loader_manager, mlflow_client: MlflowClient, test_data_dir
+):
+    """Test that find_run can locate runs by name."""
+    # Load data
+    loader_manager.load(project_ids=[TEST_PROJECT_ID], runs=None)
+
+    # Get experiment
+    experiments = mlflow_client.search_experiments()
+    assert len(experiments) > 0
+    experiment_id = experiments[0].experiment_id
+
+    # Get a run to test with
+    all_runs = mlflow_client.search_runs(experiment_ids=[experiment_id], max_results=1)
+    assert len(all_runs) > 0
+    test_run = all_runs[0]
+    test_run_name = test_run.info.run_name
+
+    # Test find_run
+    loader = loader_manager._data_loader
+    found_run_id = loader.find_run(
+        project_id=TEST_PROJECT_ID,
+        run_name=test_run_name,
+        experiment_id=experiment_id,
+    )
+
+    # Should find the run
+    assert found_run_id is not None
+    assert found_run_id == test_run.info.run_id
+
+
+def test_mlflow_find_run_not_exists(
+    loader_manager, mlflow_client: MlflowClient, test_data_dir
+):
+    """Test that find_run returns None for non-existent runs."""
+    # Get experiment
+    experiments = mlflow_client.search_experiments()
+    if len(experiments) == 0:
+        # Create an experiment if none exists
+        loader_manager.load(project_ids=[TEST_PROJECT_ID], runs=None)
+        experiments = mlflow_client.search_experiments()
+
+    assert len(experiments) > 0
+    experiment_id = experiments[0].experiment_id
+
+    # Test find_run with non-existent name
+    loader = loader_manager._data_loader
+    found_run_id = loader.find_run(
+        project_id=TEST_PROJECT_ID,
+        run_name="non-existent-run-name-12345",
+        experiment_id=experiment_id,
+    )
+
+    # Should return None
+    assert found_run_id is None

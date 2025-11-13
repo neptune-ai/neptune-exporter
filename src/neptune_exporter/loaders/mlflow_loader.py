@@ -19,6 +19,7 @@ import logging
 from decimal import Decimal
 from pathlib import Path
 from typing import Generator, Optional
+from mlflow.entities.run import Run
 import pandas as pd
 import pyarrow as pa
 import mlflow
@@ -121,6 +122,22 @@ class MLflowLoader(DataLoader):
             )
             raise
 
+    def find_run(
+        self, project_id: str, run_name: str, experiment_id: Optional[str]
+    ) -> Optional[str]:
+        """Find a run by name in an experiment."""
+        try:
+            existing_runs: list[Run] = mlflow.search_runs(
+                experiment_ids=[experiment_id] if experiment_id else None,
+                filter_string=f"attributes.run_name = '{run_name}'",
+                output_format="list",
+                max_results=1,
+            )
+            return existing_runs[0].info.run_id if existing_runs else None
+        except Exception as e:
+            self._logger.error(f"Error finding run '{run_name}': {e}")
+            return None
+
     def create_run(
         self,
         project_id: str,
@@ -136,7 +153,6 @@ class MLflowLoader(DataLoader):
             fork_step: Ignored for MLflow (parent relationships don't use step information)
             step_multiplier: Ignored for MLflow (not needed for parent relationships)
         """
-
         tags = {}
         if parent_run_id:
             tags[MLFLOW_PARENT_RUN_ID] = parent_run_id

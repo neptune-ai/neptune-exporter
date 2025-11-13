@@ -39,6 +39,13 @@ class DataLoader(ABC):
         pass
 
     @abstractmethod
+    def find_run(
+        self, project_id: str, run_name: str, experiment_id: Optional[str]
+    ) -> Optional[str]:
+        """Find a run by name in an experiment."""
+        pass
+
+    @abstractmethod
     def create_run(
         self,
         project_id: str,

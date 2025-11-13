@@ -145,6 +145,68 @@ def test_create_run_with_parent(mock_start_run):
     mock_start_run.assert_called_once()
 
 
+@patch("mlflow.search_runs", spec=mlflow.search_runs)
+def test_find_run_exists(mock_search_runs):
+    """Test finding an existing run."""
+    mock_run = Mock()
+    mock_run.info.run_id = "found-run-123"
+    mock_search_runs.return_value = [mock_run]
+
+    loader = MLflowLoader()
+    run_id = loader.find_run("test-project", "run-name", "exp-123")
+
+    assert run_id == "found-run-123"
+    mock_search_runs.assert_called_once_with(
+        experiment_ids=["exp-123"],
+        filter_string="attributes.run_name = 'run-name'",
+        output_format="list",
+        max_results=1,
+    )
+
+
+@patch("mlflow.search_runs", spec=mlflow.search_runs)
+def test_find_run_not_exists(mock_search_runs):
+    """Test finding a run that doesn't exist."""
+    mock_search_runs.return_value = []
+
+    loader = MLflowLoader()
+    run_id = loader.find_run("test-project", "run-name", "exp-123")
+
+    assert run_id is None
+    mock_search_runs.assert_called_once()
+
+
+@patch("mlflow.search_runs", spec=mlflow.search_runs)
+def test_find_run_no_experiment_id(mock_search_runs):
+    """Test finding a run without experiment_id."""
+    mock_run = Mock()
+    mock_run.info.run_id = "found-run-123"
+    mock_search_runs.return_value = [mock_run]
+
+    loader = MLflowLoader()
+    run_id = loader.find_run("test-project", "run-name", None)
+
+    assert run_id == "found-run-123"
+    mock_search_runs.assert_called_once_with(
+        experiment_ids=None,
+        filter_string="attributes.run_name = 'run-name'",
+        output_format="list",
+        max_results=1,
+    )
+
+
+@patch("mlflow.search_runs", spec=mlflow.search_runs)
+def test_find_run_error_handling(mock_search_runs):
+    """Test that find_run handles errors gracefully."""
+    mock_search_runs.side_effect = Exception("Search failed")
+
+    loader = MLflowLoader()
+    run_id = loader.find_run("test-project", "run-name", "exp-123")
+
+    assert run_id is None
+    mock_search_runs.assert_called_once()
+
+
 def test_upload_parameters():
     """Test parameter upload."""
     loader = MLflowLoader()

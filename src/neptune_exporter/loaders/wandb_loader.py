@@ -31,8 +31,8 @@ class WandBLoader(DataLoader):
 
     def __init__(
         self,
-        entity: Optional[str] = None,
-        api_key: Optional[str] = None,
+        entity: str,
+        api_key: str,
         name_prefix: Optional[str] = None,
         verbose: bool = False,
     ):
@@ -51,11 +51,10 @@ class WandBLoader(DataLoader):
         self._logger.setLevel(logging.INFO if verbose else logging.ERROR)
         self._verbose = verbose
         self._active_run: Optional[wandb.Run] = None
-        self._run_id_to_wandb_id: dict[str, str] = {}
+        self._run_id_to_wandb_id: dict[str, str] = {}  # TODO: remove
 
-        # Authenticate with W&B if API key provided
-        if api_key:
-            wandb.login(key=api_key)
+        # Authenticate with W&B
+        wandb.login(key=api_key)
 
         # Configure W&B logging
         if not verbose:
@@ -113,6 +112,42 @@ class WandBLoader(DataLoader):
         We return the experiment name as the group name to use.
         """
         return experiment_name
+
+    def find_run(
+        self, project_id: str, run_name: str, experiment_id: Optional[str]
+    ) -> Optional[str]:
+        """Find a run by name in a W&B project.
+
+        Args:
+            run_name: Name of the run to find
+            experiment_id: W&B group name (experiment name from Neptune)
+            project_id: Neptune project ID (used to construct W&B project name)
+
+        Returns:
+            W&B run ID if found, None otherwise
+        """
+        sanitized_project = self._get_project_name(project_id)
+
+        try:
+            # Use wandb.Api() to search for runs
+            api = wandb.Api()
+            project_path = f"{self.entity}/{sanitized_project}"
+
+            # Search for runs with matching name and group
+            filters = {"display_name": run_name}
+            if experiment_id:
+                filters["group"] = experiment_id
+
+            runs = api.runs(project_path, filters=filters, per_page=1)
+
+            # Get the first matching run
+            for run in runs:
+                return run.id
+
+            return None
+        except Exception as e:
+            self._logger.error(f"Error finding run '{run_name}': {e}")
+            return None
 
     def create_run(
         self,
