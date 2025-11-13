@@ -185,7 +185,12 @@ class LoaderManager:
         run_metadata: dict[RunFilePrefix, RunMetadata] = {}
         all_run_ids: set[SourceRunId] = set()
 
-        for source_run_file_prefix in all_run_file_prefixes:
+        for source_run_file_prefix in tqdm(
+            all_run_file_prefixes,
+            desc="Reading run metadata",
+            unit="run",
+            leave=False,
+        ):
             metadata = self._parquet_reader.read_run_metadata(
                 project_directory, source_run_file_prefix
             )
@@ -209,11 +214,19 @@ class LoaderManager:
             run_metadata, all_run_ids
         )
 
+        # Get project_id for progress bar description (from first valid metadata)
+        project_id = next(iter(run_metadata.values())).project_id
+
         # Track target run IDs for parent lookups
         run_id_to_target_run_id: dict[SourceRunId, TargetRunId] = {}
 
         # Process runs in topological order
-        for source_run_file_prefix in sorted_run_file_prefixes:
+        for source_run_file_prefix in tqdm(
+            sorted_run_file_prefixes,
+            desc=f"Loading runs from {project_id}",
+            unit="run",
+            leave=False,
+        ):
             if source_run_file_prefix not in run_metadata:
                 continue
 
