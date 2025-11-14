@@ -86,6 +86,10 @@ class Neptune3Exporter(NeptuneExporter):
     def list_runs(
         self, project_id: ProjectId, runs: Optional[str] = None
     ) -> list[RunId]:
+        """
+        List Neptune runs.
+        The runs parameter is a regex pattern that the sys/custom_run_id must match.
+        """
         return nq_runs.list_runs(project=project_id, runs=runs)
 
     def download_parameters(

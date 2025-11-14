@@ -99,14 +99,22 @@ class Neptune2Exporter(NeptuneExporter):
     def list_runs(
         self, project_id: ProjectId, runs: Optional[str] = None
     ) -> list[RunId]:
-        """List Neptune runs."""
+        """
+        List Neptune runs.
+        The runs parameter is a regex pattern that the sys/custom_run_id must match.
+        """
         with neptune.init_project(
             api_token=self._api_token, project=project_id, mode="read-only"
         ) as project:
-            runs_table = project.fetch_runs_table(id=runs, columns=[]).to_pandas()
-            if len(runs_table):
-                return list(runs_table["sys/id"])
-            return []
+            runs_table = project.fetch_runs_table(
+                columns=["sys/custom_run_id", "sys/id"]
+            ).to_pandas()
+            if not len(runs_table):
+                return []
+
+            if runs is not None:
+                runs_table = runs_table[runs_table["sys/custom_run_id"].str.match(runs)]
+            return list(runs_table["sys/id"])
 
     def download_parameters(
         self,
