@@ -204,8 +204,10 @@ def test_topological_sort_creation_time_order():
     # Setup: two runs with different creation times
     run1_id = "RUN-1"
     run2_id = "RUN-2"
+    run3_id = "RUN-3"
     creation_time1 = datetime.datetime(2025, 1, 1, 12, 0, 0)
-    creation_time2 = datetime.datetime(2025, 1, 1, 12, 0, 1)
+    creation_time2 = None
+    creation_time3 = datetime.datetime(2025, 1, 1, 12, 0, 2)
 
     run1_metadata = RunMetadata(
         project_id="project1",
@@ -227,9 +229,22 @@ def test_topological_sort_creation_time_order():
         creation_time=creation_time2,
     )
 
+    run3_metadata = RunMetadata(
+        project_id="project1",
+        run_id=run3_id,
+        custom_run_id=None,
+        experiment_name=None,
+        parent_source_run_id=None,
+        fork_step=None,
+        creation_time=creation_time3,
+    )
     # Mock reader
-    mock_reader.list_run_files.return_value = [run2_id, run1_id]
-    mock_reader.read_run_metadata.side_effect = [run2_metadata, run1_metadata]
+    mock_reader.list_run_files.return_value = [run3_id, run2_id, run1_id]
+    mock_reader.read_run_metadata.side_effect = [
+        run3_metadata,
+        run2_metadata,
+        run1_metadata,
+    ]
     mock_reader.read_run_data.return_value = iter([pa.table({"col": [1]})])
 
     # Track creation order
@@ -248,9 +263,10 @@ def test_topological_sort_creation_time_order():
     manager._load_project(project_dir, runs=None)
 
     # Verify: runs should be processed in creation time order
-    assert len(created_runs) == 2
+    assert len(created_runs) == 3
     assert created_runs[0] == run1_id
-    assert created_runs[1] == run2_id
+    assert created_runs[1] == run3_id
+    assert created_runs[2] == run2_id
 
 
 def test_topological_sort_multiple_children():

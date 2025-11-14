@@ -13,6 +13,7 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
+import datetime
 import heapq
 from pathlib import Path
 from typing import NewType, Optional
@@ -123,9 +124,9 @@ class LoaderManager:
             # Otherwise, run is a root (orphaned or no parent)
 
         # Kahn's algorithm: start with nodes with in-degree 0
-        # Results are sorted by metadata.creation_time
+        # Results are sorted by metadata.creation_time, those without creation time are last
         queue = [
-            (metadata.creation_time, metadata)
+            (metadata.creation_time or datetime.datetime.max, metadata)
             for metadata in run_metadata
             if in_degree[SourceRunId(metadata.run_id)] == 0
         ]
@@ -141,7 +142,11 @@ class LoaderManager:
             if source_run_id in parent_to_children:
                 for child_metadata in parent_to_children[source_run_id]:
                     heapq.heappush(
-                        queue, (child_metadata.creation_time, child_metadata)
+                        queue,
+                        (
+                            child_metadata.creation_time or datetime.datetime.max,
+                            child_metadata,
+                        ),
                     )
 
         # Check for cycles (shouldn't happen in Neptune, but defensive)
@@ -157,6 +162,9 @@ class LoaderManager:
                 for metadata in run_metadata
                 if SourceRunId(metadata.run_id) not in result_ids
             ]
+            remaining_metadata.sort(
+                key=lambda x: (x.creation_time or datetime.datetime.max, x.run_id)
+            )
             result.extend(remaining_metadata)
 
         return result
