@@ -13,6 +13,7 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
+import datetime
 from pathlib import Path
 from unittest.mock import Mock
 import pyarrow as pa
@@ -67,6 +68,7 @@ def test_topological_sort_parent_before_child():
         experiment_name=None,
         parent_source_run_id=None,
         fork_step=None,
+        creation_time=None,
     )
 
     child_metadata = RunMetadata(
@@ -76,6 +78,7 @@ def test_topological_sort_parent_before_child():
         experiment_name=None,
         parent_source_run_id=parent_run_id,
         fork_step=None,
+        creation_time=None,
     )
 
     # Mock reader to return both runs
@@ -130,6 +133,7 @@ def test_topological_sort_multiple_levels():
         experiment_name=None,
         parent_source_run_id=None,
         fork_step=None,
+        creation_time=None,
     )
 
     parent_metadata = RunMetadata(
@@ -139,6 +143,7 @@ def test_topological_sort_multiple_levels():
         experiment_name=None,
         parent_source_run_id=grandparent_id,
         fork_step=None,
+        creation_time=None,
     )
 
     child_metadata = RunMetadata(
@@ -148,6 +153,7 @@ def test_topological_sort_multiple_levels():
         experiment_name=None,
         parent_source_run_id=parent_id,
         fork_step=None,
+        creation_time=None,
     )
 
     # Mock reader - runs listed in wrong order (child, parent, grandparent)
@@ -181,6 +187,72 @@ def test_topological_sort_multiple_levels():
     assert created_runs[2] == child_id
 
 
+def test_topological_sort_creation_time_order():
+    """Test that runs are processed in creation time order."""
+    mock_reader = Mock(spec=ParquetReader)
+    mock_loader = Mock(spec=DataLoader)
+    files_dir = Path("/tmp/files")
+    project_dir = Path("/tmp/data/project1")
+
+    manager = LoaderManager(
+        parquet_reader=mock_reader,
+        data_loader=mock_loader,
+        files_directory=files_dir,
+        step_multiplier=100,
+    )
+
+    # Setup: two runs with different creation times
+    run1_id = "RUN-1"
+    run2_id = "RUN-2"
+    creation_time1 = datetime.datetime(2025, 1, 1, 12, 0, 0)
+    creation_time2 = datetime.datetime(2025, 1, 1, 12, 0, 1)
+
+    run1_metadata = RunMetadata(
+        project_id="project1",
+        run_id=run1_id,
+        custom_run_id=None,
+        experiment_name=None,
+        parent_source_run_id=None,
+        fork_step=None,
+        creation_time=creation_time1,
+    )
+
+    run2_metadata = RunMetadata(
+        project_id="project1",
+        run_id=run2_id,
+        custom_run_id=None,
+        experiment_name=None,
+        parent_source_run_id=None,
+        fork_step=None,
+        creation_time=creation_time2,
+    )
+
+    # Mock reader
+    mock_reader.list_run_files.return_value = [run2_id, run1_id]
+    mock_reader.read_run_metadata.side_effect = [run2_metadata, run1_metadata]
+    mock_reader.read_run_data.return_value = iter([pa.table({"col": [1]})])
+
+    # Track creation order
+    created_runs = []
+
+    def track_create_run(*args, **kwargs):
+        run_name = kwargs.get("run_name") or args[1]
+        created_runs.append(run_name)
+        return f"target-{run_name}"
+
+    mock_loader.create_run.side_effect = track_create_run
+    mock_loader.create_experiment.return_value = "exp-1"
+    mock_loader.upload_run_data.return_value = None
+
+    # Execute
+    manager._load_project(project_dir, runs=None)
+
+    # Verify: runs should be processed in creation time order
+    assert len(created_runs) == 2
+    assert created_runs[0] == run1_id
+    assert created_runs[1] == run2_id
+
+
 def test_topological_sort_multiple_children():
     """Test topological sorting with one parent and multiple children."""
     mock_reader = Mock(spec=ParquetReader)
@@ -207,6 +279,7 @@ def test_topological_sort_multiple_children():
         experiment_name=None,
         parent_source_run_id=None,
         fork_step=None,
+        creation_time=None,
     )
 
     child1_metadata = RunMetadata(
@@ -216,6 +289,7 @@ def test_topological_sort_multiple_children():
         experiment_name=None,
         parent_source_run_id=parent_id,
         fork_step=None,
+        creation_time=None,
     )
 
     child2_metadata = RunMetadata(
@@ -225,6 +299,7 @@ def test_topological_sort_multiple_children():
         experiment_name=None,
         parent_source_run_id=parent_id,
         fork_step=None,
+        creation_time=None,
     )
 
     # Mock reader
@@ -283,6 +358,7 @@ def test_topological_sort_orphaned_run():
         experiment_name=None,
         parent_source_run_id=missing_parent_id,  # Parent not in dataset
         fork_step=None,
+        creation_time=None,
     )
 
     # Mock reader
@@ -340,6 +416,7 @@ def test_topological_sort_mixed_orphaned_and_normal():
         experiment_name=None,
         parent_source_run_id=None,
         fork_step=None,
+        creation_time=None,
     )
 
     child_metadata = RunMetadata(
@@ -349,6 +426,7 @@ def test_topological_sort_mixed_orphaned_and_normal():
         experiment_name=None,
         parent_source_run_id=parent_id,
         fork_step=None,
+        creation_time=None,
     )
 
     orphan_metadata = RunMetadata(
@@ -358,6 +436,7 @@ def test_topological_sort_mixed_orphaned_and_normal():
         experiment_name=None,
         parent_source_run_id=missing_parent_id,
         fork_step=None,
+        creation_time=None,
     )
 
     # Mock reader
@@ -440,6 +519,7 @@ def test_topological_sort_missing_metadata():
         experiment_name=None,
         parent_source_run_id=None,
         fork_step=None,
+        creation_time=None,
     )
 
     # Mock reader
@@ -495,6 +575,7 @@ def test_process_run_custom_run_id():
         experiment_name=None,
         parent_source_run_id=None,
         fork_step=None,
+        creation_time=None,
     )
 
     mock_reader.list_run_files.return_value = [run_id]
@@ -520,6 +601,7 @@ def test_process_run_custom_run_id():
         experiment_name=None,
         parent_source_run_id=None,
         fork_step=None,
+        creation_time=None,
     )
 
     mock_loader.reset_mock()
@@ -557,6 +639,7 @@ def test_process_run_experiment_creation():
         experiment_name=experiment_name,
         parent_source_run_id=None,
         fork_step=None,
+        creation_time=None,
     )
 
     mock_reader.list_run_files.return_value = [run_id]
@@ -585,6 +668,7 @@ def test_process_run_experiment_creation():
         experiment_name=None,
         parent_source_run_id=None,
         fork_step=None,
+        creation_time=None,
     )
 
     mock_loader.reset_mock()
@@ -623,6 +707,7 @@ def test_process_run_parent_lookup():
         experiment_name=None,
         parent_source_run_id=None,
         fork_step=None,
+        creation_time=None,
     )
 
     child_metadata = RunMetadata(
@@ -632,6 +717,7 @@ def test_process_run_parent_lookup():
         experiment_name=None,
         parent_source_run_id=parent_id,
         fork_step=None,
+        creation_time=None,
     )
 
     mock_reader.list_run_files.return_value = [parent_id, child_id]
@@ -677,6 +763,7 @@ def test_process_run_fork_step_and_multiplier():
         experiment_name=None,
         parent_source_run_id=None,
         fork_step=fork_step,
+        creation_time=None,
     )
 
     mock_reader.list_run_files.return_value = [run_id]
@@ -723,6 +810,7 @@ def test_process_run_files_directory():
         experiment_name=None,
         parent_source_run_id=None,
         fork_step=None,
+        creation_time=None,
     )
 
     mock_reader.list_run_files.return_value = [run_id]
@@ -767,6 +855,7 @@ def test_load_multiple_projects():
         experiment_name=None,
         parent_source_run_id=None,
         fork_step=None,
+        creation_time=None,
     )
 
     metadata2 = RunMetadata(
@@ -776,6 +865,7 @@ def test_load_multiple_projects():
         experiment_name=None,
         parent_source_run_id=None,
         fork_step=None,
+        creation_time=None,
     )
 
     # Mock reader to return two projects
@@ -819,6 +909,7 @@ def test_load_error_handling_project_failure():
         experiment_name=None,
         parent_source_run_id=None,
         fork_step=None,
+        creation_time=None,
     )
 
     # Mock reader: project1 fails, project2 succeeds
@@ -865,6 +956,7 @@ def test_load_error_handling_run_failure():
         experiment_name=None,
         parent_source_run_id=None,
         fork_step=None,
+        creation_time=None,
     )
 
     metadata2 = RunMetadata(
@@ -874,6 +966,7 @@ def test_load_error_handling_run_failure():
         experiment_name=None,
         parent_source_run_id=None,
         fork_step=None,
+        creation_time=None,
     )
 
     mock_reader.list_run_files.return_value = [run_id1, run_id2]

@@ -13,9 +13,9 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
+import heapq
 from pathlib import Path
 from typing import NewType, Optional
-from collections import deque
 from tqdm import tqdm
 import logging
 
@@ -83,34 +83,31 @@ class LoaderManager:
         self._logger.info("Data loading completed")
 
     def _topological_sort_runs(
-        self,
-        run_metadata: dict[RunFilePrefix, RunMetadata],
-        all_run_ids: set[SourceRunId],
-    ) -> list[RunFilePrefix]:
+        self, run_metadata: list[RunMetadata]
+    ) -> list[RunMetadata]:
         """Topologically sort runs so parents are processed before children.
 
         Uses Kahn's algorithm. Orphaned runs (parent not in dataset) are treated
         as root nodes and processed first.
 
         Args:
-            run_metadata: Dictionary mapping run file prefix to metadata
-            all_run_ids: Set of all run IDs in the dataset
+            run_metadata: List of run metadata
 
         Returns:
-            List of run file prefixes in topological order (parents before children)
+            List of run metadata in topological order (parents before children)
         """
-        # Build dependency graph: parent_run_id -> list[child_run_file_prefix]
-        parent_to_children: dict[SourceRunId, list[RunFilePrefix]] = {}
+        # Build dependency graph: parent_run_id -> list[child_run_id]
+        parent_to_children: dict[SourceRunId, list[RunMetadata]] = {}
 
-        # Track in-degree for each run (how many parents it has that are in the dataset)
-        in_degree: dict[RunFilePrefix, int] = {}
+        # Track in-degree for each run (if it has a parent that is in the dataset, it has 1 in-degree)
+        in_degree: dict[SourceRunId, int] = {}
 
         # Initialize all runs
-        for run_file_prefix in run_metadata.keys():
-            in_degree[run_file_prefix] = 0
+        for metadata in run_metadata:
+            in_degree[SourceRunId(metadata.run_id)] = 0
 
         # Build graph and calculate in-degrees
-        for run_file_prefix, metadata in run_metadata.items():
+        for metadata in run_metadata:
             parent_source_run_id = (
                 SourceRunId(metadata.parent_source_run_id)
                 if metadata.parent_source_run_id is not None
@@ -118,45 +115,49 @@ class LoaderManager:
             )
 
             # If parent exists in dataset, add edge and increment in-degree
-            if parent_source_run_id is not None and parent_source_run_id in all_run_ids:
+            if parent_source_run_id is not None and parent_source_run_id in in_degree:
                 if parent_source_run_id not in parent_to_children:
                     parent_to_children[parent_source_run_id] = []
-                parent_to_children[parent_source_run_id].append(run_file_prefix)
-                in_degree[run_file_prefix] = 1
+                parent_to_children[parent_source_run_id].append(metadata)
+                in_degree[SourceRunId(metadata.run_id)] = 1
             # Otherwise, run is a root (orphaned or no parent)
 
         # Kahn's algorithm: start with nodes with in-degree 0
-        queue = deque(
-            run_file_prefix
-            for run_file_prefix, degree in in_degree.items()
-            if degree == 0
-        )
-        result: list[RunFilePrefix] = []
+        # Results are sorted by metadata.creation_time
+        queue = [
+            (metadata.creation_time, metadata)
+            for metadata in run_metadata
+            if in_degree[SourceRunId(metadata.run_id)] == 0
+        ]
+        heapq.heapify(queue)
+        result: list[RunMetadata] = []
 
         while queue:
-            run_file_prefix = queue.popleft()
-            result.append(run_file_prefix)
-
-            # Get the run ID for this run to find its children
-            metadata = run_metadata[run_file_prefix]
-            run_id = SourceRunId(metadata.run_id)
+            _, metadata = heapq.heappop(queue)
+            result.append(metadata)
 
             # Process children of this run
-            if run_id in parent_to_children:
-                for child_run_file_prefix in parent_to_children[run_id]:
-                    in_degree[child_run_file_prefix] -= 1
-                    if in_degree[child_run_file_prefix] == 0:
-                        queue.append(child_run_file_prefix)
+            source_run_id = SourceRunId(metadata.run_id)
+            if source_run_id in parent_to_children:
+                for child_metadata in parent_to_children[source_run_id]:
+                    heapq.heappush(
+                        queue, (child_metadata.creation_time, child_metadata)
+                    )
 
         # Check for cycles (shouldn't happen in Neptune, but defensive)
         if len(result) != len(run_metadata):
-            remaining = set(run_metadata.keys()) - set(result)
+            remaining_len = len(run_metadata) - len(result)
             self._logger.warning(
                 f"Circular dependency detected or missing runs. "
-                f"Remaining runs: {remaining}"
+                f"Remaining runs: {remaining_len}"
             )
-            # Add remaining runs at the end (they'll be processed but may have issues)
-            result.extend(remaining)
+            result_ids = set(SourceRunId(metadata.run_id) for metadata in result)
+            remaining_metadata = [
+                metadata
+                for metadata in run_metadata
+                if SourceRunId(metadata.run_id) not in result_ids
+            ]
+            result.extend(remaining_metadata)
 
         return result
 
@@ -182,8 +183,8 @@ class LoaderManager:
             return
 
         # Read metadata for all runs upfront
-        run_metadata: dict[RunFilePrefix, RunMetadata] = {}
-        all_run_ids: set[SourceRunId] = set()
+        run_metadata: list[RunMetadata] = []
+        source_run_id_to_file_prefix: dict[SourceRunId, RunFilePrefix] = {}
 
         for source_run_file_prefix in tqdm(
             all_run_file_prefixes,
@@ -202,39 +203,32 @@ class LoaderManager:
                 continue
 
             run_file_prefix = RunFilePrefix(source_run_file_prefix)
-            run_metadata[run_file_prefix] = metadata
-            all_run_ids.add(SourceRunId(metadata.run_id))
+            source_run_id_to_file_prefix[SourceRunId(metadata.run_id)] = run_file_prefix
+            run_metadata.append(metadata)
 
         if not run_metadata:
             self._logger.warning(f"No valid run metadata found in {project_directory}")
             return
 
         # Topologically sort runs (parents before children)
-        sorted_run_file_prefixes = self._topological_sort_runs(
-            run_metadata, all_run_ids
-        )
-
-        # Get project_id for progress bar description (from first valid metadata)
-        project_id = next(iter(run_metadata.values())).project_id
+        sorted_run_metadata = self._topological_sort_runs(run_metadata)
 
         # Track target run IDs for parent lookups
         run_id_to_target_run_id: dict[SourceRunId, TargetRunId] = {}
 
         # Process runs in topological order
-        for source_run_file_prefix in tqdm(
-            sorted_run_file_prefixes,
-            desc=f"Loading runs from {project_id}",
+        for metadata in tqdm(
+            sorted_run_metadata,
+            desc=f"Loading runs from {project_directory}",
             unit="run",
             leave=False,
         ):
-            if source_run_file_prefix not in run_metadata:
-                continue
-
             try:
-                metadata = run_metadata[source_run_file_prefix]
                 self._process_run(
                     project_directory=project_directory,
-                    source_run_file_prefix=source_run_file_prefix,
+                    source_run_file_prefix=source_run_id_to_file_prefix[
+                        SourceRunId(metadata.run_id)
+                    ],
                     metadata=metadata,
                     run_id_to_target_run_id=run_id_to_target_run_id,
                 )

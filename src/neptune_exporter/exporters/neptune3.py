@@ -54,7 +54,7 @@ class Neptune3Exporter(NeptuneExporter):
         series_attribute_batch_size: int = 128,
         file_attribute_batch_size: int = 16,
         file_series_attribute_batch_size: int = 8,
-        max_workers: int = 16,
+        max_workers: int = 8,
         verbose: bool = False,
     ):
         self._series_attribute_batch_size = series_attribute_batch_size

@@ -13,6 +13,7 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
+import datetime
 import pyarrow as pa
 import pyarrow.parquet as pq
 import pyarrow.compute as pc
@@ -24,7 +25,7 @@ from neptune_exporter import model
 from neptune_exporter.utils import sanitize_path_part
 
 
-@dataclass
+@dataclass(frozen=True, order=True, slots=True)
 class RunMetadata:
     """Metadata for a run."""
 
@@ -34,6 +35,7 @@ class RunMetadata:
     experiment_name: Optional[str]
     parent_source_run_id: Optional[str]
     fork_step: Optional[float]
+    creation_time: Optional[datetime.datetime]
 
 
 class ParquetReader:
@@ -252,6 +254,7 @@ class ParquetReader:
             "experiment_name": None,
             "parent_source_run_id": None,
             "fork_step": None,
+            "creation_time": None,
         }
 
         # Read all parts to find metadata (usually in part_0, but read all for robustness)
@@ -263,6 +266,7 @@ class ParquetReader:
                 "sys/name",
                 "sys/forking/parent",
                 "sys/forking/step",
+                "sys/creation_time",
             ],
         ):
             # Extract metadata fields
@@ -304,11 +308,23 @@ class ParquetReader:
                     except (ValueError, TypeError):
                         pass
 
-            # If we have all metadata, we can stop early (optimization)
+            if metadata["creation_time"] is None:
+                creation_time_str = self._get_attribute_value(
+                    part_table, "sys/creation_time", attribute_type="datetime_value"
+                )
+                if creation_time_str:
+                    try:
+                        metadata["creation_time"] = datetime.datetime.fromisoformat(
+                            creation_time_str
+                        )
+                    except (ValueError, TypeError):
+                        pass
+
+            # If we have all 'important' metadata, we can stop early (optimization)
             if all(
                 v is not None
                 for k, v in metadata.items()
-                if k not in ["fork_step", "parent_source_run_id", "experiment_name"]
+                if k in ["run_id", "project_id", "custom_run_id"]
             ):
                 return RunMetadata(
                     project_id=metadata["project_id"],
@@ -317,6 +333,7 @@ class ParquetReader:
                     experiment_name=metadata["experiment_name"],
                     parent_source_run_id=metadata["parent_source_run_id"],
                     fork_step=metadata["fork_step"],
+                    creation_time=metadata["creation_time"],
                 )
 
         if metadata["project_id"] and metadata["run_id"]:
@@ -327,6 +344,7 @@ class ParquetReader:
                 experiment_name=metadata["experiment_name"],
                 parent_source_run_id=metadata["parent_source_run_id"],
                 fork_step=metadata["fork_step"],
+                creation_time=metadata["creation_time"],
             )
         else:
             return None

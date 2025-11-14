@@ -286,8 +286,8 @@ def export(
 @click.option(
     "--step-multiplier",
     type=int,
-    help="Step multiplier for converting decimal steps to integers. Default: 10^6.",
-    default=10**6,
+    help="Step multiplier for converting decimal steps to integers. Default: 1.",
+    default=1,
 )
 @click.option(
     "--loader",
