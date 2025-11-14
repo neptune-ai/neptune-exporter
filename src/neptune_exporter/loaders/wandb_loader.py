@@ -23,7 +23,7 @@ import pandas as pd
 import pyarrow as pa
 import wandb
 
-from neptune_exporter.types import TargetRunId, TargetExperimentId
+from neptune_exporter.types import ProjectId, TargetRunId, TargetExperimentId
 from neptune_exporter.loaders.loader import DataLoader
 
 
@@ -114,7 +114,7 @@ class WandBLoader(DataLoader):
 
     def find_run(
         self,
-        project_id: str,
+        project_id: ProjectId,
         run_name: str,
         experiment_id: Optional[TargetExperimentId],
     ) -> Optional[TargetRunId]:
@@ -153,7 +153,7 @@ class WandBLoader(DataLoader):
 
     def create_run(
         self,
-        project_id: str,
+        project_id: ProjectId,
         run_name: str,
         experiment_id: Optional[TargetExperimentId] = None,
         parent_run_id: Optional[TargetRunId] = None,

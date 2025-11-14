@@ -15,9 +15,16 @@
 
 from typing import NewType
 
+ProjectId = NewType("ProjectId", str)
 SourceRunId = NewType("SourceRunId", str)
 RunFilePrefix = NewType("RunFilePrefix", str)
 TargetRunId = NewType("TargetRunId", str)
 TargetExperimentId = NewType("TargetExperimentId", str)
 
-__all__ = ["SourceRunId", "RunFilePrefix", "TargetRunId", "TargetExperimentId"]
+__all__ = [
+    "ProjectId",
+    "SourceRunId",
+    "RunFilePrefix",
+    "TargetRunId",
+    "TargetExperimentId",
+]

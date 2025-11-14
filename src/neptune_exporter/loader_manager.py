@@ -22,7 +22,7 @@ import logging
 
 from neptune_exporter.storage.parquet_reader import ParquetReader, RunMetadata
 from neptune_exporter.loaders.loader import DataLoader
-from neptune_exporter.types import SourceRunId, RunFilePrefix, TargetRunId
+from neptune_exporter.types import ProjectId, SourceRunId, RunFilePrefix, TargetRunId
 from neptune_exporter.utils import sanitize_path_part
 
 
@@ -44,7 +44,7 @@ class LoaderManager:
 
     def load(
         self,
-        project_ids: Optional[list[str]] = None,
+        project_ids: Optional[list[ProjectId]] = None,
         runs: Optional[list[SourceRunId]] = None,
     ) -> None:
         """

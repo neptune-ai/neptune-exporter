@@ -20,7 +20,7 @@ from pathlib import Path
 from typing import Generator, Optional
 import pyarrow as pa
 
-from neptune_exporter.types import TargetExperimentId, TargetRunId
+from neptune_exporter.types import ProjectId, TargetExperimentId, TargetRunId
 
 
 class DataLoader(ABC):
@@ -28,7 +28,7 @@ class DataLoader(ABC):
 
     @abstractmethod
     def create_experiment(
-        self, project_id: str, experiment_name: str
+        self, project_id: ProjectId, experiment_name: str
     ) -> TargetExperimentId:
         """
         Create or get an experiment/project in the target platform.
@@ -45,7 +45,7 @@ class DataLoader(ABC):
     @abstractmethod
     def find_run(
         self,
-        project_id: str,
+        project_id: ProjectId,
         run_name: str,
         experiment_id: Optional[TargetExperimentId],
     ) -> Optional[TargetRunId]:
@@ -55,7 +55,7 @@ class DataLoader(ABC):
     @abstractmethod
     def create_run(
         self,
-        project_id: str,
+        project_id: ProjectId,
         run_name: str,
         experiment_id: Optional[TargetExperimentId] = None,
         parent_run_id: Optional[TargetRunId] = None,

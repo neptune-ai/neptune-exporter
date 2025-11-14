@@ -27,7 +27,7 @@ from mlflow.tracking import MlflowClient
 from mlflow.entities import Metric
 from mlflow.utils.mlflow_tags import MLFLOW_PARENT_RUN_ID
 
-from neptune_exporter.types import TargetExperimentId, TargetRunId
+from neptune_exporter.types import ProjectId, TargetExperimentId, TargetRunId
 from neptune_exporter.loaders.loader import DataLoader
 
 
@@ -127,7 +127,7 @@ class MLflowLoader(DataLoader):
 
     def find_run(
         self,
-        project_id: str,
+        project_id: ProjectId,
         run_name: str,
         experiment_id: Optional[TargetExperimentId],
     ) -> Optional[TargetRunId]:
@@ -146,7 +146,7 @@ class MLflowLoader(DataLoader):
 
     def create_run(
         self,
-        project_id: str,
+        project_id: ProjectId,
         run_name: str,
         experiment_id: Optional[TargetExperimentId] = None,
         parent_run_id: Optional[TargetRunId] = None,

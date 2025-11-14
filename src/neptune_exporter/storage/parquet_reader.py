@@ -22,7 +22,7 @@ from typing import Any, Generator, Optional
 import logging
 from dataclasses import dataclass
 from neptune_exporter import model
-from neptune_exporter.types import RunFilePrefix, SourceRunId
+from neptune_exporter.types import ProjectId, RunFilePrefix, SourceRunId
 from neptune_exporter.utils import sanitize_path_part
 
 
@@ -30,7 +30,7 @@ from neptune_exporter.utils import sanitize_path_part
 class RunMetadata:
     """Metadata for a run."""
 
-    project_id: str
+    project_id: ProjectId
     run_id: SourceRunId
     custom_run_id: Optional[str]
     experiment_name: Optional[str]
@@ -68,7 +68,7 @@ class ParquetReader:
         return part_0_file.exists()
 
     def list_project_directories(
-        self, project_ids: Optional[list[str]] = None
+        self, project_ids: Optional[list[ProjectId]] = None
     ) -> list[Path]:
         """List all available projects in the exported data."""
         if not self.base_path.exists():

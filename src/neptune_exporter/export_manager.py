@@ -22,7 +22,7 @@ import pyarrow.compute as pc
 from neptune_exporter.exporters.exporter import NeptuneExporter
 from neptune_exporter.storage.parquet_writer import ParquetWriter, RunWriterContext
 from neptune_exporter.storage.parquet_reader import ParquetReader
-from neptune_exporter.types import SourceRunId
+from neptune_exporter.types import ProjectId, SourceRunId
 from neptune_exporter.utils import sanitize_path_part
 
 
@@ -43,7 +43,7 @@ class ExportManager:
 
     def run(
         self,
-        project_ids: list[str],
+        project_ids: list[ProjectId],
         runs: None | str = None,
         attributes: None | str | list[str] = None,
         export_classes: Iterable[
