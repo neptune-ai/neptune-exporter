@@ -27,8 +27,8 @@ from concurrent.futures import ThreadPoolExecutor, as_completed
 import logging
 
 from neptune_exporter import model
-from neptune_exporter.exporters.exporter import NeptuneExporter, ProjectId
-from neptune_exporter.types import SourceRunId
+from neptune_exporter.exporters.exporter import NeptuneExporter
+from neptune_exporter.types import ProjectId, SourceRunId
 
 
 _PARAMETER_TYPES: Sequence[str] = (

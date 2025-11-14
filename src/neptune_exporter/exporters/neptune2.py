@@ -32,8 +32,8 @@ import neptune.exceptions
 from neptune import management
 
 from neptune_exporter import model
-from neptune_exporter.exporters.exporter import NeptuneExporter, ProjectId
-from neptune_exporter.types import SourceRunId
+from neptune_exporter.exporters.exporter import NeptuneExporter
+from neptune_exporter.types import ProjectId, SourceRunId
 
 _ATTRIBUTE_TYPE_MAP = {
     na.String: "string",
@@ -497,7 +497,9 @@ class Neptune2Exporter(NeptuneExporter):
 
                     file_path = destination / project_id / run_id / attribute_path
                     file_path.parent.mkdir(parents=True, exist_ok=True)
-                    file_attribute.download(str(file_path))
+                    file_attribute.download(
+                        str(file_path), progress_bar=None if self._verbose else False
+                    )
 
                     all_data_dfs.append(
                         {
@@ -544,7 +546,10 @@ class Neptune2Exporter(NeptuneExporter):
                     file_series_path = (
                         destination / project_id / run_id / attribute_path
                     )
-                    file_series_attribute.download(str(file_series_path))
+                    file_series_attribute.download(
+                        str(file_series_path),
+                        progress_bar=None if self._verbose else False,
+                    )
                     file_paths = [p for p in file_series_path.iterdir() if p.is_file()]
 
                     all_data_dfs.extend(
@@ -566,7 +571,10 @@ class Neptune2Exporter(NeptuneExporter):
 
                     file_set_path = destination / project_id / run_id / attribute_path
                     file_set_path.mkdir(parents=True, exist_ok=True)
-                    file_set_attribute.download(str(file_set_path))
+                    file_set_attribute.download(
+                        str(file_set_path),
+                        progress_bar=None if self._verbose else False,
+                    )
 
                     all_data_dfs.append(
                         {

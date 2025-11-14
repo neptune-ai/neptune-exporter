@@ -16,14 +16,11 @@
 """Core exporter abstract base class and types."""
 
 from abc import ABC, abstractmethod
-from typing import Generator, NewType, Optional, Sequence
+from typing import Generator, Optional, Sequence
 from pathlib import Path
 import pyarrow as pa
 
-from neptune_exporter.types import SourceRunId
-
-# Type definitions
-ProjectId = NewType("ProjectId", str)
+from neptune_exporter.types import ProjectId, SourceRunId
 
 
 class NeptuneExporter(ABC):
