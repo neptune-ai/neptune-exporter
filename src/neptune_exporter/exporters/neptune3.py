@@ -27,7 +27,8 @@ from concurrent.futures import ThreadPoolExecutor, as_completed
 import logging
 
 from neptune_exporter import model
-from neptune_exporter.exporters.exporter import NeptuneExporter, ProjectId, RunId
+from neptune_exporter.exporters.exporter import NeptuneExporter, ProjectId
+from neptune_exporter.types import SourceRunId
 
 
 _PARAMETER_TYPES: Sequence[str] = (
@@ -85,7 +86,7 @@ class Neptune3Exporter(NeptuneExporter):
 
     def list_runs(
         self, project_id: ProjectId, runs: Optional[str] = None
-    ) -> list[RunId]:
+    ) -> list[SourceRunId]:
         """
         List Neptune runs.
         The runs parameter is a regex pattern that the sys/custom_run_id must match.
@@ -95,7 +96,7 @@ class Neptune3Exporter(NeptuneExporter):
     def download_parameters(
         self,
         project_id: ProjectId,
-        run_ids: list[RunId],
+        run_ids: list[SourceRunId],
         attributes: None | str | Sequence[str],
     ) -> Generator[pa.RecordBatch, None, None]:
         try:
@@ -186,7 +187,7 @@ class Neptune3Exporter(NeptuneExporter):
     def download_metrics(
         self,
         project_id: ProjectId,
-        run_ids: list[RunId],
+        run_ids: list[SourceRunId],
         attributes: None | str | Sequence[str],
     ) -> Generator[pa.RecordBatch, None, None]:
         attributes_list = nq_runs.list_attributes(
@@ -266,7 +267,7 @@ class Neptune3Exporter(NeptuneExporter):
     def download_series(
         self,
         project_id: ProjectId,
-        run_ids: list[RunId],
+        run_ids: list[SourceRunId],
         attributes: None | str | Sequence[str],
     ) -> Generator[pa.RecordBatch, None, None]:
         attributes_df = nq_runs.fetch_runs_table(
@@ -380,7 +381,7 @@ class Neptune3Exporter(NeptuneExporter):
     def download_files(
         self,
         project_id: ProjectId,
-        run_ids: list[RunId],
+        run_ids: list[SourceRunId],
         attributes: None | str | Sequence[str],
         destination: Path,
     ) -> Generator[pa.RecordBatch, None, None]:

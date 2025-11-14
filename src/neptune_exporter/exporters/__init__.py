@@ -15,7 +15,7 @@
 
 """Exporters package for extracting data from Neptune."""
 
-from .exporter import NeptuneExporter, ProjectId, RunId
+from .exporter import NeptuneExporter, ProjectId, SourceRunId
 from .neptune3 import Neptune3Exporter
 from .neptune2 import Neptune2Exporter
 
@@ -24,5 +24,5 @@ __all__ = [
     "Neptune3Exporter",
     "Neptune2Exporter",
     "ProjectId",
-    "RunId",
+    "SourceRunId",
 ]

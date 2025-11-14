@@ -32,7 +32,8 @@ import neptune.exceptions
 from neptune import management
 
 from neptune_exporter import model
-from neptune_exporter.exporters.exporter import NeptuneExporter, ProjectId, RunId
+from neptune_exporter.exporters.exporter import NeptuneExporter, ProjectId
+from neptune_exporter.types import SourceRunId
 
 _ATTRIBUTE_TYPE_MAP = {
     na.String: "string",
@@ -98,7 +99,7 @@ class Neptune2Exporter(NeptuneExporter):
 
     def list_runs(
         self, project_id: ProjectId, runs: Optional[str] = None
-    ) -> list[RunId]:
+    ) -> list[SourceRunId]:
         """
         List Neptune runs.
         The runs parameter is a regex pattern that the sys/custom_run_id must match.
@@ -119,7 +120,7 @@ class Neptune2Exporter(NeptuneExporter):
     def download_parameters(
         self,
         project_id: ProjectId,
-        run_ids: list[RunId],
+        run_ids: list[SourceRunId],
         attributes: None | str | Sequence[str],
     ) -> Generator[pa.RecordBatch, None, None]:
         """Download parameters from Neptune runs."""
@@ -144,7 +145,7 @@ class Neptune2Exporter(NeptuneExporter):
     def _process_run_parameters(
         self,
         project_id: ProjectId,
-        run_id: RunId,
+        run_id: SourceRunId,
         attributes: None | str | Sequence[str],
     ) -> Optional[pa.RecordBatch]:
         """Process parameters for a single run."""
@@ -249,7 +250,7 @@ class Neptune2Exporter(NeptuneExporter):
     def download_metrics(
         self,
         project_id: ProjectId,
-        run_ids: list[RunId],
+        run_ids: list[SourceRunId],
         attributes: None | str | Sequence[str],
     ) -> Generator[pa.RecordBatch, None, None]:
         """Download metrics from Neptune runs."""
@@ -274,7 +275,7 @@ class Neptune2Exporter(NeptuneExporter):
     def _process_run_metrics(
         self,
         project_id: ProjectId,
-        run_id: RunId,
+        run_id: SourceRunId,
         attributes: None | str | Sequence[str],
     ) -> Optional[pa.RecordBatch]:
         """Process metrics for a single run."""
@@ -300,7 +301,9 @@ class Neptune2Exporter(NeptuneExporter):
                     continue
 
                 series_attribute = cast(FetchableSeries, attribute)
-                series_df = series_attribute.fetch_values()
+                series_df = series_attribute.fetch_values(
+                    progress_bar=None if self._verbose else False
+                )
 
                 series_df["run_id"] = run_id
                 series_df["attribute_path"] = attribute_path
@@ -342,7 +345,7 @@ class Neptune2Exporter(NeptuneExporter):
     def download_series(
         self,
         project_id: ProjectId,
-        run_ids: list[RunId],
+        run_ids: list[SourceRunId],
         attributes: None | str | Sequence[str],
     ) -> Generator[pa.RecordBatch, None, None]:
         """Download series data from Neptune runs."""
@@ -367,7 +370,7 @@ class Neptune2Exporter(NeptuneExporter):
     def _process_run_series(
         self,
         project_id: ProjectId,
-        run_id: RunId,
+        run_id: SourceRunId,
         attributes: None | str | Sequence[str],
     ) -> Optional[pa.RecordBatch]:
         """Process series data for a single run."""
@@ -393,7 +396,9 @@ class Neptune2Exporter(NeptuneExporter):
                     continue
 
                 series_attribute = cast(FetchableSeries, attribute)
-                series_df = series_attribute.fetch_values()
+                series_df = series_attribute.fetch_values(
+                    progress_bar=None if self._verbose else False
+                )
 
                 series_df["run_id"] = run_id
                 series_df["attribute_path"] = attribute_path
@@ -435,7 +440,7 @@ class Neptune2Exporter(NeptuneExporter):
     def download_files(
         self,
         project_id: ProjectId,
-        run_ids: list[RunId],
+        run_ids: list[SourceRunId],
         attributes: None | str | Sequence[str],
         destination: Path,
     ) -> Generator[pa.RecordBatch, None, None]:
@@ -464,7 +469,7 @@ class Neptune2Exporter(NeptuneExporter):
     def _process_run_files(
         self,
         project_id: ProjectId,
-        run_id: RunId,
+        run_id: SourceRunId,
         attributes: None | str | Sequence[str],
         destination: Path,
     ) -> Optional[pa.RecordBatch]:
@@ -634,7 +639,7 @@ class Neptune2Exporter(NeptuneExporter):
 
         return True
 
-    def _handle_run_exception(self, run_id: RunId, exception: Exception) -> None:
+    def _handle_run_exception(self, run_id: SourceRunId, exception: Exception) -> None:
         """Handle exceptions that occur during run processing."""
         if isinstance(exception, neptune.exceptions.MetadataContainerNotFound):
             # Expected: Run doesn't exist, just skip it

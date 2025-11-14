@@ -20,9 +20,10 @@ from typing import Generator, NewType, Optional, Sequence
 from pathlib import Path
 import pyarrow as pa
 
+from neptune_exporter.types import SourceRunId
+
 # Type definitions
 ProjectId = NewType("ProjectId", str)
-RunId = NewType("RunId", str)
 
 
 class NeptuneExporter(ABC):
@@ -36,7 +37,7 @@ class NeptuneExporter(ABC):
     @abstractmethod
     def list_runs(
         self, project_id: ProjectId, runs: Optional[str] = None
-    ) -> list[RunId]:
+    ) -> list[SourceRunId]:
         """List Neptune runs."""
         pass
 
@@ -44,7 +45,7 @@ class NeptuneExporter(ABC):
     def download_parameters(
         self,
         project_id: ProjectId,
-        run_ids: list[RunId],
+        run_ids: list[SourceRunId],
         attributes: None | str | Sequence[str],
     ) -> Generator[pa.RecordBatch, None, None]:
         """Download parameters from Neptune runs."""
@@ -54,7 +55,7 @@ class NeptuneExporter(ABC):
     def download_metrics(
         self,
         project_id: ProjectId,
-        run_ids: list[RunId],
+        run_ids: list[SourceRunId],
         attributes: None | str | Sequence[str],
     ) -> Generator[pa.RecordBatch, None, None]:
         """Download metrics from Neptune runs."""
@@ -64,7 +65,7 @@ class NeptuneExporter(ABC):
     def download_series(
         self,
         project_id: ProjectId,
-        run_ids: list[RunId],
+        run_ids: list[SourceRunId],
         attributes: None | str | Sequence[str],
     ) -> Generator[pa.RecordBatch, None, None]:
         """Download series data from Neptune runs."""
@@ -74,7 +75,7 @@ class NeptuneExporter(ABC):
     def download_files(
         self,
         project_id: ProjectId,
-        run_ids: list[RunId],
+        run_ids: list[SourceRunId],
         attributes: None | str | Sequence[str],
         destination: Path,
     ) -> Generator[pa.RecordBatch, None, None]:

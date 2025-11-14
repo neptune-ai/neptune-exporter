@@ -17,9 +17,12 @@
 from typing import Iterable, Literal
 from pathlib import Path
 from tqdm import tqdm
+import pyarrow as pa
+import pyarrow.compute as pc
 from neptune_exporter.exporters.exporter import NeptuneExporter
-from neptune_exporter.storage.parquet_writer import ParquetWriter
+from neptune_exporter.storage.parquet_writer import ParquetWriter, RunWriterContext
 from neptune_exporter.storage.parquet_reader import ParquetReader
+from neptune_exporter.types import SourceRunId
 from neptune_exporter.utils import sanitize_path_part
 
 
@@ -30,11 +33,13 @@ class ExportManager:
         reader: ParquetReader,
         writer: ParquetWriter,
         files_destination: Path,
+        batch_size: int = 16,
     ):
         self._exporter = exporter
         self._reader = reader
         self._writer = writer
         self._files_destination = files_destination
+        self._batch_size = batch_size
 
     def run(
         self,
@@ -78,72 +83,122 @@ class ExportManager:
             if not run_ids:
                 continue  # All runs already exported or deleted, skip to next project
 
-            for run_id in tqdm(
-                run_ids,
+            # Process runs in batches for concurrent downloading
+            with tqdm(
+                total=len(run_ids),
                 desc=f"Exporting runs from {project_id}",
                 unit="run",
                 leave=False,
-            ):
-                with self._writer.run_writer(project_id, run_id) as writer:
-                    if "parameters" in export_classes:
-                        with tqdm(
-                            desc=f"  Parameters for {run_id}",
-                            unit="B",
-                            unit_scale=True,
-                            leave=False,
-                        ) as pbar:
-                            for batch in self._exporter.download_parameters(
-                                project_id=project_id,
-                                run_ids=[run_id],
-                                attributes=attributes,
-                            ):
-                                writer.save(batch)
-                                pbar.update(batch.nbytes)
+            ) as runs_pbar:
+                for batch_start in range(0, len(run_ids), self._batch_size):
+                    batch_run_ids = run_ids[
+                        batch_start : batch_start + self._batch_size
+                    ]
 
-                    if "metrics" in export_classes:
-                        with tqdm(
-                            desc=f"  Metrics for {run_id}",
-                            unit="B",
-                            unit_scale=True,
-                            leave=False,
-                        ) as pbar:
-                            for batch in self._exporter.download_metrics(
-                                project_id=project_id,
-                                run_ids=[run_id],
-                                attributes=attributes,
-                            ):
-                                writer.save(batch)
-                                pbar.update(batch.nbytes)
+                    # Create writers for all runs in this batch
+                    writers = {
+                        run_id: self._writer.run_writer(project_id, run_id)
+                        for run_id in batch_run_ids
+                    }
 
-                    if "series" in export_classes:
-                        with tqdm(
-                            desc=f"  Series for {run_id}",
-                            unit="B",
-                            unit_scale=True,
-                            leave=False,
-                        ) as pbar:
-                            for batch in self._exporter.download_series(
-                                project_id=project_id,
-                                run_ids=[run_id],
-                                attributes=attributes,
-                            ):
-                                writer.save(batch)
-                                pbar.update(batch.nbytes)
+                    try:
+                        if "parameters" in export_classes:
+                            with tqdm(
+                                desc=f"  Parameters ({len(batch_run_ids)} runs)",
+                                unit="B",
+                                unit_scale=True,
+                                leave=False,
+                            ) as pbar:
+                                for batch in self._exporter.download_parameters(
+                                    project_id=project_id,
+                                    run_ids=batch_run_ids,
+                                    attributes=attributes,
+                                ):
+                                    self._route_batch_to_writers(batch, writers)
+                                    pbar.update(batch.nbytes)
 
-                    if "files" in export_classes:
-                        with tqdm(
-                            desc=f"  Files for {run_id}",
-                            unit=" files",
-                            leave=False,
-                        ) as pbar:
-                            for batch in self._exporter.download_files(
-                                project_id=project_id,
-                                run_ids=[run_id],
-                                attributes=attributes,
-                                destination=self._files_destination
-                                / sanitize_path_part(project_id),
-                            ):
-                                writer.save(batch)
-                                pbar.update(batch.num_rows)
+                        if "metrics" in export_classes:
+                            with tqdm(
+                                desc=f"  Metrics ({len(batch_run_ids)} runs)",
+                                unit="B",
+                                unit_scale=True,
+                                leave=False,
+                            ) as pbar:
+                                for batch in self._exporter.download_metrics(
+                                    project_id=project_id,
+                                    run_ids=batch_run_ids,
+                                    attributes=attributes,
+                                ):
+                                    self._route_batch_to_writers(batch, writers)
+                                    pbar.update(batch.nbytes)
+
+                        if "series" in export_classes:
+                            with tqdm(
+                                desc=f"  Series ({len(batch_run_ids)} runs)",
+                                unit="B",
+                                unit_scale=True,
+                                leave=False,
+                            ) as pbar:
+                                for batch in self._exporter.download_series(
+                                    project_id=project_id,
+                                    run_ids=batch_run_ids,
+                                    attributes=attributes,
+                                ):
+                                    self._route_batch_to_writers(batch, writers)
+                                    pbar.update(batch.nbytes)
+
+                        if "files" in export_classes:
+                            with tqdm(
+                                desc=f"  Files ({len(batch_run_ids)} runs)",
+                                unit=" files",
+                                leave=False,
+                            ) as pbar:
+                                for batch in self._exporter.download_files(
+                                    project_id=project_id,
+                                    run_ids=batch_run_ids,
+                                    attributes=attributes,
+                                    destination=self._files_destination
+                                    / sanitize_path_part(project_id),
+                                ):
+                                    self._route_batch_to_writers(batch, writers)
+                                    pbar.update(batch.num_rows)
+                    finally:
+                        # Exit all writer contexts
+                        for writer in writers.values():
+                            writer.finish_run()
+
+                    # Update progress bar for completed batch
+                    runs_pbar.update(len(batch_run_ids))
 
         return total_runs
+
+    def _route_batch_to_writers(
+        self,
+        batch: pa.RecordBatch,
+        writers: dict[SourceRunId, RunWriterContext],
+    ) -> None:
+        """Route a batch to the appropriate writer(s) based on run_id.
+
+        Batches may contain data for multiple runs, so we split by run_id
+        and route each split to the correct writer.
+        """
+        if batch.num_rows == 0:
+            return
+
+        # Get run_id column
+        run_id_array = batch.column("run_id")
+
+        # Get unique run_ids in this batch
+        unique_run_ids = set(run_id_array.unique().to_pylist())
+
+        # Split batch by run_id and route to appropriate writers
+        for run_id in unique_run_ids:
+            if run_id not in writers:
+                # Skip if this run_id isn't in our batch (shouldn't happen! but be safe)
+                continue
+
+            # Filter batch to only rows for this run_id
+            filtered_batch = batch.filter(pc.equal(run_id_array, run_id))
+
+            if filtered_batch.num_rows > 0:
+                writers[run_id].save(filtered_batch)
