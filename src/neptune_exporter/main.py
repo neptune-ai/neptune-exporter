@@ -27,6 +27,7 @@ from neptune_exporter.loaders.mlflow_loader import MLflowLoader
 from neptune_exporter.loaders.wandb_loader import WandBLoader
 from neptune_exporter.loader_manager import LoaderManager
 from neptune_exporter.summary_manager import SummaryManager
+from neptune_exporter.types import SourceRunId
 from neptune_exporter.validation import ReportFormatter
 
 
@@ -428,7 +429,7 @@ def load(
     try:
         loader_manager.load(
             project_ids=project_ids_list,
-            runs=runs_list,
+            runs=[SourceRunId(run_id) for run_id in runs_list] if runs_list else None,
         )
         click.echo(f"{loader_name} loading completed successfully!")
     except Exception as e:

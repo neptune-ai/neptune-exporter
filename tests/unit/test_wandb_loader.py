@@ -48,7 +48,7 @@ def test_init_with_api_key():
 
 def test_sanitize_attribute_name():
     """Test attribute name sanitization for W&B."""
-    loader = WandBLoader()
+    loader = WandBLoader(entity="test-entity")
 
     # Test normal name
     assert loader._sanitize_attribute_name("normal_name") == "normal_name"
@@ -68,8 +68,8 @@ def test_sanitize_attribute_name():
 
 def test_get_project_name():
     """Test W&B project name generation."""
-    loader = WandBLoader(name_prefix="test-prefix")
-    loader_no_prefix = WandBLoader()
+    loader = WandBLoader(entity="test-entity", name_prefix="test-prefix")
+    loader_no_prefix = WandBLoader(entity="test-entity")
 
     # Test with prefix
     assert (
@@ -84,7 +84,7 @@ def test_get_project_name():
 
 def test_convert_step_to_int():
     """Test step conversion from decimal to int."""
-    loader = WandBLoader()
+    loader = WandBLoader(entity="test-entity")
 
     # Test normal conversion
     assert loader._convert_step_to_int(Decimal("1.5"), 1000) == 1500
@@ -132,12 +132,10 @@ def test_create_run_with_parent(mock_init):
     mock_init.return_value = mock_run
 
     loader = WandBLoader(entity="test-entity")
-    # First create parent
-    loader._run_id_to_wandb_id["parent-run"] = "wandb-run-parent"
 
     # Create child with parent
     run_id = loader.create_run(
-        "test-project", "child-run", "experiment-id", "parent-run"
+        "test-project", "child-run", "experiment-id", "wandb-run-parent"
     )
 
     assert run_id == "wandb-run-child"
@@ -150,7 +148,7 @@ def test_create_run_with_parent(mock_init):
 
 def test_upload_parameters():
     """Test parameter upload to W&B."""
-    loader = WandBLoader()
+    loader = WandBLoader(entity="test-entity")
 
     # Create mock active run
     mock_run = Mock()
@@ -188,7 +186,7 @@ def test_upload_parameters():
 
 def test_upload_parameters_string_set():
     """Test parameter upload with string_set type."""
-    loader = WandBLoader()
+    loader = WandBLoader(entity="test-entity")
 
     mock_run = Mock()
     mock_config = Mock()
@@ -219,7 +217,7 @@ def test_upload_parameters_string_set():
 
 def test_upload_metrics():
     """Test metrics upload to W&B."""
-    loader = WandBLoader()
+    loader = WandBLoader(entity="test-entity")
 
     mock_run = Mock()
     loader._active_run = mock_run
@@ -253,7 +251,7 @@ def test_upload_metrics():
 
 def test_upload_artifacts_files():
     """Test file artifact upload."""
-    loader = WandBLoader()
+    loader = WandBLoader(entity="test-entity")
 
     mock_run = Mock()
     loader._active_run = mock_run
@@ -286,7 +284,7 @@ def test_upload_artifacts_files():
 
 def test_upload_artifacts_file_series():
     """Test file series artifact upload."""
-    loader = WandBLoader()
+    loader = WandBLoader(entity="test-entity")
 
     mock_run = Mock()
     loader._active_run = mock_run
@@ -325,7 +323,7 @@ def test_upload_artifacts_file_series():
 
 def test_upload_artifacts_string_series():
     """Test string series artifact upload as W&B Table."""
-    loader = WandBLoader()
+    loader = WandBLoader(entity="test-entity")
 
     mock_run = Mock()
     loader._active_run = mock_run
@@ -366,7 +364,7 @@ def test_upload_artifacts_string_series():
 
 def test_upload_artifacts_histogram_series():
     """Test histogram series artifact upload as W&B Histogram."""
-    loader = WandBLoader()
+    loader = WandBLoader(entity="test-entity")
 
     mock_run = Mock()
     loader._active_run = mock_run
@@ -406,7 +404,7 @@ def test_upload_artifacts_histogram_series():
 
 def test_upload_artifacts_file_set():
     """Test file_set artifact upload (directory)."""
-    loader = WandBLoader()
+    loader = WandBLoader(entity="test-entity")
 
     mock_run = Mock()
     loader._active_run = mock_run
@@ -452,7 +450,7 @@ def test_upload_artifacts_file_set():
 
 def test_upload_artifacts_artifact_type():
     """Test artifact type upload (JSON file containing artifact metadata)."""
-    loader = WandBLoader()
+    loader = WandBLoader(entity="test-entity")
 
     mock_run = Mock()
     loader._active_run = mock_run
@@ -502,7 +500,7 @@ def test_upload_artifacts_artifact_type():
 
 def test_upload_run_data():
     """Test uploading complete run data."""
-    loader = WandBLoader()
+    loader = WandBLoader(entity="test-entity")
 
     # Create test data with all required schema columns
     test_data = pd.DataFrame(

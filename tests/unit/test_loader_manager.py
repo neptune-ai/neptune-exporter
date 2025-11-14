@@ -260,6 +260,7 @@ def test_topological_sort_creation_time_order():
     mock_loader.create_run.side_effect = track_create_run
     mock_loader.create_experiment.return_value = "exp-1"
     mock_loader.upload_run_data.return_value = None
+    mock_loader.find_run.return_value = None
 
     # Execute
     manager._load_project(project_dir, runs=None)
@@ -1068,6 +1069,7 @@ def test_process_run_finds_existing_run():
         experiment_name=None,
         parent_source_run_id=None,
         fork_step=None,
+        creation_time=None,
     )
 
     mock_reader.list_run_files.return_value = [run_id]
@@ -1118,6 +1120,7 @@ def test_process_run_creates_new_run_when_not_found():
         experiment_name=None,
         parent_source_run_id=None,
         fork_step=None,
+        creation_time=None,
     )
 
     mock_reader.list_run_files.return_value = [run_id]
@@ -1172,6 +1175,7 @@ def test_process_run_uses_existing_run_for_parent_relationships():
         experiment_name=None,
         parent_source_run_id=None,
         fork_step=None,
+        creation_time=None,
     )
 
     child_metadata = RunMetadata(
@@ -1181,6 +1185,7 @@ def test_process_run_uses_existing_run_for_parent_relationships():
         experiment_name=None,
         parent_source_run_id=parent_id,
         fork_step=None,
+        creation_time=None,
     )
 
     mock_reader.list_run_files.return_value = [parent_id, child_id]

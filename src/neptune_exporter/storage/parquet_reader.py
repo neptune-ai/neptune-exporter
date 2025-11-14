@@ -22,6 +22,7 @@ from typing import Any, Generator, Optional
 import logging
 from dataclasses import dataclass
 from neptune_exporter import model
+from neptune_exporter.types import RunFilePrefix, SourceRunId
 from neptune_exporter.utils import sanitize_path_part
 
 
@@ -30,10 +31,10 @@ class RunMetadata:
     """Metadata for a run."""
 
     project_id: str
-    run_id: str
+    run_id: SourceRunId
     custom_run_id: Optional[str]
     experiment_name: Optional[str]
-    parent_source_run_id: Optional[str]
+    parent_source_run_id: Optional[SourceRunId]
     fork_step: Optional[float]
     creation_time: Optional[datetime.datetime]
 
@@ -45,7 +46,7 @@ class ParquetReader:
         self.base_path = base_path
         self._logger = logging.getLogger(__name__)
 
-    def check_run_exists(self, project_id: str, run_id: str) -> bool:
+    def check_run_exists(self, project_id: str, run_id: SourceRunId) -> bool:
         """Check if a run exists and is complete (has part_0.parquet).
 
         Args:
@@ -91,8 +92,8 @@ class ParquetReader:
         return sorted(project_directories)
 
     def list_run_files(
-        self, project_directory: Path, run_ids: Optional[list[str]] = None
-    ) -> list[str]:
+        self, project_directory: Path, run_ids: Optional[list[SourceRunId]] = None
+    ) -> list[RunFilePrefix]:
         """List all complete runs (those with part_0) in a project.
 
         Reads the file name without the part_0 suffix and extension to get the run IDs.
@@ -117,14 +118,17 @@ class ParquetReader:
                 file_path for file_path in project_directory.glob("*_part_0.parquet")
             ]
 
-        run_ids = [file_path.stem.replace("_part_0", "") for file_path in run_files]
+        run_file_prefixes = [
+            RunFilePrefix(file_path.stem.replace("_part_0", ""))
+            for file_path in run_files
+        ]
 
-        return sorted(run_ids)
+        return sorted(run_file_prefixes)
 
     def read_project_data(
         self,
         project_directory: Path,
-        runs: Optional[list[str]] = None,
+        runs: Optional[list[SourceRunId]] = None,
         attribute_types: Optional[list[str]] = None,
     ) -> Generator[pa.Table, None, None]:
         """Read all data for a project, optionally filtered by project ids, runs and attribute types.
@@ -147,7 +151,7 @@ class ParquetReader:
     def read_run_data(
         self,
         project_directory: Path,
-        run_file_prefix: str,
+        run_file_prefix: RunFilePrefix,
         attribute_types: Optional[list[str]] = None,
         attribute_paths: Optional[list[str]] = None,
     ) -> Generator[pa.Table, None, None]:
@@ -182,7 +186,7 @@ class ParquetReader:
                 continue
 
     def _get_run_files(
-        self, project_directory: Path, run_file_prefix: str
+        self, project_directory: Path, run_file_prefix: RunFilePrefix
     ) -> list[Path]:
         """Get sorted list of all part files for a specific run.
 
@@ -231,7 +235,7 @@ class ParquetReader:
         return table
 
     def read_run_metadata(
-        self, project_directory: Path, run_file_prefix: str
+        self, project_directory: Path, run_file_prefix: RunFilePrefix
     ) -> Optional[RunMetadata]:
         """Read metadata from a run by reading all parts sequentially.
 
@@ -328,10 +332,10 @@ class ParquetReader:
             ):
                 return RunMetadata(
                     project_id=metadata["project_id"],
-                    run_id=metadata["run_id"],
+                    run_id=SourceRunId(metadata["run_id"]),
                     custom_run_id=metadata["custom_run_id"],
                     experiment_name=metadata["experiment_name"],
-                    parent_source_run_id=metadata["parent_source_run_id"],
+                    parent_source_run_id=SourceRunId(metadata["parent_source_run_id"]),
                     fork_step=metadata["fork_step"],
                     creation_time=metadata["creation_time"],
                 )
@@ -339,10 +343,10 @@ class ParquetReader:
         if metadata["project_id"] and metadata["run_id"]:
             return RunMetadata(
                 project_id=metadata["project_id"],
-                run_id=metadata["run_id"],
+                run_id=SourceRunId(metadata["run_id"]),
                 custom_run_id=metadata["custom_run_id"],
                 experiment_name=metadata["experiment_name"],
-                parent_source_run_id=metadata["parent_source_run_id"],
+                parent_source_run_id=SourceRunId(metadata["parent_source_run_id"]),
                 fork_step=metadata["fork_step"],
                 creation_time=metadata["creation_time"],
             )

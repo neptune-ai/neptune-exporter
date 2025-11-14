@@ -16,18 +16,14 @@
 import datetime
 import heapq
 from pathlib import Path
-from typing import NewType, Optional
+from typing import Optional
 from tqdm import tqdm
 import logging
 
 from neptune_exporter.storage.parquet_reader import ParquetReader, RunMetadata
 from neptune_exporter.loaders.loader import DataLoader
+from neptune_exporter.types import SourceRunId, RunFilePrefix, TargetRunId
 from neptune_exporter.utils import sanitize_path_part
-
-
-SourceRunId = NewType("SourceRunId", str)
-TargetRunId = NewType("TargetRunId", str)
-RunFilePrefix = NewType("RunFilePrefix", str)
 
 
 class LoaderManager:
@@ -49,7 +45,7 @@ class LoaderManager:
     def load(
         self,
         project_ids: Optional[list[str]] = None,
-        runs: Optional[list[str]] = None,
+        runs: Optional[list[SourceRunId]] = None,
     ) -> None:
         """
         Load Neptune data from files to target platforms.
@@ -105,12 +101,12 @@ class LoaderManager:
 
         # Initialize all runs
         for metadata in run_metadata:
-            in_degree[SourceRunId(metadata.run_id)] = 0
+            in_degree[metadata.run_id] = 0
 
         # Build graph and calculate in-degrees
         for metadata in run_metadata:
             parent_source_run_id = (
-                SourceRunId(metadata.parent_source_run_id)
+                metadata.parent_source_run_id
                 if metadata.parent_source_run_id is not None
                 else None
             )
@@ -120,7 +116,7 @@ class LoaderManager:
                 if parent_source_run_id not in parent_to_children:
                     parent_to_children[parent_source_run_id] = []
                 parent_to_children[parent_source_run_id].append(metadata)
-                in_degree[SourceRunId(metadata.run_id)] = 1
+                in_degree[metadata.run_id] = 1
             # Otherwise, run is a root (orphaned or no parent)
 
         # Kahn's algorithm: start with nodes with in-degree 0
@@ -128,7 +124,7 @@ class LoaderManager:
         queue = [
             (metadata.creation_time or datetime.datetime.max, metadata)
             for metadata in run_metadata
-            if in_degree[SourceRunId(metadata.run_id)] == 0
+            if in_degree[metadata.run_id] == 0
         ]
         heapq.heapify(queue)
         result: list[RunMetadata] = []
@@ -138,7 +134,7 @@ class LoaderManager:
             result.append(metadata)
 
             # Process children of this run
-            source_run_id = SourceRunId(metadata.run_id)
+            source_run_id = metadata.run_id
             if source_run_id in parent_to_children:
                 for child_metadata in parent_to_children[source_run_id]:
                     heapq.heappush(
@@ -156,11 +152,11 @@ class LoaderManager:
                 f"Circular dependency detected or missing runs. "
                 f"Remaining runs: {remaining_len}"
             )
-            result_ids = set(SourceRunId(metadata.run_id) for metadata in result)
+            result_ids = set(metadata.run_id for metadata in result)
             remaining_metadata = [
                 metadata
                 for metadata in run_metadata
-                if SourceRunId(metadata.run_id) not in result_ids
+                if metadata.run_id not in result_ids
             ]
             remaining_metadata.sort(
                 key=lambda x: (x.creation_time or datetime.datetime.max, x.run_id)
@@ -172,7 +168,7 @@ class LoaderManager:
     def _load_project(
         self,
         project_directory: Path,
-        runs: Optional[list[str]],
+        runs: Optional[list[SourceRunId]],
     ) -> None:
         """Load a single project to target platform using topological sorting.
 
@@ -210,8 +206,7 @@ class LoaderManager:
                 )
                 continue
 
-            run_file_prefix = RunFilePrefix(source_run_file_prefix)
-            source_run_id_to_file_prefix[SourceRunId(metadata.run_id)] = run_file_prefix
+            source_run_id_to_file_prefix[metadata.run_id] = source_run_file_prefix
             run_metadata.append(metadata)
 
         if not run_metadata:
@@ -235,7 +230,7 @@ class LoaderManager:
                 self._process_run(
                     project_directory=project_directory,
                     source_run_file_prefix=source_run_id_to_file_prefix[
-                        SourceRunId(metadata.run_id)
+                        metadata.run_id
                     ],
                     metadata=metadata,
                     run_id_to_target_run_id=run_id_to_target_run_id,
@@ -265,11 +260,10 @@ class LoaderManager:
             run_id_to_target_run_id: Dictionary mapping source run IDs to target run IDs
         """
         project_id = metadata.project_id
-        original_run_id = SourceRunId(metadata.run_id)
-        custom_run_id = metadata.custom_run_id or original_run_id
+        custom_run_id = metadata.custom_run_id or metadata.run_id
         experiment_name = metadata.experiment_name
         parent_source_run_id = (
-            SourceRunId(metadata.parent_source_run_id)
+            metadata.parent_source_run_id
             if metadata.parent_source_run_id is not None
             else None
         )
@@ -288,11 +282,6 @@ class LoaderManager:
         else:
             target_experiment_id = None
 
-        # Get parent target run ID if parent exists
-        parent_target_run_id = None
-        if parent_source_run_id and parent_source_run_id in run_id_to_target_run_id:
-            parent_target_run_id = run_id_to_target_run_id[parent_source_run_id]
-
         # Check if run already exists (for resumable loading)
         target_run_id = self._data_loader.find_run(
             project_id=project_id,
@@ -302,6 +291,11 @@ class LoaderManager:
 
         # Create run if it doesn't exist
         if target_run_id is None:
+            # Get parent target run ID if parent exists
+            parent_target_run_id = None
+            if parent_source_run_id and parent_source_run_id in run_id_to_target_run_id:
+                parent_target_run_id = run_id_to_target_run_id[parent_source_run_id]
+
             target_run_id = self._data_loader.create_run(
                 project_id=project_id,
                 run_name=custom_run_id,
@@ -324,6 +318,4 @@ class LoaderManager:
             )
 
         # Store mapping for parent/child relationships
-        run_id_to_target_run_id[SourceRunId(original_run_id)] = TargetRunId(
-            target_run_id
-        )
+        run_id_to_target_run_id[metadata.run_id] = TargetRunId(target_run_id)

@@ -27,6 +27,7 @@ from mlflow.tracking import MlflowClient
 from mlflow.entities import Metric
 from mlflow.utils.mlflow_tags import MLFLOW_PARENT_RUN_ID
 
+from neptune_exporter.types import TargetExperimentId, TargetRunId
 from neptune_exporter.loaders.loader import DataLoader
 
 
@@ -98,7 +99,9 @@ class MLflowLoader(DataLoader):
             return 0
         return int(float(step) * step_multiplier)
 
-    def create_experiment(self, project_id: str, experiment_name: str) -> str:
+    def create_experiment(
+        self, project_id: str, experiment_name: str
+    ) -> TargetExperimentId:
         """Create or get MLflow experiment for a Neptune project."""
         target_experiment_name = self._get_experiment_name(project_id, experiment_name)
 
@@ -115,7 +118,7 @@ class MLflowLoader(DataLoader):
                     f"Using existing experiment '{target_experiment_name}' with ID {experiment_id}"
                 )
 
-            return experiment_id
+            return TargetExperimentId(experiment_id)
         except Exception as e:
             self._logger.error(
                 f"Error creating/getting experiment '{target_experiment_name}': {e}"
@@ -123,8 +126,11 @@ class MLflowLoader(DataLoader):
             raise
 
     def find_run(
-        self, project_id: str, run_name: str, experiment_id: Optional[str]
-    ) -> Optional[str]:
+        self,
+        project_id: str,
+        run_name: str,
+        experiment_id: Optional[TargetExperimentId],
+    ) -> Optional[TargetRunId]:
         """Find a run by name in an experiment."""
         try:
             existing_runs: list[Run] = mlflow.search_runs(
@@ -133,7 +139,7 @@ class MLflowLoader(DataLoader):
                 output_format="list",
                 max_results=1,
             )
-            return existing_runs[0].info.run_id if existing_runs else None
+            return TargetRunId(existing_runs[0].info.run_id) if existing_runs else None
         except Exception as e:
             self._logger.error(f"Error finding run '{run_name}': {e}")
             return None
@@ -142,11 +148,11 @@ class MLflowLoader(DataLoader):
         self,
         project_id: str,
         run_name: str,
-        experiment_id: Optional[str] = None,
-        parent_run_id: Optional[str] = None,
+        experiment_id: Optional[TargetExperimentId] = None,
+        parent_run_id: Optional[TargetRunId] = None,
         fork_step: Optional[float] = None,
         step_multiplier: Optional[int] = None,
-    ) -> str:
+    ) -> TargetRunId:
         """Create MLflow run.
 
         Args:
@@ -165,7 +171,7 @@ class MLflowLoader(DataLoader):
                 self._logger.info(
                     f"Created run '{run_name}' with MLflow ID {mlflow_run_id}"
                 )
-                return mlflow_run_id
+                return TargetRunId(mlflow_run_id)
         except Exception as e:
             self._logger.error(f"Error creating run '{run_name}': {e}")
             raise
@@ -173,7 +179,7 @@ class MLflowLoader(DataLoader):
     def upload_run_data(
         self,
         run_data: Generator[pa.Table, None, None],
-        run_id: str,
+        run_id: TargetRunId,
         files_directory: Path,
         step_multiplier: int,
     ) -> None:
@@ -198,7 +204,7 @@ class MLflowLoader(DataLoader):
             self._logger.error(f"Error uploading run {run_id}: {e}")
             raise
 
-    def upload_parameters(self, run_data: pd.DataFrame, run_id: str) -> None:
+    def upload_parameters(self, run_data: pd.DataFrame, run_id: TargetRunId) -> None:
         """Upload parameters (configs) to MLflow run."""
         # Filter for parameter types
         param_types = {"float", "int", "string", "bool", "datetime", "string_set"}
@@ -235,7 +241,7 @@ class MLflowLoader(DataLoader):
             self._logger.info(f"Uploaded {len(params)} parameters for run {run_id}")
 
     def upload_metrics(
-        self, run_data: pd.DataFrame, run_id: str, step_multiplier: int
+        self, run_data: pd.DataFrame, run_id: TargetRunId, step_multiplier: int
     ) -> None:
         """Upload metrics (float series) to MLflow run."""
         # Filter for float_series type
@@ -282,7 +288,7 @@ class MLflowLoader(DataLoader):
     def upload_artifacts(
         self,
         run_data: pd.DataFrame,
-        run_id: str,
+        run_id: TargetRunId,
         files_base_path: Path,
         step_multiplier: int,
     ) -> None:

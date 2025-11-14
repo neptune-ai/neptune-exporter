@@ -20,12 +20,16 @@ from pathlib import Path
 from typing import Generator, Optional
 import pyarrow as pa
 
+from neptune_exporter.types import TargetExperimentId, TargetRunId
+
 
 class DataLoader(ABC):
     """Abstract base class for data loaders that upload Neptune data to target platforms."""
 
     @abstractmethod
-    def create_experiment(self, project_id: str, experiment_name: str) -> str:
+    def create_experiment(
+        self, project_id: str, experiment_name: str
+    ) -> TargetExperimentId:
         """
         Create or get an experiment/project in the target platform.
 
@@ -40,8 +44,11 @@ class DataLoader(ABC):
 
     @abstractmethod
     def find_run(
-        self, project_id: str, run_name: str, experiment_id: Optional[str]
-    ) -> Optional[str]:
+        self,
+        project_id: str,
+        run_name: str,
+        experiment_id: Optional[TargetExperimentId],
+    ) -> Optional[TargetRunId]:
         """Find a run by name in an experiment."""
         pass
 
@@ -50,11 +57,11 @@ class DataLoader(ABC):
         self,
         project_id: str,
         run_name: str,
-        experiment_id: Optional[str] = None,
-        parent_run_id: Optional[str] = None,
+        experiment_id: Optional[TargetExperimentId] = None,
+        parent_run_id: Optional[TargetRunId] = None,
         fork_step: Optional[float] = None,
         step_multiplier: Optional[int] = None,
-    ) -> str:
+    ) -> TargetRunId:
         """
         Create a run in the target platform.
 
@@ -76,7 +83,7 @@ class DataLoader(ABC):
     def upload_run_data(
         self,
         run_data: Generator[pa.Table, None, None],
-        run_id: str,
+        run_id: TargetRunId,
         files_directory: Path,
         step_multiplier: int,
     ) -> None:

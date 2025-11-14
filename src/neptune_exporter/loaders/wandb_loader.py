@@ -23,6 +23,7 @@ import pandas as pd
 import pyarrow as pa
 import wandb
 
+from neptune_exporter.types import TargetRunId, TargetExperimentId
 from neptune_exporter.loaders.loader import DataLoader
 
 
@@ -32,7 +33,7 @@ class WandBLoader(DataLoader):
     def __init__(
         self,
         entity: str,
-        api_key: str,
+        api_key: Optional[str] = None,
         name_prefix: Optional[str] = None,
         verbose: bool = False,
     ):
@@ -51,10 +52,10 @@ class WandBLoader(DataLoader):
         self._logger.setLevel(logging.INFO if verbose else logging.ERROR)
         self._verbose = verbose
         self._active_run: Optional[wandb.Run] = None
-        self._run_id_to_wandb_id: dict[str, str] = {}  # TODO: remove
 
         # Authenticate with W&B
-        wandb.login(key=api_key)
+        if api_key:
+            wandb.login(key=api_key)
 
         # Configure W&B logging
         if not verbose:
@@ -96,26 +97,27 @@ class WandBLoader(DataLoader):
 
         return name
 
-    def _get_run_name(self, run_id: str) -> str:
-        """Get W&B run name from Neptune run ID."""
-        return run_id
-
     def _convert_step_to_int(self, step: Decimal, step_multiplier: int) -> int:
         """Convert Neptune decimal step to W&B integer step."""
         if step is None:
             return 0
         return int(float(step) * step_multiplier)
 
-    def create_experiment(self, project_id: str, experiment_name: str) -> str:
+    def create_experiment(
+        self, project_id: str, experiment_name: str
+    ) -> TargetExperimentId:
         """
         Neptune experiment_name maps to W&B group (set in create_run).
         We return the experiment name as the group name to use.
         """
-        return experiment_name
+        return TargetExperimentId(experiment_name)
 
     def find_run(
-        self, project_id: str, run_name: str, experiment_id: Optional[str]
-    ) -> Optional[str]:
+        self,
+        project_id: str,
+        run_name: str,
+        experiment_id: Optional[TargetExperimentId],
+    ) -> Optional[TargetRunId]:
         """Find a run by name in a W&B project.
 
         Args:
@@ -142,7 +144,7 @@ class WandBLoader(DataLoader):
 
             # Get the first matching run
             for run in runs:
-                return run.id
+                return TargetRunId(run.id)
 
             return None
         except Exception as e:
@@ -153,11 +155,11 @@ class WandBLoader(DataLoader):
         self,
         project_id: str,
         run_name: str,
-        experiment_id: Optional[str] = None,
-        parent_run_id: Optional[str] = None,
+        experiment_id: Optional[TargetExperimentId] = None,
+        parent_run_id: Optional[TargetRunId] = None,
         fork_step: Optional[float] = None,
         step_multiplier: Optional[int] = None,
-    ) -> str:
+    ) -> TargetRunId:
         """Create W&B run, with support for forked runs.
 
         Args:
@@ -178,9 +180,7 @@ class WandBLoader(DataLoader):
             }
 
             # Handle forking if parent exists
-            if parent_run_id and parent_run_id in self._run_id_to_wandb_id:
-                parent_wandb_id = self._run_id_to_wandb_id[parent_run_id]
-
+            if parent_run_id:
                 # Convert fork_step to int using provided step_multiplier
                 # step_multiplier should always be provided when fork_step is set
                 if fork_step is not None:
@@ -195,7 +195,7 @@ class WandBLoader(DataLoader):
                     step_int = 0
 
                 # W&B fork format: entity/project/run_id?_step=step
-                fork_from = f"{self.entity}/{sanitized_project}/{parent_wandb_id}?_step={step_int}"
+                fork_from = f"{self.entity}/{sanitized_project}/{parent_run_id}?_step={step_int}"
                 init_kwargs["fork_from"] = fork_from
                 self._logger.info(
                     f"Creating forked run '{run_name}' from parent {parent_run_id} at step {step_int}"
@@ -206,10 +206,9 @@ class WandBLoader(DataLoader):
             wandb_run_id = run.id
 
             self._active_run = run
-            self._run_id_to_wandb_id[run_name] = wandb_run_id
 
             self._logger.info(f"Created run '{run_name}' with W&B ID {wandb_run_id}")
-            return wandb_run_id
+            return TargetRunId(wandb_run_id)
 
         except Exception as e:
             self._logger.error(f"Error creating run '{run_name}': {e}")
@@ -218,7 +217,7 @@ class WandBLoader(DataLoader):
     def upload_run_data(
         self,
         run_data: Generator[pa.Table, None, None],
-        run_id: str,
+        run_id: TargetRunId,
         files_directory: Path,
         step_multiplier: int,
     ) -> None:
@@ -256,7 +255,7 @@ class WandBLoader(DataLoader):
                 self._active_run = None
             raise
 
-    def upload_parameters(self, run_data: pd.DataFrame, run_id: str) -> None:
+    def upload_parameters(self, run_data: pd.DataFrame, run_id: TargetRunId) -> None:
         """Upload parameters (configs) to W&B run."""
         if self._active_run is None:
             raise RuntimeError("No active run")
@@ -295,7 +294,7 @@ class WandBLoader(DataLoader):
             self._logger.info(f"Uploaded {len(config)} parameters for run {run_id}")
 
     def upload_metrics(
-        self, run_data: pd.DataFrame, run_id: str, step_multiplier: int
+        self, run_data: pd.DataFrame, run_id: TargetRunId, step_multiplier: int
     ) -> None:
         """Upload metrics (float series) to W&B run.
 
@@ -330,7 +329,7 @@ class WandBLoader(DataLoader):
     def upload_artifacts(
         self,
         run_data: pd.DataFrame,
-        run_id: str,
+        run_id: TargetRunId,
         files_base_path: Path,
         step_multiplier: int,
     ) -> None:
