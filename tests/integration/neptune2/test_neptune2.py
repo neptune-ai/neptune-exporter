@@ -192,5 +192,24 @@ def test_neptune2_download_files(api_token, project, test_runs, temp_dir):
             assert "metadata" in item, "Artifact file data should have metadata"
 
 
+def test_neptune2_list_runs_with_regex_filter(api_token, project, test_runs):
+    """Test list_runs filters runs using regex pattern."""
+    exporter = Neptune2Exporter(api_token=api_token)
+
+    # Test with pattern that matches all (should return at least test_runs)
+    all_matching = exporter.list_runs(project_id=project, runs=".*")
+    assert len(all_matching) >= len(test_runs)
+    assert set(test_runs).issubset(set(all_matching))
+
+    first_run_id = test_runs[0]
+    prefix_pattern = f".*{first_run_id[4:]}$"
+    prefix_matching = exporter.list_runs(project_id=project, runs=prefix_pattern)
+    assert first_run_id in prefix_matching
+
+    # Test with pattern that matches none
+    no_matching = exporter.list_runs(project_id=project, runs="^NONEXISTENT-")
+    assert len(no_matching) == 0
+
+
 def _to_table(parameters: Generator[pa.RecordBatch, None, None]) -> pa.Table:
     return pa.Table.from_batches(parameters, schema=model.SCHEMA)

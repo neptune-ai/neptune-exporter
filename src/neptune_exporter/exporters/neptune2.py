@@ -107,14 +107,12 @@ class Neptune2Exporter(NeptuneExporter):
         with neptune.init_project(
             api_token=self._api_token, project=project_id, mode="read-only"
         ) as project:
-            runs_table = project.fetch_runs_table(
-                columns=["sys/custom_run_id", "sys/id"]
-            ).to_pandas()
+            runs_table = project.fetch_runs_table().to_pandas()
             if not len(runs_table):
                 return []
 
             if runs is not None:
-                runs_table = runs_table[runs_table["sys/custom_run_id"].str.match(runs)]
+                runs_table = runs_table[runs_table["sys/id"].str.match(runs)]
             return list(runs_table["sys/id"])
 
     def download_parameters(
