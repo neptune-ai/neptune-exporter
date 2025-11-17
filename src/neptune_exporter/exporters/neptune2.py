@@ -167,6 +167,7 @@ class Neptune2Exporter(NeptuneExporter):
                 except KeyError:
                     return None
 
+            attribute_path = None
             for attribute in self._iterate_attributes(structure):
                 try:
                     attribute_path = "/".join(attribute._path)
@@ -193,7 +194,7 @@ class Neptune2Exporter(NeptuneExporter):
                         }
                     )
                 except Exception as e:
-                    self._handle_run_exception(run_id, e)
+                    self._handle_attribute_exception(run_id, attribute_path, e)
 
         if all_data:
             converted_df = self._convert_parameters_to_schema(all_data, project_id)
@@ -291,6 +292,7 @@ class Neptune2Exporter(NeptuneExporter):
         ) as run:
             structure = run.get_structure()
 
+            attribute_path = None
             for attribute in self._iterate_attributes(structure):
                 try:
                     attribute_path = "/".join(attribute._path)
@@ -314,7 +316,7 @@ class Neptune2Exporter(NeptuneExporter):
 
                     all_data_dfs.append(series_df)
                 except Exception as e:
-                    self._handle_run_exception(run_id, e)
+                    self._handle_attribute_exception(run_id, attribute_path, e)
 
         if all_data_dfs:
             converted_df = self._convert_metrics_to_schema(all_data_dfs, project_id)
@@ -393,6 +395,7 @@ class Neptune2Exporter(NeptuneExporter):
         ) as run:
             structure = run.get_structure()
 
+            attribute_path = None
             for attribute in self._iterate_attributes(structure):
                 try:
                     attribute_path = "/".join(attribute._path)
@@ -416,7 +419,7 @@ class Neptune2Exporter(NeptuneExporter):
 
                     all_data_dfs.append(series_df)
                 except Exception as e:
-                    self._handle_run_exception(run_id, e)
+                    self._handle_attribute_exception(run_id, attribute_path, e)
 
         if all_data_dfs:
             converted_df = self._convert_series_to_schema(all_data_dfs, project_id)
@@ -500,6 +503,7 @@ class Neptune2Exporter(NeptuneExporter):
         ) as run:
             structure = run.get_structure()
 
+            attribute_path = None
             for attribute in self._iterate_attributes(structure):
                 try:
                     attribute_path = "/".join(attribute._path)
@@ -614,7 +618,7 @@ class Neptune2Exporter(NeptuneExporter):
                             }
                         )
                 except Exception as e:
-                    self._handle_run_exception(run_id, e)
+                    self._handle_attribute_exception(run_id, attribute_path, e)
 
         if all_data_dfs:
             converted_df = self._convert_files_to_schema(all_data_dfs, project_id)
@@ -712,3 +716,35 @@ class Neptune2Exporter(NeptuneExporter):
             self._logger.error(
                 f"Unexpected error processing run {run_id}: {exception}", exc_info=True
             )
+
+    def _handle_attribute_exception(
+        self, run_id: SourceRunId, attribute_path: Optional[str], exception: Exception
+    ) -> None:
+        """Handle exceptions that occur during attribute processing."""
+        if attribute_path is None:
+            self._handle_run_exception(run_id, exception)
+            return
+
+        if isinstance(exception, neptune.exceptions.NeptuneConnectionLostException):
+            # Network issues - might be temporary, user should retry
+            self._logger.warning(
+                f"Connection lost processing run {run_id} attribute {attribute_path}: {exception}"
+            )
+        elif isinstance(exception, neptune.exceptions.NeptuneApiException):
+            # API errors - could be rate limiting, auth issues, etc.
+            self._logger.warning(
+                f"API error processing run {run_id} attribute {attribute_path}: {exception}"
+            )
+        elif isinstance(exception, neptune.exceptions.NeptuneException):
+            if attribute_path == "sys/group_tags":
+                self._logger.debug(
+                    f"Neptune error processing run {run_id} attribute {attribute_path}: {exception}",
+                    exc_info=True,
+                )
+            else:
+                # Other Neptune-specific errors
+                self._logger.error(
+                    f"Neptune error processing run {run_id} attribute {attribute_path}: {exception}"
+                )
+        else:
+            self._handle_run_exception(run_id, exception)
