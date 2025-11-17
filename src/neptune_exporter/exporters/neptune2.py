@@ -167,29 +167,32 @@ class Neptune2Exporter(NeptuneExporter):
                     return None
 
             for attribute in self._iterate_attributes(structure):
-                attribute_path = "/".join(attribute._path)
+                try:
+                    attribute_path = "/".join(attribute._path)
 
-                # Filter by attribute path if attributes filter is provided
-                if not self._should_include_attribute(attribute_path, attributes):
-                    continue
+                    # Filter by attribute path if attributes filter is provided
+                    if not self._should_include_attribute(attribute_path, attributes):
+                        continue
 
-                attribute_type = self._get_attribute_type(attribute)
-                if attribute_type not in _PARAMETER_TYPES:
-                    continue
+                    attribute_type = self._get_attribute_type(attribute)
+                    if attribute_type not in _PARAMETER_TYPES:
+                        continue
 
-                if attribute_type == "string_set":
-                    value = attribute.fetch()
-                else:
-                    value = get_value(all_parameter_values, attribute._path)
+                    if attribute_type == "string_set":
+                        value = attribute.fetch()
+                    else:
+                        value = get_value(all_parameter_values, attribute._path)
 
-                all_data.append(
-                    {
-                        "run_id": run_id,
-                        "attribute_path": attribute_path,
-                        "attribute_type": attribute_type,
-                        "value": value,
-                    }
-                )
+                    all_data.append(
+                        {
+                            "run_id": run_id,
+                            "attribute_path": attribute_path,
+                            "attribute_type": attribute_type,
+                            "value": value,
+                        }
+                    )
+                except Exception as e:
+                    self._handle_run_exception(run_id, e)
 
         if all_data:
             converted_df = self._convert_parameters_to_schema(all_data, project_id)
@@ -288,26 +291,29 @@ class Neptune2Exporter(NeptuneExporter):
             structure = run.get_structure()
 
             for attribute in self._iterate_attributes(structure):
-                attribute_path = "/".join(attribute._path)
+                try:
+                    attribute_path = "/".join(attribute._path)
 
-                # Filter by attribute path if attributes filter is provided
-                if not self._should_include_attribute(attribute_path, attributes):
-                    continue
+                    # Filter by attribute path if attributes filter is provided
+                    if not self._should_include_attribute(attribute_path, attributes):
+                        continue
 
-                attribute_type = self._get_attribute_type(attribute)
-                if attribute_type not in _METRIC_TYPES:
-                    continue
+                    attribute_type = self._get_attribute_type(attribute)
+                    if attribute_type not in _METRIC_TYPES:
+                        continue
 
-                series_attribute = cast(FetchableSeries, attribute)
-                series_df = series_attribute.fetch_values(
-                    progress_bar=None if self._verbose else False
-                )
+                    series_attribute = cast(FetchableSeries, attribute)
+                    series_df = series_attribute.fetch_values(
+                        progress_bar=None if self._verbose else False
+                    )
 
-                series_df["run_id"] = run_id
-                series_df["attribute_path"] = attribute_path
-                series_df["attribute_type"] = attribute_type
+                    series_df["run_id"] = run_id
+                    series_df["attribute_path"] = attribute_path
+                    series_df["attribute_type"] = attribute_type
 
-                all_data_dfs.append(series_df)
+                    all_data_dfs.append(series_df)
+                except Exception as e:
+                    self._handle_run_exception(run_id, e)
 
         if all_data_dfs:
             converted_df = self._convert_metrics_to_schema(all_data_dfs, project_id)
@@ -383,26 +389,29 @@ class Neptune2Exporter(NeptuneExporter):
             structure = run.get_structure()
 
             for attribute in self._iterate_attributes(structure):
-                attribute_path = "/".join(attribute._path)
+                try:
+                    attribute_path = "/".join(attribute._path)
 
-                # Filter by attribute path if attributes filter is provided
-                if not self._should_include_attribute(attribute_path, attributes):
-                    continue
+                    # Filter by attribute path if attributes filter is provided
+                    if not self._should_include_attribute(attribute_path, attributes):
+                        continue
 
-                attribute_type = self._get_attribute_type(attribute)
-                if attribute_type not in _SERIES_TYPES:
-                    continue
+                    attribute_type = self._get_attribute_type(attribute)
+                    if attribute_type not in _SERIES_TYPES:
+                        continue
 
-                series_attribute = cast(FetchableSeries, attribute)
-                series_df = series_attribute.fetch_values(
-                    progress_bar=None if self._verbose else False
-                )
+                    series_attribute = cast(FetchableSeries, attribute)
+                    series_df = series_attribute.fetch_values(
+                        progress_bar=None if self._verbose else False
+                    )
 
-                series_df["run_id"] = run_id
-                series_df["attribute_path"] = attribute_path
-                series_df["attribute_type"] = attribute_type
+                    series_df["run_id"] = run_id
+                    series_df["attribute_path"] = attribute_path
+                    series_df["attribute_type"] = attribute_type
 
-                all_data_dfs.append(series_df)
+                    all_data_dfs.append(series_df)
+                except Exception as e:
+                    self._handle_run_exception(run_id, e)
 
         if all_data_dfs:
             converted_df = self._convert_series_to_schema(all_data_dfs, project_id)
@@ -483,108 +492,118 @@ class Neptune2Exporter(NeptuneExporter):
             structure = run.get_structure()
 
             for attribute in self._iterate_attributes(structure):
-                attribute_path = "/".join(attribute._path)
+                try:
+                    attribute_path = "/".join(attribute._path)
 
-                # Filter by attribute path if attributes filter is provided
-                if not self._should_include_attribute(attribute_path, attributes):
-                    continue
+                    # Filter by attribute path if attributes filter is provided
+                    if not self._should_include_attribute(attribute_path, attributes):
+                        continue
 
-                attribute_type = self._get_attribute_type(attribute)
-                if attribute_type in _FILE_TYPES:
-                    file_attribute = cast(na.File, attribute)
+                    attribute_type = self._get_attribute_type(attribute)
+                    if attribute_type in _FILE_TYPES:
+                        file_attribute = cast(na.File, attribute)
 
-                    file_path = destination / project_id / run_id / attribute_path
-                    file_path.parent.mkdir(parents=True, exist_ok=True)
-                    file_attribute.download(
-                        str(file_path), progress_bar=None if self._verbose else False
-                    )
+                        file_path = destination / project_id / run_id / attribute_path
+                        file_path.parent.mkdir(parents=True, exist_ok=True)
+                        file_attribute.download(
+                            str(file_path),
+                            progress_bar=None if self._verbose else False,
+                        )
 
-                    all_data_dfs.append(
-                        {
-                            "run_id": run_id,
-                            "step": None,
-                            "attribute_path": attribute_path,
-                            "attribute_type": attribute_type,
-                            "file_value": {
-                                "path": str(file_path.relative_to(destination))
-                            },
-                        }
-                    )
-                elif attribute_type in _ARTIFACT_TYPES:
-                    artifact_attribute = cast(na.Artifact, attribute)
-
-                    artifact_path = destination / project_id / run_id / attribute_path
-                    artifact_path.mkdir(parents=True, exist_ok=True)
-                    artifact_files_list = artifact_attribute.fetch_files_list()
-
-                    # Serialize the artifact file list to JSON
-                    files_list_data_path = artifact_path / "files_list.json"
-                    serialized_data = [
-                        file_data.to_dto() for file_data in artifact_files_list
-                    ]
-                    with open(files_list_data_path, "w") as opened:
-                        json.dump(serialized_data, opened)
-
-                    all_data_dfs.append(
-                        {
-                            "run_id": run_id,
-                            "step": None,
-                            "attribute_path": attribute_path,
-                            "attribute_type": attribute_type,
-                            "file_value": {
-                                "path": str(
-                                    files_list_data_path.relative_to(destination)
-                                )
-                            },
-                        }
-                    )
-                elif attribute_type in _FILE_SERIES_TYPES:
-                    file_series_attribute = cast(na.FileSeries, attribute)
-
-                    file_series_path = (
-                        destination / project_id / run_id / attribute_path
-                    )
-                    file_series_attribute.download(
-                        str(file_series_path),
-                        progress_bar=None if self._verbose else False,
-                    )
-                    file_paths = [p for p in file_series_path.iterdir() if p.is_file()]
-
-                    all_data_dfs.extend(
-                        [
+                        all_data_dfs.append(
                             {
                                 "run_id": run_id,
-                                "step": Decimal(file_path.stem),
+                                "step": None,
                                 "attribute_path": attribute_path,
                                 "attribute_type": attribute_type,
                                 "file_value": {
                                     "path": str(file_path.relative_to(destination))
                                 },
                             }
-                            for file_path in file_paths
+                        )
+                    elif attribute_type in _ARTIFACT_TYPES:
+                        artifact_attribute = cast(na.Artifact, attribute)
+
+                        artifact_path = (
+                            destination / project_id / run_id / attribute_path
+                        )
+                        artifact_path.mkdir(parents=True, exist_ok=True)
+                        artifact_files_list = artifact_attribute.fetch_files_list()
+
+                        # Serialize the artifact file list to JSON
+                        files_list_data_path = artifact_path / "files_list.json"
+                        serialized_data = [
+                            file_data.to_dto() for file_data in artifact_files_list
                         ]
-                    )
-                elif attribute_type in _FILE_SET_TYPES:
-                    file_set_attribute = cast(na.FileSet, attribute)
+                        with open(files_list_data_path, "w") as opened:
+                            json.dump(serialized_data, opened)
 
-                    file_set_path = destination / project_id / run_id / attribute_path
-                    file_set_path.mkdir(parents=True, exist_ok=True)
-                    file_set_attribute.download(
-                        str(file_set_path),
-                        progress_bar=None if self._verbose else False,
-                    )
+                        all_data_dfs.append(
+                            {
+                                "run_id": run_id,
+                                "step": None,
+                                "attribute_path": attribute_path,
+                                "attribute_type": attribute_type,
+                                "file_value": {
+                                    "path": str(
+                                        files_list_data_path.relative_to(destination)
+                                    )
+                                },
+                            }
+                        )
+                    elif attribute_type in _FILE_SERIES_TYPES:
+                        file_series_attribute = cast(na.FileSeries, attribute)
 
-                    all_data_dfs.append(
-                        {
-                            "run_id": run_id,
-                            "step": None,
-                            "attribute_path": attribute_path,
-                            "attribute_type": attribute_type,
-                            "file_value": {
-                                "path": str(file_set_path.relative_to(destination))
-                            },
-                        }
-                    )
+                        file_series_path = (
+                            destination / project_id / run_id / attribute_path
+                        )
+                        file_series_attribute.download(
+                            str(file_series_path),
+                            progress_bar=None if self._verbose else False,
+                        )
+                        file_paths = [
+                            p for p in file_series_path.iterdir() if p.is_file()
+                        ]
+
+                        all_data_dfs.extend(
+                            [
+                                {
+                                    "run_id": run_id,
+                                    "step": Decimal(file_path.stem),
+                                    "attribute_path": attribute_path,
+                                    "attribute_type": attribute_type,
+                                    "file_value": {
+                                        "path": str(file_path.relative_to(destination))
+                                    },
+                                }
+                                for file_path in file_paths
+                            ]
+                        )
+                    elif attribute_type in _FILE_SET_TYPES:
+                        file_set_attribute = cast(na.FileSet, attribute)
+
+                        file_set_path = (
+                            destination / project_id / run_id / attribute_path
+                        )
+                        file_set_path.mkdir(parents=True, exist_ok=True)
+                        file_set_attribute.download(
+                            str(file_set_path),
+                            progress_bar=None if self._verbose else False,
+                        )
+
+                        all_data_dfs.append(
+                            {
+                                "run_id": run_id,
+                                "step": None,
+                                "attribute_path": attribute_path,
+                                "attribute_type": attribute_type,
+                                "file_value": {
+                                    "path": str(file_set_path.relative_to(destination))
+                                },
+                            }
+                        )
+                except Exception as e:
+                    self._handle_run_exception(run_id, e)
 
         if all_data_dfs:
             converted_df = self._convert_files_to_schema(all_data_dfs, project_id)
