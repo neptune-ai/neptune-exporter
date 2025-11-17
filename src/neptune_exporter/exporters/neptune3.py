@@ -61,6 +61,7 @@ class Neptune3Exporter(NeptuneExporter):
         self._series_attribute_batch_size = series_attribute_batch_size
         self._file_attribute_batch_size = file_attribute_batch_size
         self._file_series_attribute_batch_size = file_series_attribute_batch_size
+        self._quantize_base = Decimal("1.000000")
         self._executor = ThreadPoolExecutor(max_workers=max_workers)
         self._verbose = verbose
         self._logger = logging.getLogger(__name__)
@@ -243,7 +244,9 @@ class Neptune3Exporter(NeptuneExporter):
             [0], future_stack=True
         )  # index = [run, step, attribute_path_type], columns = [value_type(absolute_time, value)]
         stacked_df.index.names = ["run", "step", "attribute_path"]
-        stacked_df = stacked_df.reset_index()
+        stacked_df = stacked_df.reset_index().dropna(
+            subset=["absolute_time", "value"], how="all"
+        )
 
         return pd.DataFrame(
             {
@@ -251,7 +254,11 @@ class Neptune3Exporter(NeptuneExporter):
                 "run_id": stacked_df["run"],
                 "attribute_path": stacked_df["attribute_path"],
                 "attribute_type": "float_series",
-                "step": stacked_df["step"].map(Decimal),
+                "step": stacked_df["step"].map(
+                    lambda x: Decimal(x).quantize(self._quantize_base)
+                    if pd.notna(x)
+                    else None
+                ),
                 "timestamp": stacked_df["absolute_time"],
                 "int_value": None,
                 "float_value": stacked_df["value"],
@@ -336,7 +343,9 @@ class Neptune3Exporter(NeptuneExporter):
             [0], future_stack=True
         )  # index = [run, step, attribute_path], columns = [value_type(absolute_time, value)]
         stacked_df.index.names = ["run", "step", "attribute_path"]
-        stacked_df = stacked_df.reset_index()
+        stacked_df = stacked_df.reset_index().dropna(
+            subset=["absolute_time", "value"], how="all"
+        )
 
         attribute_type_map = {name: typ for name, typ in attribute_path_types}
         stacked_df["attribute_type"] = stacked_df["attribute_path"].map(
@@ -349,7 +358,11 @@ class Neptune3Exporter(NeptuneExporter):
                 "run_id": stacked_df["run"],
                 "attribute_path": stacked_df["attribute_path"],
                 "attribute_type": stacked_df["attribute_type"],
-                "step": stacked_df["step"].map(Decimal),
+                "step": stacked_df["step"].map(
+                    lambda x: Decimal(x).quantize(self._quantize_base)
+                    if pd.notna(x)
+                    else None
+                ),
                 "timestamp": stacked_df["absolute_time"],
                 "value": stacked_df["value"],
                 "int_value": None,
@@ -370,7 +383,7 @@ class Neptune3Exporter(NeptuneExporter):
             elif attr_type == "histogram_series":
                 result_df.loc[mask, "histogram_value"] = result_df.loc[
                     mask, "value"
-                ].map(dataclasses.asdict)
+                ].map(lambda x: dataclasses.asdict(x) if pd.notna(x) else None)
             else:
                 raise ValueError(f"Unsupported series type: {attr_type}")
 
@@ -534,7 +547,9 @@ class Neptune3Exporter(NeptuneExporter):
             # Reset index and melt the file_series_df to get step and timestamp info
             series_stacked_df = file_series_df.stack([0], future_stack=True)
             series_stacked_df.index.names = ["run", "step", "attribute_path"]
-            series_stacked_df = series_stacked_df.reset_index()
+            series_stacked_df = series_stacked_df.reset_index().dropna(
+                subset=["absolute_time", "value"], how="all"
+            )
 
             # Merge with melted_df to get timestamp
             melted_df = melted_df.merge(
@@ -552,7 +567,11 @@ class Neptune3Exporter(NeptuneExporter):
                 "run_id": melted_df["run"],
                 "attribute_path": melted_df["attribute_path"],
                 "attribute_type": attribute_type,
-                "step": melted_df["step"].map(Decimal),
+                "step": melted_df["step"].map(
+                    lambda x: Decimal(x).quantize(self._quantize_base)
+                    if pd.notna(x)
+                    else None
+                ),
                 "timestamp": melted_df["absolute_time"],
                 "int_value": None,
                 "float_value": None,

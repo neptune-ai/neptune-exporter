@@ -78,6 +78,7 @@ class Neptune2Exporter(NeptuneExporter):
     ):
         self._api_token = api_token
         self._max_workers = max_workers
+        self._quantize_base = Decimal("1.000000")
         self._executor = ThreadPoolExecutor(max_workers=max_workers)
         self._verbose = verbose
         self._logger = logging.getLogger(__name__)
@@ -331,7 +332,11 @@ class Neptune2Exporter(NeptuneExporter):
                 "run_id": all_data_df["run_id"],
                 "attribute_path": all_data_df["attribute_path"],
                 "attribute_type": all_data_df["attribute_type"],
-                "step": all_data_df["step"].map(Decimal),
+                "step": all_data_df["step"].map(
+                    lambda x: Decimal(x).quantize(self._quantize_base)
+                    if pd.notna(x)
+                    else None
+                ),
                 "timestamp": all_data_df["timestamp"],
                 "int_value": None,
                 "float_value": all_data_df["value"],
@@ -429,7 +434,11 @@ class Neptune2Exporter(NeptuneExporter):
                 "run_id": all_data_df["run_id"],
                 "attribute_path": all_data_df["attribute_path"],
                 "attribute_type": all_data_df["attribute_type"],
-                "step": all_data_df["step"].map(Decimal),
+                "step": all_data_df["step"].map(
+                    lambda x: Decimal(x).quantize(self._quantize_base)
+                    if pd.notna(x)
+                    else None
+                ),
                 "timestamp": all_data_df["timestamp"],
                 "int_value": None,
                 "float_value": None,
@@ -569,7 +578,9 @@ class Neptune2Exporter(NeptuneExporter):
                             [
                                 {
                                     "run_id": run_id,
-                                    "step": Decimal(file_path.stem),
+                                    "step": Decimal(file_path.stem).quantize(
+                                        self._quantize_base
+                                    ),
                                     "attribute_path": attribute_path,
                                     "attribute_type": attribute_type,
                                     "file_value": {

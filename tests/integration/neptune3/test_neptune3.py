@@ -97,6 +97,7 @@ def test_neptune3_download_series_empty(api_token, project, test_runs):
 
 def test_neptune3_download_series(api_token, project, test_runs):
     exporter = Neptune3Exporter(api_token=api_token)
+
     series = _to_table(
         exporter.download_series(
             project_id=project,

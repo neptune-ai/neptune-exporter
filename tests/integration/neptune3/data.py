@@ -76,13 +76,13 @@ TEST_DATA = [
         },
         float_series={
             f"{TEST_PATH}/float-series-value_{j}": [
-                (k, i * 100 + j + k * 0.01) for k in range(10)
+                (k * 0.1, i * 100 + j + k * 0.01) for k in range(100)
             ]
             for j in range(5)
         },
         string_series={
             f"{TEST_PATH}/string-series-value_{j}": [
-                (k, f"string-series_{i}_{j}_{k}") for k in range(10)
+                (k * 0.1, f"string-series_{i}_{j}_{k}") for k in range(100)
             ]
             for j in range(5)
         },
