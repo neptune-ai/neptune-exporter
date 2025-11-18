@@ -34,12 +34,14 @@ class ExportManager:
         writer: ParquetWriter,
         files_destination: Path,
         batch_size: int = 16,
+        progress_bar: bool = True,
     ):
         self._exporter = exporter
         self._reader = reader
         self._writer = writer
         self._files_destination = files_destination
         self._batch_size = batch_size
+        self._progress_bar = progress_bar
 
     def run(
         self,
@@ -53,7 +55,10 @@ class ExportManager:
         # Step 1: List all runs for all projects
         project_runs = {}
         for project_id in tqdm(
-            project_ids, desc="Listing runs in projects", unit="project"
+            project_ids,
+            desc="Listing runs in projects",
+            unit="project",
+            disable=not self._progress_bar,
         ):
             run_ids = self._exporter.list_runs(project_id, runs)
             project_runs[project_id] = run_ids
@@ -65,7 +70,10 @@ class ExportManager:
 
         # Step 2: Process each project's runs
         for project_id, run_ids in tqdm(
-            project_runs.items(), desc="Exporting projects", unit="project"
+            project_runs.items(),
+            desc="Exporting projects",
+            unit="project",
+            disable=not self._progress_bar,
         ):
             # Filter out already-exported runs
             original_count = len(run_ids)
@@ -89,6 +97,7 @@ class ExportManager:
                 desc=f"Exporting runs from {project_id}",
                 unit="run",
                 leave=False,
+                disable=not self._progress_bar,
             ) as runs_pbar:
                 for batch_start in range(0, len(run_ids), self._batch_size):
                     batch_run_ids = run_ids[
@@ -108,6 +117,7 @@ class ExportManager:
                                 unit="B",
                                 unit_scale=True,
                                 leave=False,
+                                disable=not self._progress_bar,
                             ) as pbar:
                                 for batch in self._exporter.download_parameters(
                                     project_id=project_id,
@@ -123,6 +133,7 @@ class ExportManager:
                                 unit="B",
                                 unit_scale=True,
                                 leave=False,
+                                disable=not self._progress_bar,
                             ) as pbar:
                                 for batch in self._exporter.download_metrics(
                                     project_id=project_id,
@@ -138,6 +149,7 @@ class ExportManager:
                                 unit="B",
                                 unit_scale=True,
                                 leave=False,
+                                disable=not self._progress_bar,
                             ) as pbar:
                                 for batch in self._exporter.download_series(
                                     project_id=project_id,
@@ -152,6 +164,7 @@ class ExportManager:
                                 desc=f"  Files ({len(batch_run_ids)} runs)",
                                 unit=" files",
                                 leave=False,
+                                disable=not self._progress_bar,
                             ) as pbar:
                                 for batch in self._exporter.download_files(
                                     project_id=project_id,

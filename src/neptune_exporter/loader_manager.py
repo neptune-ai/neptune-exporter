@@ -35,11 +35,13 @@ class LoaderManager:
         data_loader: DataLoader,
         files_directory: Path,
         step_multiplier: int,
+        progress_bar: bool = True,
     ):
         self._parquet_reader = parquet_reader
         self._data_loader = data_loader
         self._files_directory = files_directory
         self._step_multiplier = step_multiplier
+        self._progress_bar = progress_bar
         self._logger = logging.getLogger(__name__)
 
     def load(
@@ -67,7 +69,10 @@ class LoaderManager:
 
         # Process each project
         for project_directory in tqdm(
-            project_directories, desc="Loading projects", unit="project"
+            project_directories,
+            desc="Loading projects",
+            unit="project",
+            disable=not self._progress_bar,
         ):
             try:
                 self._load_project(project_directory, runs=runs)
@@ -195,6 +200,7 @@ class LoaderManager:
             desc="Reading run metadata",
             unit="run",
             leave=False,
+            disable=not self._progress_bar,
         ):
             metadata = self._parquet_reader.read_run_metadata(
                 project_directory, source_run_file_prefix
@@ -225,6 +231,7 @@ class LoaderManager:
             desc=f"Loading runs from {project_directory}",
             unit="run",
             leave=False,
+            disable=not self._progress_bar,
         ):
             try:
                 self._process_run(
