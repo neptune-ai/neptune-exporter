@@ -77,8 +77,7 @@ def cli():
 @click.option(
     "--exporter",
     type=click.Choice(["neptune2", "neptune3"], case_sensitive=False),
-    default="neptune3",
-    help="Neptune exporter to use. Default: neptune3.",
+    help="Neptune exporter to use.",
 )
 @click.option(
     "--data-path",
@@ -104,6 +103,11 @@ def cli():
     is_flag=True,
     help="Enable verbose logging including Neptune internal logs.",
 )
+@click.option(
+    "--no-progress",
+    is_flag=True,
+    help="Disable progress bar.",
+)
 def export(
     project_ids: tuple[str, ...],
     runs: str | None,
@@ -115,6 +119,7 @@ def export(
     files_path: Path,
     api_token: str | None,
     verbose: bool,
+    no_progress: bool,
 ) -> None:
     """Export Neptune experiment data to parquet files.
 
@@ -228,6 +233,7 @@ def export(
         reader=reader,
         writer=writer,
         files_destination=files_path,
+        progress_bar=not no_progress,
     )
 
     click.echo(f"Starting export of {len(project_ids_list)} project(s)...")
@@ -293,8 +299,7 @@ def export(
 @click.option(
     "--loader",
     type=click.Choice(["mlflow", "wandb"], case_sensitive=False),
-    default="mlflow",
-    help="Target platform loader to use. Default: mlflow.",
+    help="Target platform loader to use.",
 )
 @click.option(
     "--mlflow-tracking-uri",
@@ -318,6 +323,11 @@ def export(
     is_flag=True,
     help="Enable verbose logging including Neptune internal logs.",
 )
+@click.option(
+    "--no-progress",
+    is_flag=True,
+    help="Disable progress bar.",
+)
 def load(
     data_path: Path,
     files_path: Path,
@@ -330,6 +340,7 @@ def load(
     wandb_api_key: str | None,
     name_prefix: str | None,
     verbose: bool,
+    no_progress: bool,
 ) -> None:
     """Load exported Neptune data from parquet files to target platforms (MLflow or W&B).
 
@@ -417,6 +428,7 @@ def load(
         data_loader=data_loader,
         files_directory=files_path,
         step_multiplier=step_multiplier,
+        progress_bar=not no_progress,
     )
 
     click.echo(f"Starting {loader_name} loading from {data_path.absolute()}")
