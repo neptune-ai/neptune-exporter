@@ -16,6 +16,7 @@
 import os
 import re
 import logging
+import tempfile
 from decimal import Decimal
 from pathlib import Path
 from typing import Generator, Optional, Any
@@ -387,30 +388,26 @@ class WandBLoader(DataLoader):
                     else:
                         self._logger.warning(f"File not found: {file_path}")
 
-        # Handle string series as W&B Tables
+        # Handle string series as text artifacts
         string_series_data = run_data[run_data["attribute_type"] == "string_series"]
         for attr_path, group in string_series_data.groupby("attribute_path"):
             attr_name = self._sanitize_attribute_name(attr_path)
-            # Use global step multiplier
 
-            # Create table data
-            table_data = []
-            for _, row in group.iterrows():
-                if pd.notna(row["string_value"]) and pd.notna(row["step"]):
-                    step = self._convert_step_to_int(row["step"], step_multiplier)
-                    timestamp_str = (
-                        row["timestamp"].isoformat()
-                        if pd.notna(row["timestamp"])
-                        else None
-                    )
-                    table_data.append([step, row["string_value"], timestamp_str])
+            # Create temporary file with text content
+            with tempfile.NamedTemporaryFile(
+                mode="w", suffix=".txt", encoding="utf-8"
+            ) as tmp_file:
+                for _, row in group.iterrows():
+                    if pd.notna(row["string_value"]) and pd.notna(row["step"]):
+                        step = self._convert_step_to_int(row["step"], step_multiplier)
+                        text_line = f"[{step}] {row['string_value']}\n"
+                        tmp_file.write(text_line)
+                tmp_file_path = tmp_file.name
 
-            if table_data:
-                # Create and log W&B Table
-                table = wandb.Table(
-                    columns=["step", "value", "timestamp"], data=table_data
-                )
-                self._active_run.log({attr_name: table})
+                # Create and log W&B artifact
+                artifact = wandb.Artifact(name=attr_name, type="string_series")
+                artifact.add_file(tmp_file_path, name="series.txt")
+                self._active_run.log_artifact(artifact)
 
         # Handle histogram series as W&B Histograms
         histogram_series_data = run_data[

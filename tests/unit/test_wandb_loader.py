@@ -322,7 +322,7 @@ def test_upload_artifacts_file_series():
 
 
 def test_upload_artifacts_string_series():
-    """Test string series artifact upload as W&B Table."""
+    """Test string series artifact upload as text artifact."""
     loader = WandBLoader(entity="test-entity")
 
     mock_run = Mock()
@@ -338,28 +338,39 @@ def test_upload_artifacts_string_series():
         }
     )
 
-    with patch("wandb.Table", spec=wandb.Table) as mock_table_class:
-        mock_table = Mock()
-        mock_table_class.return_value = mock_table
+    with (
+        patch("wandb.Artifact", spec=wandb.Artifact) as mock_artifact_class,
+        patch("tempfile.NamedTemporaryFile") as mock_temp_file,
+    ):
+        # Mock temporary file
+        mock_file = Mock()
+        mock_file.name = "/tmp/test_series.txt"
+        mock_file.write = Mock()
+        mock_file.flush = Mock()
+        mock_temp_file.return_value.__enter__.return_value = mock_file
+
+        mock_artifact = Mock()
+        mock_artifact_class.return_value = mock_artifact
 
         files_base_path = Path("/test/files")
         loader.upload_artifacts(
             test_data, "RUN-123", files_base_path, step_multiplier=1
         )
 
-        # Verify Table was created and logged
-        mock_table_class.assert_called_once()
-        mock_run.log.assert_called_once()
+        # Verify artifact was created and logged
+        mock_artifact_class.assert_called_once_with(
+            name="test_string_series", type="string_series"
+        )
+        mock_artifact.add_file.assert_called_once()
+        mock_run.log_artifact.assert_called_once_with(mock_artifact)
 
-        # Check table columns
-        call_kwargs = mock_table_class.call_args[1]
-        assert call_kwargs["columns"] == ["step", "value", "timestamp"]
-
-        # Check table data
-        table_data = call_kwargs["data"]
-        assert len(table_data) == 2
-        assert table_data[0][0] == 1  # step
-        assert table_data[0][1] == "value1"  # value
+        # Verify text content was written
+        assert mock_file.write.call_count >= 1
+        # Get all written text (in case write is called multiple times)
+        written_calls = mock_file.write.call_args_list
+        all_written_text = "".join(call[0][0] for call in written_calls)
+        assert "[1] value1" in all_written_text
+        assert "[2] value2" in all_written_text
 
 
 def test_upload_artifacts_histogram_series():
