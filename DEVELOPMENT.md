@@ -1,217 +1,52 @@
-# Neptune Exporter
-
-Migration tool to help Neptune customers transition their data out of Neptune in case of acquisition.
-
-## Development
-
-### Setup
-
-```bash
-# Install dependencies
-uv sync --dev
-
-# Run linting and formatting
-uv run pre-commit run --all-files
-
-# Run tests
-# Note: Integration tests require environment variables:
-# - NEPTUNE2_E2E_API_TOKEN: Neptune 2.x API token for authentication
-# - NEPTUNE2_E2E_PROJECT: Neptune 2.x project identifier for testing
-# - NEPTUNE3_E2E_API_TOKEN: Neptune 3.x API token for authentication
-# - NEPTUNE3_E2E_PROJECT: Neptune 3.x project identifier for testing
-uv run pytest tests/ -v
-```
-
-### CI/CD
-
-This project uses GitHub Actions for continuous integration. The CI workflow runs on every push and pull request and includes:
-
-- **Pre-commit hooks**: Code formatting (ruff), linting (ruff), type checking (mypy), and license insertion
-- **Tests**: Runs pytest on the test suite with coverage reporting
-- **Test Reports**: Generates JUnit XML test reports with GitHub Actions integration
-- **Python version**: Tests against Python 3.13
-
-The workflow is defined in `.github/workflows/ci.yml` and uses `uv` for dependency management.
-
-### Pre-commit
-
-This project uses pre-commit hooks to ensure code quality. The hooks include:
-
-- **ruff**: Code formatting and linting
-- **mypy**: Type checking
-- **license**: Automatic license header insertion
-
-To install pre-commit hooks:
-
-```bash
-uv run pre-commit install
-```
-
-## Usage
-
-The Neptune Exporter provides a complete migration pipeline from Neptune to other platforms like MLflow.
-
-### Export Data from Neptune
-
-Export Neptune experiment data to parquet files:
-
-```bash
-# Export all data from a project
-neptune-exporter export -p "my-org/my-project"
-
-# Export only parameters and metrics from specific runs
-neptune-exporter export -p "my-org/my-project" -r "RUN-*" --exclude files
-
-# Export specific attributes only (exact match)
-neptune-exporter export -p "my-org/my-project" -a "learning_rate" -a "batch_size"
-
-# Export attributes matching a pattern (regex)
-neptune-exporter export -p "my-org/my-project" -a "config/.*"
-
-# Use Neptune 2.x exporter
-neptune-exporter export -p "my-org/my-project" --exporter neptune2
-
-# Export with custom paths
-neptune-exporter export -p "my-org/my-project" --data-path ./my-data --files-path ./my-files
-
-# Overwrite existing data (re-export all runs)
-neptune-exporter export -p "my-org/my-project" --overwrite
-```
-
-#### Resume and Overwrite Behavior
-
-By default, the exporter will **resume** interrupted exports by skipping runs that have already been exported. This is useful when:
-
-- An export was interrupted and you want to continue from where it left off
-- You want to add new runs to an existing export
-- You want to avoid re-downloading large amounts of data
-
-Use the `--overwrite` flag to force re-export of all runs, which will:
-
-- Delete existing project data before starting the export
-- Re-export all runs from scratch
-- Ensure no mixing of old and new data
-
-**Note:** Resume works at the run level - if a run was partially exported, it will be skipped entirely and not resumed.
-
-### Load Data to Target Platforms
-
-Load exported parquet data to MLflow or Weights & Biases:
-
-#### MLflow
-
-```bash
-# Load all data from exported parquet files to MLflow (default)
-neptune-exporter load
-
-# Load specific projects
-neptune-exporter load -p "my-org/my-project1" -p "my-org/my-project2"
-
-# Load specific runs
-neptune-exporter load -r "RUN-123" -r "RUN-456"
-
-# Load with custom paths
-neptune-exporter load --data-path ./my-data --files-path ./my-files
-
-# Load to specific MLflow tracking URI
-neptune-exporter load --mlflow-tracking-uri "http://localhost:5000"
-```
-
-#### Weights & Biases
-
-```bash
-# Load all data to W&B
-neptune-exporter load --loader wandb --wandb-entity my-org
-
-# Load to W&B with API key
-neptune-exporter load --loader wandb --wandb-entity my-org --wandb-api-key YOUR_API_KEY
-
-# Load specific projects to W&B
-neptune-exporter load --loader wandb --wandb-entity my-org -p "my-org/my-project"
-
-# Load with custom paths
-neptune-exporter load --loader wandb --wandb-entity my-org --data-path ./my-data --files-path ./my-files
-```
-
-### View Data Summary
-
-Get a summary of exported data:
-
-```bash
-# Show summary of all exported data
-neptune-exporter summary
-
-# Show summary from custom data path
-neptune-exporter summary --data-path ./my-data
-```
-
-### Complete Migration Examples
-
-#### To MLflow
-
-```bash
-# Step 1: Export data from Neptune
-neptune-exporter export -p "my-org/my-project"
-
-# Step 2: View what was exported
-neptune-exporter summary
-
-# Step 3: Load to MLflow
-neptune-exporter load --mlflow-tracking-uri "http://localhost:5000"
-```
-
-#### To Weights & Biases
-
-```bash
-# Step 1: Export data from Neptune
-neptune-exporter export -p "my-org/my-project"
-
-# Step 2: View what was exported
-neptune-exporter summary
-
-# Step 3: Load to W&B
-neptune-exporter load --loader wandb --wandb-entity my-org
-```
-
-
-## Data Type Mappings
-
-### Neptune to MLflow
-
-| Neptune Type | MLflow Type | Notes |
-|--------------|-------------|-------|
-| Parameters (float, int, string, bool, datetime, string_set) | Parameters | All values converted to strings |
-| Float Series | Metrics | Steps converted from decimal to integer |
-| String Series | Artifacts | Saved as text files |
-| Histogram Series | Artifacts | Saved as JSON |
-| Files | Artifacts | Direct file upload |
-| File Series | Artifacts | Files with step information in path |
-
-#### MLflow Key Considerations
-
-- **Step Conversion**: Neptune uses decimal steps, MLflow uses integer steps. Multiplier automatically determined based on data precision
-- **Attribute Names**: Neptune attribute paths are sanitized to meet MLflow key constraints (max 250 chars, alphanumeric + special chars)
-- **Experiment Names**: Neptune project IDs become MLflow experiment names (with optional prefix)
-- **File Artifacts**: Files are uploaded as MLflow artifacts with preserved directory structure
-- **Nested Runs**: Neptune forks become MLflow nested runs using parent-child relationships
-
-### Neptune to Weights & Biases
-
-| Neptune Type | W&B Type | Notes |
-|--------------|----------|-------|
-| Parameters (float, int, string, bool, datetime, string_set) | Config | Native type preservation (string_set as list) |
-| Float Series | Metrics | Steps converted from decimal to integer |
-| String Series | Tables | W&B Tables with step, value, timestamp columns |
-| Histogram Series | Histograms | Native W&B Histogram objects |
-| Files | Artifacts | W&B artifacts (supports both files and directories) |
-| File Series | Artifacts | Artifacts with step in name |
-
-#### W&B Key Considerations
-
-- **Step Conversion**: Neptune uses decimal steps, W&B uses integer steps. Multiplier automatically determined based on data precision
-- **Attribute Names**: Neptune attribute paths are sanitized to meet W&B key constraints (must start with letter/underscore, only alphanumerics and underscores)
-- **Project Names**: Neptune project ID and experiment name are combined into W&B project name
-- **Entity**: W&B requires an entity (organization/username) to be specified
-- **Nested Runs**: Neptune forks become W&B forked runs using native `fork_from` feature
-- **String Series**: Logged as W&B Tables for better visualization and analysis
-- **Histograms**: Use native W&B Histogram objects for proper visualization
+# Development Guide
+
+Notes for contributors extending the exporter (new loaders/targets, schema tweaks, etc.). User-facing usage lives in `README.md`.
+
+## Local environment
+- Install deps with `uv sync --dev`.
+- Run checks with `uv run pre-commit run --all-files`.
+- Run tests with `uv run pytest -v`. Integration-style tests need:
+  - `NEPTUNE2_E2E_API_TOKEN`, `NEPTUNE2_E2E_PROJECT`
+  - `NEPTUNE3_E2E_API_TOKEN`, `NEPTUNE3_E2E_PROJECT`
+
+## Code structure (src/neptune_exporter)
+- `main.py`: Click CLI wiring for `export`, `load`, `summary`.
+- `exporters/`: `Neptune2Exporter` (neptune-client) and `Neptune3Exporter` (neptune-query); both yield `pyarrow.RecordBatch` objects matching `model.SCHEMA`.
+- `export_manager.py`: Orchestrates export per project/run, fans out batches per run, and skips runs already on disk.
+- `storage/`: `ParquetWriter` (streaming parts per run, temp file cleanup) and `ParquetReader` (per-project/run streaming, metadata extraction).
+- `loaders/`: Common `DataLoader` interface plus `MLflowLoader` and `WandBLoader` implementations.
+- `loader_manager.py`: Topologically sorts runs (parents before forks), resumes runs if the target already has them, and streams parts to loaders.
+- `summary_manager.py` & `validation/report_formatter.py`: Lightweight data introspection/printing for already-exported parquet.
+- `model.py`: Central PyArrow schema.
+- `utils.py`: Shared helpers (`sanitize_path_part` adds a digest to keep paths safe/unique).
+
+## Data flow overview
+1. Export (primary): exporter → `ExportManager` → `ParquetWriter` (+ file downloads). A run is considered complete when `*_part_0.parquet` exists; runs without it are rewritable.
+2. Summary: `ParquetReader` → `SummaryManager` → `ReportFormatter`.
+3. Load (optional): `ParquetReader` → `LoaderManager` → selected `DataLoader`.
+
+Exports are resumable but not incremental: reruns skip completed runs, so new data added to an already-exported run will be missed unless you re-export to a fresh location.
+
+## Adding or changing components
+- **New loader** (e.g., another tracking backend):
+  - Implement `DataLoader` methods (`create_experiment`, `find_run`, `create_run`, `upload_run_data`).
+  - Handle attribute name sanitization and step conversion internally; `loader_manager` provides `step_multiplier` (keep it consistent when Neptune steps are floats).
+  - Extend CLI choices in `main.py` and plumb target-specific options.
+- **Schema changes**:
+  - Update `model.SCHEMA`.
+  - Ensure exporters populate the new columns and loaders ignore/handle them gracefully.
+  - Add coverage in tests and, if necessary, bump parquet reader/writer logic.
+- **Exporter tweaks**:
+  - Keep outputs as PyArrow tables matching `model.SCHEMA`.
+  - Continue batching to avoid large in-memory frames; follow the `download_*` generator pattern.
+- **File handling**:
+  - Artifacts are stored under `--files-path/<sanitized_project_id>/...`; keep the relative paths in `file_value.path` stable so loaders can find the payloads.
+  - Fork metadata exists only in Neptune 3 exports; MLflow ignores parents and W&B supports forks in a limited/preview fashion—avoid relying on strict fidelity.
+
+## Testing notes
+- Prefer function-style pytest tests (no classes) and `unittest.mock.Mock` for doubles.
+- Look at `tests/test_storage.py` and `tests/test_summary_manager.py` for patterns.
+- When adding loader/exporter behavior, add small, focused tests around boundary cases (empty batches, missing metadata, bad attribute names).
+
+## CI
+GitHub Actions runs linting (ruff, mypy, license headers) and tests on Python 3.13 using uv. Workflows live in `.github/workflows/ci.yml`.

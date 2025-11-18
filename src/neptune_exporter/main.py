@@ -145,31 +145,31 @@ def export(
 
     \b
     # Export all data from a project
-    neptune-exporter -p "my-org/my-project"
+    neptune-exporter export -p "my-org/my-project"
 
     \b
     # Export only parameters and metrics from specific runs
-    neptune-exporter -p "my-org/my-project" -r "RUN-*" -c parameters -c metrics
+    neptune-exporter export -p "my-org/my-project" -r "RUN-.*" -c parameters -c metrics
 
     \b
     # Export everything except files
-    neptune-exporter -p "my-org/my-project" --exclude files
+    neptune-exporter export -p "my-org/my-project" --exclude files
 
     \b
     # Export specific attributes only (exact match)
-    neptune-exporter -p "my-org/my-project" -a "learning_rate" -a "batch_size"
+    neptune-exporter export -p "my-org/my-project" -a "learning_rate" -a "batch_size"
 
     \b
     # Export attributes matching a pattern (regex)
-    neptune-exporter -p "my-org/my-project" -a "config/.*"
+    neptune-exporter export -p "my-org/my-project" -a "config/.*"
 
     \b
     # Use Neptune 2.x exporter
-    neptune-exporter -p "my-org/my-project" --exporter neptune2
+    neptune-exporter export -p "my-org/my-project" --exporter neptune2
 
     \b
     # Use environment variable for project ID
-    NEPTUNE_PROJECT="my-org/my-project" neptune-exporter
+    NEPTUNE_PROJECT="my-org/my-project" neptune-exporter export
     """
     # Convert tuples to lists and handle None values
     project_ids_list = list(project_ids)
