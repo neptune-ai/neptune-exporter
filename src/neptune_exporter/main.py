@@ -340,7 +340,7 @@ def export(
     "--verbose",
     "-v",
     is_flag=True,
-    help="Enable verbose logging including Neptune internal logs.",
+    help="Enable verbose logging to the console.",
 )
 @click.option(
     "--log-file",
@@ -496,7 +496,7 @@ def load(
     "--verbose",
     "-v",
     is_flag=True,
-    help="Enable verbose logging including Neptune internal logs.",
+    help="Enable verbose logging to the console.",
 )
 @click.option(
     "--log-file",
