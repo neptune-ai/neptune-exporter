@@ -218,7 +218,7 @@ class Neptune3Exporter(NeptuneExporter):
             )
 
             def fetch_and_convert_batch(
-                attribute_batch: list[tuple[str, str]],
+                attribute_batch: list[str],
             ) -> Optional[pa.RecordBatch]:
                 try:
                     metrics_df = nq_runs.fetch_metrics(
@@ -255,8 +255,8 @@ class Neptune3Exporter(NeptuneExporter):
 
             # Submit all batches to the executor
             futures = [
-                self._executor.submit(fetch_and_convert_batch, batch_attributes)
-                for batch_attributes in attribute_batches
+                self._executor.submit(fetch_and_convert_batch, attribute_batch)
+                for attribute_batch in attribute_batches
             ]
 
             # Yield results as they complete
@@ -361,7 +361,7 @@ class Neptune3Exporter(NeptuneExporter):
                     self._handle_batch_exception(
                         project_id=project_id,
                         run_ids=run_ids,
-                        attribute_batch=attributes_batch,
+                        attribute_batch=[name for name, _ in attributes_batch],
                         batch_type="series",
                         exception=e,
                     )
@@ -483,7 +483,7 @@ class Neptune3Exporter(NeptuneExporter):
             )
 
             def fetch_and_convert_file_batch(
-                attribute_batch: list[tuple[str, str]],
+                attribute_batch: list[str],
             ) -> Optional[pa.RecordBatch]:
                 try:
                     if not attribute_batch:
@@ -524,14 +524,14 @@ class Neptune3Exporter(NeptuneExporter):
                     self._handle_batch_exception(
                         project_id=project_id,
                         run_ids=run_ids,
-                        attribute_batch=batch_attributes,
+                        attribute_batch=attribute_batch,
                         batch_type="files",
                         exception=e,
                     )
                     return None
 
             def fetch_and_convert_file_series_batch(
-                attribute_batch: list[tuple[str, str]],
+                attribute_batch: list[str],
             ) -> Optional[pa.RecordBatch]:
                 try:
                     if not attribute_batch:
@@ -596,18 +596,16 @@ class Neptune3Exporter(NeptuneExporter):
             futures = []
 
             # Submit file batches
-            for batch_attributes in file_attribute_batches:
+            for attribute_batch in file_attribute_batches:
                 futures.append(
-                    self._executor.submit(
-                        fetch_and_convert_file_batch, batch_attributes
-                    )
+                    self._executor.submit(fetch_and_convert_file_batch, attribute_batch)
                 )
 
             # Submit file series batches
-            for batch_attributes in file_series_attribute_batches:
+            for attribute_batch in file_series_attribute_batches:
                 futures.append(
                     self._executor.submit(
-                        fetch_and_convert_file_series_batch, batch_attributes
+                        fetch_and_convert_file_series_batch, attribute_batch
                     )
                 )
 
@@ -703,30 +701,27 @@ class Neptune3Exporter(NeptuneExporter):
         self,
         project_id: ProjectId,
         run_ids: list[SourceRunId],
-        attribute_batch: list[tuple[str, str]],
+        attribute_batch: list[str],
         batch_type: Literal["parameters", "metrics", "series", "files"],
         exception: Exception,
     ) -> None:
         """Handle exceptions that occur during batch processing."""
-        attribute_string = ", ".join(
-            [f"{name} ({_type})" for name, _type in attribute_batch]
-        )
         if isinstance(exception, NeptuneError):
             # Neptune-related errors
             self._logger.warning(
-                f"Skipping project {project_id}, run {run_ids}, attributes [{attribute_string}], batch type {batch_type} because of neptune-query client error.",
+                f"Skipping project {project_id}, run {run_ids}, attributes {attribute_batch}, batch type {batch_type} because of neptune-query client error.",
                 exc_info=True,
             )
         elif isinstance(exception, OSError):
             # Other I/O errors - could be temporary or permanent
             self._logger.warning(
-                f"Skipping project {project_id}, run {run_ids}, attributes [{attribute_string}], batch type {batch_type} because of I/O error.",
+                f"Skipping project {project_id}, run {run_ids}, attributes {attribute_batch}, batch type {batch_type} because of I/O error.",
                 exc_info=True,
             )
         else:
             # Unexpected errors - definitely need investigation
             self._logger.warning(
-                f"Skipping project {project_id}, run {run_ids}, attributes [{attribute_string}], batch type {batch_type} because of unexpected error.",
+                f"Skipping project {project_id}, run {run_ids}, attributes {attribute_batch}, batch type {batch_type} because of unexpected error.",
                 exc_info=True,
             )
 
@@ -736,10 +731,10 @@ class Neptune3Exporter(NeptuneExporter):
                     project_id=project_id,
                     run_id=run_id,
                     attribute_path=attribute_path,
-                    attribute_type=attribute_type,
+                    attribute_type=None,
                     exception=exception,
                 )
-                for attribute_path, attribute_type in attribute_batch
+                for attribute_path in attribute_batch
                 for run_id in run_ids
             ]
         )

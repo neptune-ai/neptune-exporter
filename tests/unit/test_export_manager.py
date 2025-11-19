@@ -65,6 +65,7 @@ def test_export_manager_skips_existing_runs():
     mock_exporter.download_metrics.return_value = []
     mock_exporter.download_series.return_value = []
     mock_exporter.download_files.return_value = []
+    mock_exporter.get_exception_infos.return_value = []
 
     # Run export with project that has existing runs
     result = export_manager.run(
@@ -117,7 +118,7 @@ def test_export_manager_with_no_existing_data():
     mock_exporter.download_metrics.return_value = []
     mock_exporter.download_series.return_value = []
     mock_exporter.download_files.return_value = []
-
+    mock_exporter.get_exception_infos.return_value = []
     # Run export
     result = export_manager.run(
         project_ids=["test-project"],
@@ -169,7 +170,7 @@ def test_export_manager_with_partial_existing_data():
     mock_exporter.download_metrics.return_value = []
     mock_exporter.download_series.return_value = []
     mock_exporter.download_files.return_value = []
-
+    mock_exporter.get_exception_infos.return_value = []
     # Run export with multiple runs (one existing, two new)
     result = export_manager.run(
         project_ids=["test-project"],
@@ -234,7 +235,7 @@ def test_export_manager_integration_with_real_files():
         mock_exporter.download_metrics.return_value = []
         mock_exporter.download_series.return_value = []
         mock_exporter.download_files.return_value = []
-
+        mock_exporter.get_exception_infos.return_value = []
         # Create export manager
         export_manager = ExportManager(
             exporter=mock_exporter,
