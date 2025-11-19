@@ -56,7 +56,6 @@ class Neptune3Exporter(NeptuneExporter):
         file_attribute_batch_size: int = 16,
         file_series_attribute_batch_size: int = 8,
         max_workers: int = 16,
-        logger_level: int = logging.ERROR,
         show_client_logs: bool = False,
     ):
         self._quantize_base = Decimal("1.000000")
@@ -65,7 +64,6 @@ class Neptune3Exporter(NeptuneExporter):
         self._file_series_attribute_batch_size = file_series_attribute_batch_size
         self._executor = ThreadPoolExecutor(max_workers=max_workers)
         self._logger = logging.getLogger(__name__)
-        self._logger.setLevel(logger_level)
         self._initialize_client(api_token=api_token, show_client_logs=show_client_logs)
 
     def _initialize_client(

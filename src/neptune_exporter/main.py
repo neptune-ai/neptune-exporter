@@ -15,6 +15,7 @@
 
 import logging
 import os
+from typing import Optional
 import click
 from pathlib import Path
 from neptune_exporter.exporters.exporter import NeptuneExporter
@@ -105,6 +106,12 @@ def cli():
     help="Enable verbose logging including Neptune internal logs.",
 )
 @click.option(
+    "--log-file",
+    type=click.Path(path_type=Path),
+    default="./neptune_exporter.log",
+    help="Path for logging file. Default: ./neptune_exporter.log",
+)
+@click.option(
     "--no-progress",
     is_flag=True,
     help="Disable progress bar.",
@@ -120,6 +127,7 @@ def export(
     files_path: Path,
     api_token: str | None,
     verbose: bool,
+    log_file: Path,
     no_progress: bool,
 ) -> None:
     """Export Neptune experiment data to parquet files.
@@ -214,25 +222,23 @@ def export(
         invalid = export_classes_set - valid_export_classes
         raise click.BadParameter(f"Invalid export classes: {', '.join(invalid)}")
 
+    # Configure logging
+    configure_logging(
+        stderr_level=logging.INFO if verbose else logging.ERROR,
+        log_file=log_file if log_file else None,
+    )
+
     # Create exporter instance
     if exporter == "neptune2":
-        exporter_instance: NeptuneExporter = Neptune2Exporter(
-            api_token=api_token, logger_level=logging.INFO if verbose else logging.ERROR
-        )
+        exporter_instance: NeptuneExporter = Neptune2Exporter(api_token=api_token)
     elif exporter == "neptune3":
-        exporter_instance = Neptune3Exporter(
-            api_token=api_token, logger_level=logging.INFO if verbose else logging.ERROR
-        )
+        exporter_instance = Neptune3Exporter(api_token=api_token)
     else:
         raise click.BadParameter(f"Unknown exporter: {exporter}")
 
     # Create storage and reader instances
-    writer = ParquetWriter(
-        base_path=data_path, logger_level=logging.INFO if verbose else logging.ERROR
-    )
-    reader = ParquetReader(
-        base_path=data_path, logger_level=logging.INFO if verbose else logging.ERROR
-    )
+    writer = ParquetWriter(base_path=data_path)
+    reader = ParquetReader(base_path=data_path)
 
     # Create export manager
     export_manager = ExportManager(
@@ -335,6 +341,12 @@ def export(
     help="Enable verbose logging including Neptune internal logs.",
 )
 @click.option(
+    "--log-file",
+    type=click.Path(path_type=Path),
+    default="./neptune_exporter.log",
+    help="Path for logging file. Default: ./neptune_exporter.log",
+)
+@click.option(
     "--no-progress",
     is_flag=True,
     help="Disable progress bar.",
@@ -351,6 +363,7 @@ def load(
     wandb_api_key: str | None,
     name_prefix: str | None,
     verbose: bool,
+    log_file: Path,
     no_progress: bool,
 ) -> None:
     """Load exported Neptune data from parquet files to target platforms (MLflow or W&B).
@@ -393,9 +406,7 @@ def load(
         raise click.BadParameter(f"Data path does not exist: {data_path}")
 
     # Create parquet reader
-    parquet_reader = ParquetReader(
-        base_path=data_path, logger_level=logging.INFO if verbose else logging.ERROR
-    )
+    parquet_reader = ParquetReader(base_path=data_path)
 
     # Create appropriate loader based on --loader flag
     data_loader: DataLoader
@@ -409,7 +420,6 @@ def load(
         data_loader = MLflowLoader(
             tracking_uri=mlflow_tracking_uri,
             name_prefix=name_prefix,
-            logger_level=logging.INFO if verbose else logging.ERROR,
             show_client_logs=verbose,
         )
         loader_name = "MLflow"
@@ -430,12 +440,17 @@ def load(
             entity=wandb_entity,
             api_key=wandb_api_key,
             name_prefix=name_prefix,
-            logger_level=logging.INFO if verbose else logging.ERROR,
             show_client_logs=verbose,
         )
         loader_name = "W&B"
     else:
         raise click.BadParameter(f"Unknown loader: {loader}")
+
+    # Configure logging
+    configure_logging(
+        stderr_level=logging.INFO if verbose else logging.ERROR,
+        log_file=log_file if log_file else None,
+    )
 
     # Create loader manager
     loader_manager = LoaderManager(
@@ -444,7 +459,6 @@ def load(
         files_directory=files_path,
         step_multiplier=step_multiplier,
         progress_bar=not no_progress,
-        logger_level=logging.INFO if verbose else logging.ERROR,
     )
 
     click.echo(f"Starting {loader_name} loading from {data_path.absolute()}")
@@ -481,7 +495,13 @@ def load(
     is_flag=True,
     help="Enable verbose logging including Neptune internal logs.",
 )
-def summary(data_path: Path, verbose: bool) -> None:
+@click.option(
+    "--log-file",
+    type=click.Path(path_type=Path),
+    default="./neptune_exporter.log",
+    help="Path for logging file. Default: ./neptune_exporter.log",
+)
+def summary(data_path: Path, verbose: bool, log_file: Path) -> None:
     """Show summary of exported Neptune data.
 
     This command shows a summary of available data in the exported parquet files,
@@ -491,14 +511,15 @@ def summary(data_path: Path, verbose: bool) -> None:
     if not data_path.exists():
         raise click.BadParameter(f"Data path does not exist: {data_path}")
 
+    # Configure logging
+    configure_logging(
+        stderr_level=logging.INFO if verbose else logging.ERROR,
+        log_file=log_file if log_file else None,
+    )
+
     # Create parquet reader and summary manager
-    parquet_reader = ParquetReader(
-        base_path=data_path, logger_level=logging.INFO if verbose else logging.ERROR
-    )
-    summary_manager = SummaryManager(
-        parquet_reader=parquet_reader,
-        logger_level=logging.INFO if verbose else logging.ERROR,
-    )
+    parquet_reader = ParquetReader(base_path=data_path)
+    summary_manager = SummaryManager(parquet_reader=parquet_reader)
 
     try:
         # Show general data summary
@@ -515,5 +536,18 @@ def main():
     cli()
 
 
-if __name__ == "__main__":
-    main()
+def configure_logging(stderr_level: Optional[int], log_file: Optional[Path]) -> None:
+    logger = logging.getLogger("neptune_exporter")
+    FORMAT = "%(asctime)s %(name)s:%(levelname)s: %(message)s"
+
+    if stderr_level:
+        stream_handler = logging.StreamHandler()
+        stream_handler.setFormatter(logging.Formatter(FORMAT))
+        stream_handler.setLevel(stderr_level)
+        logger.addHandler(stream_handler)
+
+    if log_file:
+        file_handler = logging.FileHandler(log_file)
+        file_handler.setFormatter(logging.Formatter(FORMAT))
+        file_handler.setLevel(logging.INFO)
+        logger.addHandler(file_handler)

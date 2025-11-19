@@ -42,10 +42,9 @@ class RunMetadata:
 class ParquetReader:
     """Reads exported Neptune data from parquet files."""
 
-    def __init__(self, base_path: Path, logger_level: int = logging.ERROR):
+    def __init__(self, base_path: Path):
         self.base_path = base_path
         self._logger = logging.getLogger(__name__)
-        self._logger.setLevel(logger_level)
 
     def check_run_exists(self, project_id: str, run_id: SourceRunId) -> bool:
         """Check if a run exists and is complete (has part_0.parquet).
