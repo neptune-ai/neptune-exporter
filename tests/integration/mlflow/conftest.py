@@ -277,7 +277,7 @@ def test_data_dir() -> pathlib.Path:
 @pytest.fixture
 def mlflow_loader(mlflow_tracking_uri: str) -> MLflowLoader:
     """Create MLflowLoader instance."""
-    return MLflowLoader(tracking_uri=mlflow_tracking_uri, verbose=False)
+    return MLflowLoader(tracking_uri=mlflow_tracking_uri)
 
 
 @pytest.fixture
