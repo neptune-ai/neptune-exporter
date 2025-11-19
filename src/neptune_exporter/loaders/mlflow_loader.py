@@ -139,7 +139,10 @@ class MLflowLoader(DataLoader):
             )
             return TargetRunId(existing_runs[0].info.run_id) if existing_runs else None
         except Exception as e:
-            self._logger.error(f"Error finding run '{run_name}': {e}")
+            self._logger.error(
+                f"Error finding project {project_id}, run '{run_name}': {e}",
+                exc_info=True,
+            )
             return None
 
     def create_run(
@@ -171,7 +174,10 @@ class MLflowLoader(DataLoader):
                 )
                 return TargetRunId(mlflow_run_id)
         except Exception as e:
-            self._logger.error(f"Error creating run '{run_name}': {e}")
+            self._logger.error(
+                f"Error creating project {project_id}, run '{run_name}': {e}",
+                exc_info=True,
+            )
             raise
 
     def upload_run_data(
@@ -199,7 +205,9 @@ class MLflowLoader(DataLoader):
                     self._logger.info(f"Successfully uploaded run {run_id} to MLflow")
 
         except Exception as e:
-            self._logger.error(f"Error uploading run {run_id}: {e}")
+            self._logger.error(
+                f"Error uploading data for run {run_id}: {e}", exc_info=True
+            )
             raise
 
     def upload_parameters(self, run_data: pd.DataFrame, run_id: TargetRunId) -> None:

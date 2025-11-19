@@ -185,6 +185,12 @@ class ExportManager:
                     # Update progress bar for completed batch
                     runs_pbar.update(len(batch_run_ids))
 
+        exception_infos = self._exporter.get_exception_infos()
+        if exception_infos:
+            self._logger.error(
+                f"{len(exception_infos)} exceptions occurred during export. See the logs for details."
+            )
+
         return total_runs
 
     def _route_batch_to_writers(

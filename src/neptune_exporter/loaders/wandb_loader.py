@@ -147,7 +147,10 @@ class WandBLoader(DataLoader):
 
             return None
         except Exception as e:
-            self._logger.error(f"Error finding run '{run_name}': {e}")
+            self._logger.error(
+                f"Error finding project {project_id}, run '{run_name}': {e}",
+                exc_info=True,
+            )
             return None
 
     def create_run(
@@ -210,7 +213,10 @@ class WandBLoader(DataLoader):
             return TargetRunId(wandb_run_id)
 
         except Exception as e:
-            self._logger.error(f"Error creating run '{run_name}': {e}")
+            self._logger.error(
+                f"Error creating project {project_id}, run '{run_name}': {e}",
+                exc_info=True,
+            )
             raise
 
     def upload_run_data(
@@ -248,7 +254,9 @@ class WandBLoader(DataLoader):
             self._logger.info(f"Successfully uploaded run {run_id} to W&B")
 
         except Exception as e:
-            self._logger.error(f"Error uploading run {run_id}: {e}")
+            self._logger.error(
+                f"Error uploading data for run {run_id}: {e}", exc_info=True
+            )
             if self._active_run:
                 self._active_run.finish(exit_code=1)
                 self._active_run = None

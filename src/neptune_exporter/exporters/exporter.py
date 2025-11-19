@@ -16,11 +16,21 @@
 """Core exporter abstract base class and types."""
 
 from abc import ABC, abstractmethod
+from dataclasses import dataclass
 from typing import Generator, Optional, Sequence
 from pathlib import Path
 import pyarrow as pa
 
 from neptune_exporter.types import ProjectId, SourceRunId
+
+
+@dataclass
+class ExceptionInfo:
+    project_id: ProjectId
+    run_id: SourceRunId
+    attribute_path: Optional[str]
+    attribute_type: Optional[str]
+    exception: Exception
 
 
 class NeptuneExporter(ABC):
@@ -77,6 +87,11 @@ class NeptuneExporter(ABC):
         destination: Path,
     ) -> Generator[pa.RecordBatch, None, None]:
         """Download files from Neptune runs."""
+        pass
+
+    @abstractmethod
+    def get_exception_infos(self) -> list[ExceptionInfo]:
+        """Get list of exceptions that occurred during export."""
         pass
 
     def close(self) -> None:
