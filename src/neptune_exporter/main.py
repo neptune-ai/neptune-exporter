@@ -228,6 +228,8 @@ def export(
         log_file=log_file if log_file else None,
     )
 
+    logger = logging.getLogger(__name__)
+
     # Create exporter instance
     if exporter == "neptune2":
         exporter_instance: NeptuneExporter = Neptune2Exporter(api_token=api_token)
@@ -249,10 +251,10 @@ def export(
         progress_bar=not no_progress,
     )
 
-    click.echo(f"Starting export of {len(project_ids_list)} project(s)...")
-    click.echo(f"Export classes: {', '.join(export_classes_list)}")
-    click.echo(f"Data path: {data_path.absolute()}")
-    click.echo(f"Files path: {files_path.absolute()}")
+    logger.info(f"Starting export of {len(project_ids_list)} project(s)...")
+    logger.info(f"Export classes: {', '.join(export_classes_list)}")
+    logger.info(f"Data path: {data_path.absolute()}")
+    logger.info(f"Files path: {files_path.absolute()}")
 
     try:
         runs_exported = export_manager.run(
@@ -263,16 +265,16 @@ def export(
         )
 
         if runs_exported == 0:
-            click.echo("ℹ️  No runs found matching the specified criteria.")
+            logger.info("No runs found matching the specified criteria.")
             if runs:
-                click.echo(f"   Filter: {runs}")
-            click.echo(
+                logger.info(f"   Filter: {runs}")
+            logger.info(
                 "   Try adjusting your run filter or check if the project contains any runs."
             )
         else:
-            click.echo("Export completed successfully!")
+            logger.info("Export completed successfully!")
     except Exception as e:
-        click.echo(f"Export failed: {e}", err=True)
+        logger.error(f"Export failed: {e}", exc_info=True)
         raise click.Abort()
 
     finally:
@@ -461,12 +463,13 @@ def load(
         progress_bar=not no_progress,
     )
 
-    click.echo(f"Starting {loader_name} loading from {data_path.absolute()}")
-    click.echo(f"Files directory: {files_path.absolute()}")
+    logger = logging.getLogger(__name__)
+    logger.info(f"Starting {loader_name} loading from {data_path.absolute()}")
+    logger.info(f"Files directory: {files_path.absolute()}")
     if project_ids_list:
-        click.echo(f"Project IDs: {', '.join(project_ids_list)}")
+        logger.info(f"Project IDs: {', '.join(project_ids_list)}")
     if runs_list:
-        click.echo(f"Run IDs: {', '.join(runs_list)}")
+        logger.info(f"Run IDs: {', '.join(runs_list)}")
 
     try:
         loader_manager.load(
@@ -475,9 +478,9 @@ def load(
             else None,
             runs=[SourceRunId(run_id) for run_id in runs_list] if runs_list else None,
         )
-        click.echo(f"{loader_name} loading completed successfully!")
+        logger.info(f"{loader_name} loading completed successfully!")
     except Exception as e:
-        click.echo(f"{loader_name} loading failed: {e}", err=True)
+        logger.error(f"{loader_name} loading failed: {e}", exc_info=True)
         raise click.Abort()
 
 
@@ -517,6 +520,8 @@ def summary(data_path: Path, verbose: bool, log_file: Path) -> None:
         log_file=log_file if log_file else None,
     )
 
+    logger = logging.getLogger(__name__)
+
     # Create parquet reader and summary manager
     parquet_reader = ParquetReader(base_path=data_path)
     summary_manager = SummaryManager(parquet_reader=parquet_reader)
@@ -527,7 +532,7 @@ def summary(data_path: Path, verbose: bool, log_file: Path) -> None:
         ReportFormatter.print_data_summary(summary_data, data_path)
 
     except Exception as e:
-        click.echo(f"Failed to generate summary: {e}", err=True)
+        logger.error(f"Failed to generate summary: {e}", exc_info=True)
         raise click.Abort()
 
 
@@ -538,6 +543,7 @@ def main():
 
 def configure_logging(stderr_level: Optional[int], log_file: Optional[Path]) -> None:
     logger = logging.getLogger("neptune_exporter")
+    logger.setLevel(logging.INFO)
     FORMAT = "%(asctime)s %(name)s:%(levelname)s: %(message)s"
 
     if stderr_level:
