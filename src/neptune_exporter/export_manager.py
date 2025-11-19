@@ -14,6 +14,7 @@
 # limitations under the License.
 
 
+import logging
 from typing import Iterable, Literal
 from pathlib import Path
 from tqdm import tqdm
@@ -42,6 +43,7 @@ class ExportManager:
         self._files_destination = files_destination
         self._batch_size = batch_size
         self._progress_bar = progress_bar
+        self._logger = logging.getLogger(__name__)
 
     def run(
         self,
@@ -84,7 +86,7 @@ class ExportManager:
             ]
             skipped = original_count - len(run_ids)
             if skipped > 0:
-                tqdm.write(
+                self._logger.info(
                     f"Skipping {skipped} already exported run(s) in {project_id}"
                 )
 
