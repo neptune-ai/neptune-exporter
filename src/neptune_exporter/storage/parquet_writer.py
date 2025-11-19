@@ -70,12 +70,16 @@ class RunWriterContext:
 
 class ParquetWriter:
     def __init__(
-        self, base_path: Path, target_part_size_bytes: int = 200 * 1024 * 1024
+        self,
+        base_path: Path,
+        target_part_size_bytes: int = 200 * 1024 * 1024,
+        logger_level: int = logging.ERROR,
     ):
         self.base_path = base_path
         self._target_part_size_bytes = target_part_size_bytes
-        self._initialize_directory()
         self._logger = logging.getLogger(__name__)
+        self._logger.setLevel(logger_level)
+        self._initialize_directory()
 
         # Track current part state per run (keyed by (project_id, run_id))
         self._run_writers: dict[tuple[str, str], RunWriter] = {}

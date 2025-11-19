@@ -13,6 +13,7 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
+import logging
 import os
 import click
 from pathlib import Path
@@ -216,16 +217,22 @@ def export(
     # Create exporter instance
     if exporter == "neptune2":
         exporter_instance: NeptuneExporter = Neptune2Exporter(
-            api_token=api_token, verbose=verbose
+            api_token=api_token, logger_level=logging.INFO if verbose else logging.ERROR
         )
     elif exporter == "neptune3":
-        exporter_instance = Neptune3Exporter(api_token=api_token, verbose=verbose)
+        exporter_instance = Neptune3Exporter(
+            api_token=api_token, logger_level=logging.INFO if verbose else logging.ERROR
+        )
     else:
         raise click.BadParameter(f"Unknown exporter: {exporter}")
 
     # Create storage and reader instances
-    writer = ParquetWriter(base_path=data_path)
-    reader = ParquetReader(base_path=data_path)
+    writer = ParquetWriter(
+        base_path=data_path, logger_level=logging.INFO if verbose else logging.ERROR
+    )
+    reader = ParquetReader(
+        base_path=data_path, logger_level=logging.INFO if verbose else logging.ERROR
+    )
 
     # Create export manager
     export_manager = ExportManager(
@@ -261,6 +268,10 @@ def export(
     except Exception as e:
         click.echo(f"Export failed: {e}", err=True)
         raise click.Abort()
+
+    finally:
+        exporter_instance.close()
+        writer.close_all()
 
 
 @cli.command()
@@ -382,7 +393,9 @@ def load(
         raise click.BadParameter(f"Data path does not exist: {data_path}")
 
     # Create parquet reader
-    parquet_reader = ParquetReader(base_path=data_path)
+    parquet_reader = ParquetReader(
+        base_path=data_path, logger_level=logging.INFO if verbose else logging.ERROR
+    )
 
     # Create appropriate loader based on --loader flag
     data_loader: DataLoader
@@ -396,7 +409,8 @@ def load(
         data_loader = MLflowLoader(
             tracking_uri=mlflow_tracking_uri,
             name_prefix=name_prefix,
-            verbose=verbose,
+            logger_level=logging.INFO if verbose else logging.ERROR,
+            show_client_logs=verbose,
         )
         loader_name = "MLflow"
     elif loader == "wandb":
@@ -416,7 +430,8 @@ def load(
             entity=wandb_entity,
             api_key=wandb_api_key,
             name_prefix=name_prefix,
-            verbose=verbose,
+            logger_level=logging.INFO if verbose else logging.ERROR,
+            show_client_logs=verbose,
         )
         loader_name = "W&B"
     else:
@@ -429,6 +444,7 @@ def load(
         files_directory=files_path,
         step_multiplier=step_multiplier,
         progress_bar=not no_progress,
+        logger_level=logging.INFO if verbose else logging.ERROR,
     )
 
     click.echo(f"Starting {loader_name} loading from {data_path.absolute()}")
@@ -459,7 +475,13 @@ def load(
     default="./exports/data",
     help="Path for exported parquet data. Default: ./exports/data",
 )
-def summary(data_path: Path) -> None:
+@click.option(
+    "--verbose",
+    "-v",
+    is_flag=True,
+    help="Enable verbose logging including Neptune internal logs.",
+)
+def summary(data_path: Path, verbose: bool) -> None:
     """Show summary of exported Neptune data.
 
     This command shows a summary of available data in the exported parquet files,
@@ -470,8 +492,13 @@ def summary(data_path: Path) -> None:
         raise click.BadParameter(f"Data path does not exist: {data_path}")
 
     # Create parquet reader and summary manager
-    parquet_reader = ParquetReader(base_path=data_path)
-    summary_manager = SummaryManager(parquet_reader=parquet_reader)
+    parquet_reader = ParquetReader(
+        base_path=data_path, logger_level=logging.INFO if verbose else logging.ERROR
+    )
+    summary_manager = SummaryManager(
+        parquet_reader=parquet_reader,
+        logger_level=logging.INFO if verbose else logging.ERROR,
+    )
 
     try:
         # Show general data summary
