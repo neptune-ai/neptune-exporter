@@ -73,20 +73,20 @@ class Neptune2Exporter(NeptuneExporter):
     def __init__(
         self,
         api_token: Optional[str] = None,
-        verbose: bool = False,
         max_workers: int = 16,
+        logger_level: int = logging.ERROR,
+        show_client_logs: bool = False,
     ):
         self._api_token = api_token
-        self._max_workers = max_workers
         self._quantize_base = Decimal("1.000000")
         self._executor = ThreadPoolExecutor(max_workers=max_workers)
-        self._verbose = verbose
         self._logger = logging.getLogger(__name__)
-        self._logger.setLevel(logging.INFO if verbose else logging.ERROR)
-        self._initialize_client(verbose=verbose)
+        self._logger.setLevel(logger_level)
+        self._show_client_logs = show_client_logs
+        self._initialize_client(show_client_logs=show_client_logs)
 
-    def _initialize_client(self, verbose: bool) -> None:
-        if verbose:
+    def _initialize_client(self, show_client_logs: bool) -> None:
+        if show_client_logs:
             logging.getLogger("neptune").setLevel(logging.INFO)
         else:
             logging.getLogger("neptune").setLevel(logging.ERROR)
@@ -307,7 +307,7 @@ class Neptune2Exporter(NeptuneExporter):
 
                     series_attribute = cast(FetchableSeries, attribute)
                     series_df = series_attribute.fetch_values(
-                        progress_bar=None if self._verbose else False
+                        progress_bar=None if self._show_client_logs else False
                     )
 
                     series_df["run_id"] = run_id
@@ -410,7 +410,7 @@ class Neptune2Exporter(NeptuneExporter):
 
                     series_attribute = cast(FetchableSeries, attribute)
                     series_df = series_attribute.fetch_values(
-                        progress_bar=None if self._verbose else False
+                        progress_bar=None if self._show_client_logs else False
                     )
 
                     series_df["run_id"] = run_id
@@ -520,7 +520,7 @@ class Neptune2Exporter(NeptuneExporter):
                         file_path.parent.mkdir(parents=True, exist_ok=True)
                         file_attribute.download(
                             str(file_path),
-                            progress_bar=None if self._verbose else False,
+                            progress_bar=None if self._show_client_logs else False,
                         )
 
                         all_data_dfs.append(
@@ -572,7 +572,7 @@ class Neptune2Exporter(NeptuneExporter):
                         )
                         file_series_attribute.download(
                             str(file_series_path),
-                            progress_bar=None if self._verbose else False,
+                            progress_bar=None if self._show_client_logs else False,
                         )
                         file_paths = [
                             p for p in file_series_path.iterdir() if p.is_file()
@@ -603,7 +603,7 @@ class Neptune2Exporter(NeptuneExporter):
                         file_set_path.mkdir(parents=True, exist_ok=True)
                         file_set_attribute.download(
                             str(file_set_path),
-                            progress_bar=None if self._verbose else False,
+                            progress_bar=None if self._show_client_logs else False,
                         )
 
                         all_data_dfs.append(

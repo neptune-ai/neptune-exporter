@@ -24,9 +24,12 @@ from neptune_exporter.storage.parquet_reader import ParquetReader
 class SummaryManager:
     """Manages analysis and reporting of exported Neptune data."""
 
-    def __init__(self, parquet_reader: ParquetReader):
+    def __init__(
+        self, parquet_reader: ParquetReader, logger_level: int = logging.ERROR
+    ):
         self._parquet_reader = parquet_reader
         self._logger = logging.getLogger(__name__)
+        self._logger.setLevel(logger_level)
 
     def get_data_summary(self) -> dict[str, Any]:
         """
@@ -126,7 +129,9 @@ class SummaryManager:
                 "step_statistics": step_stats,
             }
         except Exception as e:
-            self._logger.error(f"Error analyzing project {project_directory}: {e}")
+            self._logger.error(
+                f"Error analyzing project {project_directory}: {e}", exc_info=True
+            )
             return None
 
     def _calculate_step_statistics(self, table: pa.Table) -> dict[str, Any]:
@@ -154,7 +159,9 @@ class SummaryManager:
                 "unique_steps": len(set(step_values)),
             }
         except Exception as e:
-            self._logger.warning(f"Could not calculate step statistics: {e}")
+            self._logger.warning(
+                f"Could not calculate step statistics: {e}", exc_info=True
+            )
             return {
                 "total_steps": 0,
                 "min_step": None,

@@ -38,7 +38,8 @@ class MLflowLoader(DataLoader):
         self,
         tracking_uri: Optional[str] = None,
         name_prefix: Optional[str] = None,
-        verbose: bool = False,
+        logger_level: int = logging.ERROR,
+        show_client_logs: bool = False,
     ):
         """
         Initialize MLflow loader.
@@ -51,14 +52,13 @@ class MLflowLoader(DataLoader):
         self.tracking_uri = tracking_uri
         self.name_prefix = name_prefix
         self._logger = logging.getLogger(__name__)
-        self._logger.setLevel(logging.INFO if verbose else logging.ERROR)
-        self._verbose = verbose
+        self._logger.setLevel(logger_level)
 
         if tracking_uri:
             mlflow.set_tracking_uri(tracking_uri)
 
         # Configure MLflow logging
-        if verbose:
+        if show_client_logs:
             logging.getLogger("mlflow").setLevel(logging.INFO)
         else:
             logging.getLogger("mlflow").setLevel(logging.ERROR)

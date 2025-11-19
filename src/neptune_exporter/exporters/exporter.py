@@ -78,3 +78,7 @@ class NeptuneExporter(ABC):
     ) -> Generator[pa.RecordBatch, None, None]:
         """Download files from Neptune runs."""
         pass
+
+    def close(self) -> None:
+        """Close the exporter."""
+        pass

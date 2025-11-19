@@ -55,24 +55,26 @@ class Neptune3Exporter(NeptuneExporter):
         series_attribute_batch_size: int = 128,
         file_attribute_batch_size: int = 16,
         file_series_attribute_batch_size: int = 8,
-        max_workers: int = 8,
-        verbose: bool = False,
+        max_workers: int = 16,
+        logger_level: int = logging.ERROR,
+        show_client_logs: bool = False,
     ):
+        self._quantize_base = Decimal("1.000000")
         self._series_attribute_batch_size = series_attribute_batch_size
         self._file_attribute_batch_size = file_attribute_batch_size
         self._file_series_attribute_batch_size = file_series_attribute_batch_size
-        self._quantize_base = Decimal("1.000000")
         self._executor = ThreadPoolExecutor(max_workers=max_workers)
-        self._verbose = verbose
         self._logger = logging.getLogger(__name__)
-        self._logger.setLevel(logging.INFO if verbose else logging.ERROR)
-        self._initialize_client(api_token=api_token, verbose=verbose)
+        self._logger.setLevel(logger_level)
+        self._initialize_client(api_token=api_token, show_client_logs=show_client_logs)
 
-    def _initialize_client(self, api_token: Optional[str], verbose: bool) -> None:
+    def _initialize_client(
+        self, api_token: Optional[str], show_client_logs: bool
+    ) -> None:
         if api_token is not None:
             nq.set_api_token(api_token)
 
-        if verbose:
+        if show_client_logs:
             logging.getLogger("neptune").setLevel(logging.INFO)
         else:
             logging.getLogger("neptune").setLevel(logging.ERROR)
