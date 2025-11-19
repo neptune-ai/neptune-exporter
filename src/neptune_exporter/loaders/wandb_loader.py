@@ -398,9 +398,20 @@ class WandBLoader(DataLoader):
                 mode="w", suffix=".txt", encoding="utf-8"
             ) as tmp_file:
                 for _, row in group.iterrows():
-                    if pd.notna(row["string_value"]) and pd.notna(row["step"]):
-                        step = self._convert_step_to_int(row["step"], step_multiplier)
-                        text_line = f"[{step}] {row['string_value']}\n"
+                    if pd.notna(row["string_value"]):
+                        series_step = (
+                            self._convert_step_to_int(row["step"], step_multiplier)
+                            if pd.notna(row["step"])
+                            else None
+                        )
+                        timestamp = (
+                            row["timestamp"].isoformat()
+                            if pd.notna(row["timestamp"])
+                            else None
+                        )
+                        text_line = (
+                            f"{series_step}; {timestamp}; {row['string_value']}\n"
+                        )
                         tmp_file.write(text_line)
                 tmp_file_path = tmp_file.name
 

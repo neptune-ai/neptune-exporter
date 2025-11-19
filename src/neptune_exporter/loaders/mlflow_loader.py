@@ -266,9 +266,11 @@ class MLflowLoader(DataLoader):
                         row["step"], step_multiplier=step_multiplier
                     )
                     # Convert timestamp to milliseconds if available
-                    timestamp = None
-                    if pd.notna(row["timestamp"]):
-                        timestamp = int(row["timestamp"].timestamp() * 1000)
+                    timestamp = (
+                        int(row["timestamp"].timestamp() * 1000)
+                        if pd.notna(row["timestamp"])
+                        else None
+                    )
                     metrics.append(
                         Metric(
                             key=attr_name,
@@ -347,11 +349,20 @@ class MLflowLoader(DataLoader):
             # Create a table-like structure
             series_text = []
             for _, row in group.iterrows():
-                if pd.notna(row["string_value"]) and pd.notna(row["step"]):
-                    step = self._convert_step_to_int(
-                        row["step"], step_multiplier=step_multiplier
+                if pd.notna(row["string_value"]):
+                    step = (
+                        self._convert_step_to_int(
+                            row["step"], step_multiplier=step_multiplier
+                        )
+                        if pd.notna(row["step"])
+                        else None
                     )
-                    series_text.append(f"[{step}] {row['string_value']}")
+                    timestamp = (
+                        row["timestamp"].isoformat()
+                        if pd.notna(row["timestamp"])
+                        else None
+                    )
+                    series_text.append(f"{step}; {timestamp}; {row['string_value']}")
 
             if series_text:
                 # Log as text artifact
@@ -381,6 +392,11 @@ class MLflowLoader(DataLoader):
                         if pd.notna(row["step"])
                         else None
                     )
+                    timestamp = (
+                        row["timestamp"].isoformat()
+                        if pd.notna(row["timestamp"])
+                        else None
+                    )
                     hist = row["histogram_value"]
                     histogram_data.append(
                         {
@@ -388,9 +404,7 @@ class MLflowLoader(DataLoader):
                             "type": hist.get("type", ""),
                             "edges": hist.get("edges", []),
                             "values": hist.get("values", []),
-                            "timestamp": row["timestamp"].isoformat()
-                            if pd.notna(row["timestamp"])
-                            else None,
+                            "timestamp": timestamp,
                         }
                     )
 
