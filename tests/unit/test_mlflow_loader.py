@@ -523,8 +523,8 @@ def test_upload_artifacts_string_series():
         # Verify text content
         text_content = call_args[1]["text"]
         # Steps are converted using step_multiplier (100), so 1.0 becomes 100, 2.0 becomes 200
-        assert "[100] value1" in text_content
-        assert "[200] value2" in text_content
+        assert "100; 2023-01-01T00:00:00; value1" in text_content
+        assert "200; 2023-01-02T00:00:00; value2" in text_content
 
 
 def test_upload_artifacts_histogram_series():

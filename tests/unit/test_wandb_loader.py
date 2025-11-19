@@ -369,8 +369,8 @@ def test_upload_artifacts_string_series():
         # Get all written text (in case write is called multiple times)
         written_calls = mock_file.write.call_args_list
         all_written_text = "".join(call[0][0] for call in written_calls)
-        assert "[1] value1" in all_written_text
-        assert "[2] value2" in all_written_text
+        assert "1; 2023-01-01T00:00:00; value1" in all_written_text
+        assert "2; 2023-01-02T00:00:00; value2" in all_written_text
 
 
 def test_upload_artifacts_histogram_series():
