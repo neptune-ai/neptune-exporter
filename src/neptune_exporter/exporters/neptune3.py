@@ -15,7 +15,7 @@
 
 import dataclasses
 from decimal import Decimal
-from neptune_query.exceptions import NeptuneError, NeptuneWarning
+from neptune_query.exceptions import NeptuneError
 import pyarrow as pa
 import pandas as pd
 from typing import Generator, Literal, Optional, Sequence
@@ -27,7 +27,7 @@ from concurrent.futures import ThreadPoolExecutor, as_completed
 import logging
 
 from neptune_exporter import model
-from neptune_exporter.exporters.exporter import NeptuneExporter
+from neptune_exporter.exporters.exporter import ExceptionInfo, NeptuneExporter
 from neptune_exporter.types import ProjectId, SourceRunId
 
 
@@ -67,6 +67,7 @@ class Neptune3Exporter(NeptuneExporter):
         self._executor = ThreadPoolExecutor(max_workers=max_workers)
         self._logger = logging.getLogger(__name__)
         self._initialize_client(api_token=api_token, show_client_logs=show_client_logs)
+        self._exception_infos: list[ExceptionInfo] = []
 
     def _initialize_client(
         self, api_token: Optional[str], show_client_logs: bool
@@ -132,8 +133,12 @@ class Neptune3Exporter(NeptuneExporter):
             converted_df = self._convert_parameters_to_schema(parameters_df, project_id)
             yield pa.RecordBatch.from_pandas(converted_df, schema=model.SCHEMA)
         except Exception as e:
-            self._handle_batch_exception(f"parameters for project {project_id}", e)
-            # Yield empty batch to maintain interface contract
+            self._handle_runs_exception(
+                project_id=project_id,
+                run_ids=run_ids,
+                batch_type="parameters",
+                exception=e,
+            )
             yield pa.RecordBatch.from_pylist([], schema=model.SCHEMA)
 
     def _convert_parameters_to_schema(
@@ -205,50 +210,76 @@ class Neptune3Exporter(NeptuneExporter):
         run_ids: list[SourceRunId],
         attributes: None | str | Sequence[str],
     ) -> Generator[pa.RecordBatch, None, None]:
-        attributes_list = nq_runs.list_attributes(
-            project=project_id,
-            runs=run_ids,
-            attributes=AttributeFilter(name=attributes, type=_METRIC_TYPES),
-        )
-
-        def fetch_and_convert_batch(batch_attributes):
-            metrics_df = nq_runs.fetch_metrics(
+        try:
+            attributes_list = nq_runs.list_attributes(
                 project=project_id,
                 runs=run_ids,
-                attributes=batch_attributes,
-                include_time="absolute",
-                include_point_previews=False,
-                lineage_to_the_root=False,
-                type_suffix_in_column_names=False,  # assume the type is always "float_series"
+                attributes=AttributeFilter(name=attributes, type=_METRIC_TYPES),
             )
 
-            if not metrics_df.empty:
-                converted_df = self._convert_metrics_to_schema(metrics_df, project_id)
-                return pa.RecordBatch.from_pandas(converted_df, schema=model.SCHEMA)
-            return None
+            def fetch_and_convert_batch(
+                attribute_batch: list[tuple[str, str]],
+            ) -> Optional[pa.RecordBatch]:
+                try:
+                    metrics_df = nq_runs.fetch_metrics(
+                        project=project_id,
+                        runs=run_ids,
+                        attributes=attribute_batch,
+                        include_time="absolute",
+                        include_point_previews=False,
+                        lineage_to_the_root=False,
+                        type_suffix_in_column_names=False,  # assume the type is always "float_series"
+                    )
 
-        # Create batches of attributes
-        attribute_batches = [
-            attributes_list[i : i + self._series_attribute_batch_size]
-            for i in range(0, len(attributes_list), self._series_attribute_batch_size)
-        ]
+                    if not metrics_df.empty:
+                        converted_df = self._convert_metrics_to_schema(
+                            metrics_df, project_id
+                        )
+                        return pa.RecordBatch.from_pandas(
+                            converted_df, schema=model.SCHEMA
+                        )
+                    return None
+                except Exception as e:
+                    self._handle_batch_exception(
+                        project_id, run_ids, attribute_batch, "metrics", e
+                    )
+                    return None
 
-        # Submit all batches to the executor
-        futures = [
-            self._executor.submit(fetch_and_convert_batch, batch_attributes)
-            for batch_attributes in attribute_batches
-        ]
-
-        # Yield results as they complete
-        for i, future in enumerate(as_completed(futures)):
-            try:
-                result = future.result()
-                if result is not None:
-                    yield result
-            except Exception as e:
-                self._handle_batch_exception(
-                    f"metrics batch {i} for project {project_id}", e
+            # Create batches of attributes
+            attribute_batches = [
+                attributes_list[i : i + self._series_attribute_batch_size]
+                for i in range(
+                    0, len(attributes_list), self._series_attribute_batch_size
                 )
+            ]
+
+            # Submit all batches to the executor
+            futures = [
+                self._executor.submit(fetch_and_convert_batch, batch_attributes)
+                for batch_attributes in attribute_batches
+            ]
+
+            # Yield results as they complete
+            for i, future in enumerate(as_completed(futures)):
+                try:
+                    result = future.result()
+                    if result is not None:
+                        yield result
+                except Exception as e:
+                    self._handle_runs_exception(
+                        project_id=project_id,
+                        run_ids=run_ids,
+                        batch_type="metrics",
+                        exception=e,
+                    )
+        except Exception as e:
+            self._handle_runs_exception(
+                project_id=project_id,
+                run_ids=run_ids,
+                batch_type="metrics",
+                exception=e,
+            )
+            yield pa.RecordBatch.from_pylist([], schema=model.SCHEMA)
 
     def _convert_metrics_to_schema(
         self, series_df: pd.DataFrame, project_id: str
@@ -291,60 +322,83 @@ class Neptune3Exporter(NeptuneExporter):
         run_ids: list[SourceRunId],
         attributes: None | str | Sequence[str],
     ) -> Generator[pa.RecordBatch, None, None]:
-        attributes_df = nq_runs.fetch_runs_table(
-            project=project_id,
-            runs=run_ids,
-            attributes=AttributeFilter(name=attributes, type=_SERIES_TYPES),
-            sort_by=Attribute(name="sys/id", type="string"),
-            sort_direction="asc",
-            type_suffix_in_column_names=True,
-        )
-        attribute_path_types = [
-            attr.rsplit(":", maxsplit=1) for attr in attributes_df.columns
-        ]
-
-        def fetch_and_convert_batch(attributes_batch):
-            series_df = nq_runs.fetch_series(
+        try:
+            attributes_df = nq_runs.fetch_runs_table(
                 project=project_id,
                 runs=run_ids,
-                attributes=[name for name, _ in attributes_batch],
-                include_time="absolute",
-                lineage_to_the_root=False,
+                attributes=AttributeFilter(name=attributes, type=_SERIES_TYPES),
+                sort_by=Attribute(name="sys/id", type="string"),
+                sort_direction="asc",
+                type_suffix_in_column_names=True,
             )
+            attribute_path_types = [
+                attr.rsplit(":", maxsplit=1) for attr in attributes_df.columns
+            ]
 
-            if not series_df.empty:
-                converted_df = self._convert_series_to_schema(
-                    series_df=series_df,
-                    project_id=project_id,
-                    attribute_path_types=attributes_batch,
+            def fetch_and_convert_batch(
+                attributes_batch: list[tuple[str, str]],
+            ) -> Optional[pa.RecordBatch]:
+                try:
+                    series_df = nq_runs.fetch_series(
+                        project=project_id,
+                        runs=run_ids,
+                        attributes=[name for name, _ in attributes_batch],
+                        include_time="absolute",
+                        lineage_to_the_root=False,
+                    )
+
+                    if not series_df.empty:
+                        converted_df = self._convert_series_to_schema(
+                            series_df=series_df,
+                            project_id=project_id,
+                            attribute_path_types=attributes_batch,
+                        )
+                        return pa.RecordBatch.from_pandas(
+                            converted_df, schema=model.SCHEMA
+                        )
+                    return None
+                except Exception as e:
+                    self._handle_batch_exception(
+                        project_id=project_id,
+                        run_ids=run_ids,
+                        attribute_batch=attributes_batch,
+                        batch_type="series",
+                        exception=e,
+                    )
+                    return None
+
+            # Create batches of attributes
+            attribute_batches = [
+                attribute_path_types[i : i + self._series_attribute_batch_size]
+                for i in range(
+                    0, len(attribute_path_types), self._series_attribute_batch_size
                 )
-                return pa.RecordBatch.from_pandas(converted_df, schema=model.SCHEMA)
-            return None
+            ]
 
-        # Create batches of attributes
-        attribute_batches = [
-            attribute_path_types[i : i + self._series_attribute_batch_size]
-            for i in range(
-                0, len(attribute_path_types), self._series_attribute_batch_size
+            # Submit all batches to the executor
+            futures = [
+                self._executor.submit(fetch_and_convert_batch, attributes_batch)
+                for attributes_batch in attribute_batches
+            ]
+
+            # Yield results as they complete
+            for future in as_completed(futures):
+                try:
+                    result = future.result()
+                    if result is not None:
+                        yield result
+                except Exception as e:
+                    self._handle_runs_exception(
+                        project_id=project_id,
+                        run_ids=run_ids,
+                        batch_type="series",
+                        exception=e,
+                    )
+        except Exception as e:
+            self._handle_runs_exception(
+                project_id=project_id, run_ids=run_ids, batch_type="series", exception=e
             )
-        ]
-
-        # Submit all batches to the executor
-        futures = [
-            self._executor.submit(fetch_and_convert_batch, attributes_batch)
-            for attributes_batch in attribute_batches
-        ]
-
-        # Yield results as they complete
-        for i, future in enumerate(as_completed(futures)):
-            try:
-                result = future.result()
-                if result is not None:
-                    yield result
-            except Exception as e:
-                self._handle_batch_exception(
-                    f"series batch {i} for project {project_id}", e
-                )
+            yield pa.RecordBatch.from_pylist([], schema=model.SCHEMA)
 
     def _convert_series_to_schema(
         self,
@@ -412,130 +466,169 @@ class Neptune3Exporter(NeptuneExporter):
         attributes: None | str | Sequence[str],
         destination: Path,
     ) -> Generator[pa.RecordBatch, None, None]:
-        destination = destination.resolve()
+        try:
+            destination = destination.resolve()
 
-        # Get list of file attributes to batch
-        file_attributes = nq_runs.list_attributes(
-            project=project_id,
-            runs=run_ids,
-            attributes=AttributeFilter(name=attributes, type=_FILE_TYPES),
-        )
-
-        file_series_attributes = nq_runs.list_attributes(
-            project=project_id,
-            runs=run_ids,
-            attributes=AttributeFilter(name=attributes, type=_FILE_SERIES_TYPES),
-        )
-
-        def fetch_and_convert_file_batch(batch_attributes):
-            if not batch_attributes:
-                return None
-
-            # Fetch files table for this batch
-            files_df = nq_runs.fetch_runs_table(
+            # Get list of file attributes to batch
+            file_attributes = nq_runs.list_attributes(
                 project=project_id,
                 runs=run_ids,
-                attributes=AttributeFilter(name=batch_attributes, type=_FILE_TYPES),
-                sort_by=Attribute(name="sys/id", type="string"),
-                sort_direction="asc",
-                type_suffix_in_column_names=True,
+                attributes=AttributeFilter(name=attributes, type=_FILE_TYPES),
             )
 
-            if files_df.empty:
-                return None
-
-            # Download files for this batch
-            file_paths_df = nq_runs.download_files(
-                files=files_df,
-                destination=destination,
-            )
-
-            # Convert to schema
-            converted_df = self._convert_files_to_schema(
-                downloaded_files_df=file_paths_df,
-                project_id=project_id,
-                attribute_type="file",
-                file_series_df=None,
-                destination=destination,
-            )
-
-            return pa.RecordBatch.from_pandas(converted_df, schema=model.SCHEMA)
-
-        def fetch_and_convert_file_series_batch(batch_attributes):
-            if not batch_attributes:
-                return None
-
-            # Fetch file series for this batch
-            files_series_df = nq_runs.fetch_series(
+            file_series_attributes = nq_runs.list_attributes(
                 project=project_id,
                 runs=run_ids,
-                attributes=AttributeFilter(
-                    name=batch_attributes, type=_FILE_SERIES_TYPES
-                ),
-                include_time="absolute",
-                lineage_to_the_root=False,
+                attributes=AttributeFilter(name=attributes, type=_FILE_SERIES_TYPES),
             )
 
-            if files_series_df.empty:
-                return None
+            def fetch_and_convert_file_batch(
+                attribute_batch: list[tuple[str, str]],
+            ) -> Optional[pa.RecordBatch]:
+                try:
+                    if not attribute_batch:
+                        return None
 
-            # Download file series for this batch
-            file_series_paths_df = nq_runs.download_files(
-                files=files_series_df,
-                destination=destination,
-            )
+                    # Fetch files table for this batch
+                    files_df = nq_runs.fetch_runs_table(
+                        project=project_id,
+                        runs=run_ids,
+                        attributes=AttributeFilter(
+                            name=attribute_batch, type=_FILE_TYPES
+                        ),
+                        sort_by=Attribute(name="sys/id", type="string"),
+                        sort_direction="asc",
+                        type_suffix_in_column_names=True,
+                    )
 
-            # Convert to schema
-            converted_df = self._convert_files_to_schema(
-                downloaded_files_df=file_series_paths_df,
-                project_id=project_id,
-                attribute_type="file_series",
-                file_series_df=files_series_df,
-                destination=destination,
-            )
+                    if files_df.empty:
+                        return None
 
-            return pa.RecordBatch.from_pandas(converted_df, schema=model.SCHEMA)
+                    # Download files for this batch
+                    file_paths_df = nq_runs.download_files(
+                        files=files_df,
+                        destination=destination,
+                    )
 
-        # Create batches of attributes
-        file_attribute_batches = [
-            file_attributes[i : i + self._file_attribute_batch_size]
-            for i in range(0, len(file_attributes), self._file_attribute_batch_size)
-        ]
+                    # Convert to schema
+                    converted_df = self._convert_files_to_schema(
+                        downloaded_files_df=file_paths_df,
+                        project_id=project_id,
+                        attribute_type="file",
+                        file_series_df=None,
+                        destination=destination,
+                    )
 
-        file_series_attribute_batches = [
-            file_series_attributes[i : i + self._file_series_attribute_batch_size]
-            for i in range(
-                0, len(file_series_attributes), self._file_series_attribute_batch_size
-            )
-        ]
+                    return pa.RecordBatch.from_pandas(converted_df, schema=model.SCHEMA)
+                except Exception as e:
+                    self._handle_batch_exception(
+                        project_id=project_id,
+                        run_ids=run_ids,
+                        attribute_batch=batch_attributes,
+                        batch_type="files",
+                        exception=e,
+                    )
+                    return None
 
-        # Submit all batches to the executor
-        futures = []
+            def fetch_and_convert_file_series_batch(
+                attribute_batch: list[tuple[str, str]],
+            ) -> Optional[pa.RecordBatch]:
+                try:
+                    if not attribute_batch:
+                        return None
 
-        # Submit file batches
-        for batch_attributes in file_attribute_batches:
-            futures.append(
-                self._executor.submit(fetch_and_convert_file_batch, batch_attributes)
-            )
+                    # Fetch file series for this batch
+                    files_series_df = nq_runs.fetch_series(
+                        project=project_id,
+                        runs=run_ids,
+                        attributes=AttributeFilter(
+                            name=attribute_batch, type=_FILE_SERIES_TYPES
+                        ),
+                        include_time="absolute",
+                        lineage_to_the_root=False,
+                    )
 
-        # Submit file series batches
-        for batch_attributes in file_series_attribute_batches:
-            futures.append(
-                self._executor.submit(
-                    fetch_and_convert_file_series_batch, batch_attributes
+                    if files_series_df.empty:
+                        return None
+
+                    # Download file series for this batch
+                    file_series_paths_df = nq_runs.download_files(
+                        files=files_series_df,
+                        destination=destination,
+                    )
+
+                    # Convert to schema
+                    converted_df = self._convert_files_to_schema(
+                        downloaded_files_df=file_series_paths_df,
+                        project_id=project_id,
+                        attribute_type="file_series",
+                        file_series_df=files_series_df,
+                        destination=destination,
+                    )
+
+                    return pa.RecordBatch.from_pandas(converted_df, schema=model.SCHEMA)
+                except Exception as e:
+                    self._handle_batch_exception(
+                        project_id=project_id,
+                        run_ids=run_ids,
+                        attribute_batch=attribute_batch,
+                        batch_type="files",
+                        exception=e,
+                    )
+                    return None
+
+            # Create batches of attributes
+            file_attribute_batches = [
+                file_attributes[i : i + self._file_attribute_batch_size]
+                for i in range(0, len(file_attributes), self._file_attribute_batch_size)
+            ]
+
+            file_series_attribute_batches = [
+                file_series_attributes[i : i + self._file_series_attribute_batch_size]
+                for i in range(
+                    0,
+                    len(file_series_attributes),
+                    self._file_series_attribute_batch_size,
                 )
-            )
+            ]
 
-        # Yield results as they complete
-        for i, future in enumerate(as_completed(futures)):
-            try:
-                result = future.result()
-                if result is not None:
-                    yield result
-            except Exception as e:
-                self._handle_batch_exception(
-                    f"files batch {i} for project {project_id}", e
+            # Submit all batches to the executor
+            futures = []
+
+            # Submit file batches
+            for batch_attributes in file_attribute_batches:
+                futures.append(
+                    self._executor.submit(
+                        fetch_and_convert_file_batch, batch_attributes
+                    )
                 )
+
+            # Submit file series batches
+            for batch_attributes in file_series_attribute_batches:
+                futures.append(
+                    self._executor.submit(
+                        fetch_and_convert_file_series_batch, batch_attributes
+                    )
+                )
+
+            # Yield results as they complete
+            for future in as_completed(futures):
+                try:
+                    result = future.result()
+                    if result is not None:
+                        yield result
+                except Exception as e:
+                    self._handle_runs_exception(
+                        project_id=project_id,
+                        run_ids=run_ids,
+                        batch_type="files",
+                        exception=e,
+                    )
+        except Exception as e:
+            self._handle_runs_exception(
+                project_id=project_id, run_ids=run_ids, batch_type="files", exception=e
+            )
+            yield pa.RecordBatch.from_pylist([], schema=model.SCHEMA)
 
     def _convert_files_to_schema(
         self,
@@ -602,36 +695,90 @@ class Neptune3Exporter(NeptuneExporter):
             }
         )
 
-    def _handle_batch_exception(self, batch_info: str, exception: Exception) -> None:
+    def get_exception_infos(self) -> list[ExceptionInfo]:
+        """Get list of exceptions that occurred during export."""
+        return self._exception_infos
+
+    def _handle_batch_exception(
+        self,
+        project_id: ProjectId,
+        run_ids: list[SourceRunId],
+        attribute_batch: list[tuple[str, str]],
+        batch_type: Literal["parameters", "metrics", "series", "files"],
+        exception: Exception,
+    ) -> None:
         """Handle exceptions that occur during batch processing."""
-        if isinstance(exception, PermissionError):
-            # Permission issues - user needs to fix their setup
-            self._logger.error(
-                f"Permission denied processing batch {batch_info}: {exception}"
-            )
-        elif isinstance(exception, FileNotFoundError):
-            # File not found - could be user error or system issue
-            self._logger.error(
-                f"File not found processing batch {batch_info}: {exception}"
-            )
-        elif (
-            isinstance(exception, OSError) and exception.errno == 28
-        ):  # No space left on device
-            # Critical system issue
-            self._logger.critical(
-                f"Disk full processing batch {batch_info}: {exception}"
-            )
-        elif isinstance(exception, (OSError, IOError)):
-            # Other I/O errors - could be temporary or permanent
-            self._logger.error(f"I/O error processing batch {batch_info}: {exception}")
-        elif isinstance(exception, (NeptuneError, NeptuneWarning)):
+        attribute_string = ", ".join(
+            [f"{name} ({_type})" for name, _type in attribute_batch]
+        )
+        if isinstance(exception, NeptuneError):
             # Neptune-related errors
-            self._logger.error(
-                f"Neptune error processing batch {batch_info}: {exception}"
+            self._logger.warning(
+                f"Skipping project {project_id}, run {run_ids}, attributes [{attribute_string}], batch type {batch_type} because of neptune-query client error.",
+                exc_info=True,
+            )
+        elif isinstance(exception, OSError):
+            # Other I/O errors - could be temporary or permanent
+            self._logger.warning(
+                f"Skipping project {project_id}, run {run_ids}, attributes [{attribute_string}], batch type {batch_type} because of I/O error.",
+                exc_info=True,
             )
         else:
             # Unexpected errors - definitely need investigation
-            self._logger.error(
-                f"Unexpected error processing batch {batch_info}: {exception}",
+            self._logger.warning(
+                f"Skipping project {project_id}, run {run_ids}, attributes [{attribute_string}], batch type {batch_type} because of unexpected error.",
                 exc_info=True,
             )
+
+        self._exception_infos.extend(
+            [
+                ExceptionInfo(
+                    project_id=project_id,
+                    run_id=run_id,
+                    attribute_path=attribute_path,
+                    attribute_type=attribute_type,
+                    exception=exception,
+                )
+                for attribute_path, attribute_type in attribute_batch
+                for run_id in run_ids
+            ]
+        )
+
+    def _handle_runs_exception(
+        self,
+        project_id: ProjectId,
+        run_ids: list[SourceRunId],
+        batch_type: Literal["parameters", "metrics", "series", "files"],
+        exception: Exception,
+    ) -> None:
+        """Handle exceptions that occur during batch processing."""
+        if isinstance(exception, NeptuneError):
+            # Neptune-related errors
+            self._logger.warning(
+                f"Skipping project {project_id}, run {run_ids}, batch type {batch_type} because of neptune-query client error.",
+                exc_info=True,
+            )
+        elif isinstance(exception, OSError):
+            # Other I/O errors - could be temporary or permanent
+            self._logger.warning(
+                f"Skipping project {project_id}, run {run_ids}, batch type {batch_type} because of I/O error.",
+                exc_info=True,
+            )
+        else:
+            # Unexpected errors - definitely need investigation
+            self._logger.warning(
+                f"Skipping project {project_id}, run {run_ids}, batch type {batch_type} because of unexpected error.",
+                exc_info=True,
+            )
+        self._exception_infos.extend(
+            [
+                ExceptionInfo(
+                    project_id=project_id,
+                    run_id=run_id,
+                    attribute_path=None,
+                    attribute_type=None,
+                    exception=exception,
+                )
+                for run_id in run_ids
+            ]
+        )

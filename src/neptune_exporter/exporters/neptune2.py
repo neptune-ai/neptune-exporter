@@ -32,7 +32,7 @@ import neptune.exceptions
 from neptune import management
 
 from neptune_exporter import model
-from neptune_exporter.exporters.exporter import NeptuneExporter
+from neptune_exporter.exporters.exporter import ExceptionInfo, NeptuneExporter
 from neptune_exporter.types import ProjectId, SourceRunId
 
 _ATTRIBUTE_TYPE_MAP = {
@@ -84,6 +84,7 @@ class Neptune2Exporter(NeptuneExporter):
         self._logger = logging.getLogger(__name__)
         self._show_client_logs = show_client_logs
         self._initialize_client(show_client_logs=show_client_logs)
+        self._exception_infos: list[ExceptionInfo] = []
 
     def _initialize_client(self, show_client_logs: bool) -> None:
         if show_client_logs:
@@ -143,7 +144,7 @@ class Neptune2Exporter(NeptuneExporter):
                 if result is not None:
                     yield result
             except Exception as e:
-                self._handle_run_exception(run_id, e)
+                self._handle_run_exception(project_id, run_id, e)
 
     def _process_run_parameters(
         self,
@@ -171,8 +172,9 @@ class Neptune2Exporter(NeptuneExporter):
                 except KeyError:
                     return None
 
-            attribute_path = None
+            attribute_path, attribute_type = None, None
             for attribute in self._iterate_attributes(structure):
+                attribute_path, attribute_type = None, None
                 try:
                     attribute_path = "/".join(attribute._path)
 
@@ -198,7 +200,9 @@ class Neptune2Exporter(NeptuneExporter):
                         }
                     )
                 except Exception as e:
-                    self._handle_attribute_exception(run_id, attribute_path, e)
+                    self._handle_attribute_exception(
+                        project_id, run_id, attribute_path, attribute_type, e
+                    )
 
         if all_data:
             converted_df = self._convert_parameters_to_schema(all_data, project_id)
@@ -277,7 +281,7 @@ class Neptune2Exporter(NeptuneExporter):
                 if result is not None:
                     yield result
             except Exception as e:
-                self._handle_run_exception(run_id, e)
+                self._handle_run_exception(project_id, run_id, e)
 
     def _process_run_metrics(
         self,
@@ -296,8 +300,9 @@ class Neptune2Exporter(NeptuneExporter):
         ) as run:
             structure = run.get_structure()
 
-            attribute_path = None
+            attribute_path, attribute_type = None, None
             for attribute in self._iterate_attributes(structure):
+                attribute_path, attribute_type = None, None
                 try:
                     attribute_path = "/".join(attribute._path)
 
@@ -320,7 +325,9 @@ class Neptune2Exporter(NeptuneExporter):
 
                     all_data_dfs.append(series_df)
                 except Exception as e:
-                    self._handle_attribute_exception(run_id, attribute_path, e)
+                    self._handle_attribute_exception(
+                        project_id, run_id, attribute_path, attribute_type, e
+                    )
 
         if all_data_dfs:
             converted_df = self._convert_metrics_to_schema(all_data_dfs, project_id)
@@ -380,7 +387,7 @@ class Neptune2Exporter(NeptuneExporter):
                 if result is not None:
                     yield result
             except Exception as e:
-                self._handle_run_exception(run_id, e)
+                self._handle_run_exception(project_id, run_id, e)
 
     def _process_run_series(
         self,
@@ -399,8 +406,9 @@ class Neptune2Exporter(NeptuneExporter):
         ) as run:
             structure = run.get_structure()
 
-            attribute_path = None
+            attribute_path, attribute_type = None, None
             for attribute in self._iterate_attributes(structure):
+                attribute_path, attribute_type = None, None
                 try:
                     attribute_path = "/".join(attribute._path)
 
@@ -423,7 +431,9 @@ class Neptune2Exporter(NeptuneExporter):
 
                     all_data_dfs.append(series_df)
                 except Exception as e:
-                    self._handle_attribute_exception(run_id, attribute_path, e)
+                    self._handle_attribute_exception(
+                        project_id, run_id, attribute_path, attribute_type, e
+                    )
 
         if all_data_dfs:
             converted_df = self._convert_series_to_schema(all_data_dfs, project_id)
@@ -487,7 +497,7 @@ class Neptune2Exporter(NeptuneExporter):
                 if result is not None:
                     yield result
             except Exception as e:
-                self._handle_run_exception(run_id, e)
+                self._handle_run_exception(project_id, run_id, e)
 
     def _process_run_files(
         self,
@@ -507,8 +517,9 @@ class Neptune2Exporter(NeptuneExporter):
         ) as run:
             structure = run.get_structure()
 
-            attribute_path = None
+            attribute_path, attribute_type = None, None
             for attribute in self._iterate_attributes(structure):
+                attribute_path, attribute_type = None, None
                 try:
                     attribute_path = "/".join(attribute._path)
 
@@ -622,7 +633,9 @@ class Neptune2Exporter(NeptuneExporter):
                             }
                         )
                 except Exception as e:
-                    self._handle_attribute_exception(run_id, attribute_path, e)
+                    self._handle_attribute_exception(
+                        project_id, run_id, attribute_path, attribute_type, e
+                    )
 
         if all_data_dfs:
             converted_df = self._convert_files_to_schema(all_data_dfs, project_id)
@@ -683,72 +696,86 @@ class Neptune2Exporter(NeptuneExporter):
 
         return True
 
-    def _handle_run_exception(self, run_id: SourceRunId, exception: Exception) -> None:
+    def get_exception_infos(self) -> list[ExceptionInfo]:
+        """Get list of exceptions that occurred during export."""
+        return self._exception_infos
+
+    def _handle_run_exception(
+        self, project_id: ProjectId, run_id: SourceRunId, exception: Exception
+    ) -> None:
         """Handle exceptions that occur during run processing."""
-        if isinstance(exception, neptune.exceptions.MetadataContainerNotFound):
-            # Expected: Run doesn't exist, just skip it
-            self._logger.debug(f"Run {run_id} not found, skipping")
-        elif isinstance(exception, neptune.exceptions.NeptuneConnectionLostException):
-            # Network issues - might be temporary, user should retry
-            self._logger.warning(
-                f"Connection lost processing run {run_id}: {exception}"
-            )
-        elif isinstance(exception, neptune.exceptions.NeptuneApiException):
-            # API errors - could be rate limiting, auth issues, etc.
-            self._logger.warning(f"API error processing run {run_id}: {exception}")
-        elif isinstance(exception, neptune.exceptions.NeptuneException):
+        if isinstance(exception, neptune.exceptions.NeptuneException):
             # Other Neptune-specific errors
-            self._logger.error(f"Neptune error processing run {run_id}: {exception}")
-        elif isinstance(exception, PermissionError):
-            # Permission issues - user needs to fix their setup
-            self._logger.error(
-                f"Permission denied processing run {run_id}: {exception}"
+            self._logger.warning(
+                f"Skipping project {project_id}, run {run_id} because of neptune client error.",
+                exc_info=True,
             )
-        elif isinstance(exception, FileNotFoundError):
-            # File not found - could be user error or system issue
-            self._logger.error(f"File not found processing run {run_id}: {exception}")
-        elif (
-            isinstance(exception, OSError) and exception.errno == 28
-        ):  # No space left on device
-            # Critical system issue
-            self._logger.critical(f"Disk full processing run {run_id}: {exception}")
-        elif isinstance(exception, (OSError, IOError)):
+        elif isinstance(exception, OSError):
             # Other I/O errors - could be temporary or permanent
-            self._logger.error(f"I/O error processing run {run_id}: {exception}")
+            self._logger.warning(
+                f"Skipping project {project_id}, run {run_id} because of I/O error.",
+                exc_info=True,
+            )
         else:
             # Unexpected errors - definitely need investigation
-            self._logger.error(
-                f"Unexpected error processing run {run_id}: {exception}", exc_info=True
+            self._logger.warning(
+                f"Skipping project {project_id}, run {run_id} because of unexpected error.",
+                exc_info=True,
             )
+        self._exception_infos.append(
+            ExceptionInfo(
+                project_id=project_id,
+                run_id=run_id,
+                attribute_path=None,
+                attribute_type=None,
+                exception=exception,
+            )
+        )
 
     def _handle_attribute_exception(
-        self, run_id: SourceRunId, attribute_path: Optional[str], exception: Exception
+        self,
+        project_id: ProjectId,
+        run_id: SourceRunId,
+        attribute_path: Optional[str],
+        attribute_type: Optional[str],
+        exception: Exception,
     ) -> None:
         """Handle exceptions that occur during attribute processing."""
         if attribute_path is None:
-            self._handle_run_exception(run_id, exception)
+            self._handle_run_exception(project_id, run_id, exception)
             return
 
-        if isinstance(exception, neptune.exceptions.NeptuneConnectionLostException):
-            # Network issues - might be temporary, user should retry
-            self._logger.warning(
-                f"Connection lost processing run {run_id} attribute {attribute_path}: {exception}"
-            )
-        elif isinstance(exception, neptune.exceptions.NeptuneApiException):
-            # API errors - could be rate limiting, auth issues, etc.
-            self._logger.warning(
-                f"API error processing run {run_id} attribute {attribute_path}: {exception}"
-            )
-        elif isinstance(exception, neptune.exceptions.NeptuneException):
+        if isinstance(exception, neptune.exceptions.NeptuneException):
+            # an expected problem, skipping this attribute is acceptable
             if attribute_path == "sys/group_tags":
-                self._logger.debug(
-                    f"Neptune error processing run {run_id} attribute {attribute_path}: {exception}",
+                self._logger.info(
+                    f"Skipping project {project_id}, run {run_id}, attribute {attribute_path} ({attribute_type}) because of neptune client error. This is expected and can be ignored.",
                     exc_info=True,
                 )
             else:
                 # Other Neptune-specific errors
-                self._logger.error(
-                    f"Neptune error processing run {run_id} attribute {attribute_path}: {exception}"
+                self._logger.warning(
+                    f"Skipping project {project_id}, run {run_id}, attribute {attribute_path} ({attribute_type}) because of neptune client error.",
+                    exc_info=True,
                 )
+        elif isinstance(exception, OSError):
+            # Other I/O errors - could be temporary or permanent
+            self._logger.warning(
+                f"Skipping project {project_id}, run {run_id}, attribute {attribute_path} ({attribute_type}) because of I/O error.",
+                exc_info=True,
+            )
         else:
-            self._handle_run_exception(run_id, exception)
+            # Unexpected errors - definitely need investigation
+            self._logger.warning(
+                f"Skipping project {project_id}, run {run_id}, attribute {attribute_path} ({attribute_type}) because of unexpected error.",
+                exc_info=True,
+            )
+        self._exception_infos.append(
+            ExceptionInfo(
+                project_id=project_id,
+                run_id=run_id,
+                attribute_path=attribute_path,
+                attribute_type=attribute_type,
+                exception=exception,
+            )
+        )
