@@ -36,7 +36,6 @@ class LoaderManager:
         files_directory: Path,
         step_multiplier: int,
         progress_bar: bool = True,
-        logger_level: int = logging.ERROR,
     ):
         self._parquet_reader = parquet_reader
         self._data_loader = data_loader
@@ -44,7 +43,6 @@ class LoaderManager:
         self._step_multiplier = step_multiplier
         self._progress_bar = progress_bar
         self._logger = logging.getLogger(__name__)
-        self._logger.setLevel(logger_level)
 
     def load(
         self,

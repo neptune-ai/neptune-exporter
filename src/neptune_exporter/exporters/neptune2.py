@@ -74,14 +74,12 @@ class Neptune2Exporter(NeptuneExporter):
         self,
         api_token: Optional[str] = None,
         max_workers: int = 16,
-        logger_level: int = logging.ERROR,
         show_client_logs: bool = False,
     ):
         self._api_token = api_token
         self._quantize_base = Decimal("1.000000")
         self._executor = ThreadPoolExecutor(max_workers=max_workers)
         self._logger = logging.getLogger(__name__)
-        self._logger.setLevel(logger_level)
         self._show_client_logs = show_client_logs
         self._initialize_client(show_client_logs=show_client_logs)
 

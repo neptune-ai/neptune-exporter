@@ -36,7 +36,6 @@ class WandBLoader(DataLoader):
         entity: str,
         api_key: Optional[str] = None,
         name_prefix: Optional[str] = None,
-        logger_level: int = logging.ERROR,
         show_client_logs: bool = False,
     ):
         """
@@ -51,7 +50,6 @@ class WandBLoader(DataLoader):
         self.entity = entity
         self.name_prefix = name_prefix
         self._logger = logging.getLogger(__name__)
-        self._logger.setLevel(logger_level)
         self._active_run: Optional[wandb.Run] = None
 
         # Authenticate with W&B

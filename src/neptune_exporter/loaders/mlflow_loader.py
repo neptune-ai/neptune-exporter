@@ -38,7 +38,6 @@ class MLflowLoader(DataLoader):
         self,
         tracking_uri: Optional[str] = None,
         name_prefix: Optional[str] = None,
-        logger_level: int = logging.ERROR,
         show_client_logs: bool = False,
     ):
         """
@@ -52,7 +51,6 @@ class MLflowLoader(DataLoader):
         self.tracking_uri = tracking_uri
         self.name_prefix = name_prefix
         self._logger = logging.getLogger(__name__)
-        self._logger.setLevel(logger_level)
 
         if tracking_uri:
             mlflow.set_tracking_uri(tracking_uri)

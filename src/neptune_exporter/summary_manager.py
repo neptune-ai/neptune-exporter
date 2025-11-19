@@ -24,12 +24,9 @@ from neptune_exporter.storage.parquet_reader import ParquetReader
 class SummaryManager:
     """Manages analysis and reporting of exported Neptune data."""
 
-    def __init__(
-        self, parquet_reader: ParquetReader, logger_level: int = logging.ERROR
-    ):
+    def __init__(self, parquet_reader: ParquetReader):
         self._parquet_reader = parquet_reader
         self._logger = logging.getLogger(__name__)
-        self._logger.setLevel(logger_level)
 
     def get_data_summary(self) -> dict[str, Any]:
         """
