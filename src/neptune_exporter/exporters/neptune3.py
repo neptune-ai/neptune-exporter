@@ -21,7 +21,7 @@ import pandas as pd
 from typing import Generator, Literal, Optional, Sequence
 from pathlib import Path
 import neptune_query as nq
-from neptune_query import runs as nq_runs
+from neptune_query import filters, runs as nq_runs
 from neptune_query.filters import Attribute, AttributeFilter
 from concurrent.futures import ThreadPoolExecutor, as_completed
 import logging
@@ -92,7 +92,15 @@ class Neptune3Exporter(NeptuneExporter):
         List Neptune runs.
         The runs parameter is a regex pattern that the sys/custom_run_id must match.
         """
-        return nq_runs.list_runs(project=project_id, runs=runs)
+        if runs is not None:
+            runs_filter = filters.Filter.matches(
+                filters.Attribute("sys/custom_run_id", type="string"), runs
+            )
+        else:
+            runs_filter = filters.Filter.exists(
+                filters.Attribute("sys/custom_run_id", type="string")
+            )
+        return nq_runs.list_runs(project=project_id, runs=runs_filter)
 
     def download_parameters(
         self,
