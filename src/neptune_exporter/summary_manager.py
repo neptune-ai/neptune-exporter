@@ -133,7 +133,7 @@ class SummaryManager:
         """Calculate statistics for step values in the table."""
         try:
             # Filter out null steps
-            non_null_mask = pc.is_not_null(table["step"])
+            non_null_mask = pc.true_unless_null(table["step"])
             non_null_table = table.filter(non_null_mask)
 
             if len(non_null_table) == 0:
