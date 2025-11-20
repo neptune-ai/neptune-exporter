@@ -153,8 +153,10 @@ class ParquetWriter:
         for file_path in all_files:
             try:
                 file_path.unlink()
-            except Exception as e:
-                self._logger.warning(f"Failed to delete leftover file {file_path}: {e}")
+            except Exception:
+                self._logger.warning(
+                    f"Failed to delete leftover file {file_path}", exc_info=True
+                )
 
     def _create_new_part(
         self, project_id: str, run_id: str, data: pa.RecordBatch

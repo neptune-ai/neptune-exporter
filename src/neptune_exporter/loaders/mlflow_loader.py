@@ -117,9 +117,10 @@ class MLflowLoader(DataLoader):
                 )
 
             return TargetExperimentId(experiment_id)
-        except Exception as e:
+        except Exception:
             self._logger.error(
-                f"Error creating/getting experiment '{target_experiment_name}': {e}"
+                f"Error creating/getting experiment '{target_experiment_name}'",
+                exc_info=True,
             )
             raise
 
@@ -138,9 +139,9 @@ class MLflowLoader(DataLoader):
                 max_results=1,
             )
             return TargetRunId(existing_runs[0].info.run_id) if existing_runs else None
-        except Exception as e:
-            self._logger.error(
-                f"Error finding project {project_id}, run '{run_name}': {e}",
+        except Exception:
+            self._logger.warning(
+                f"Error finding project {project_id}, run '{run_name}'",
                 exc_info=True,
             )
             return None
@@ -173,9 +174,9 @@ class MLflowLoader(DataLoader):
                     f"Created run '{run_name}' with MLflow ID {mlflow_run_id}"
                 )
                 return TargetRunId(mlflow_run_id)
-        except Exception as e:
+        except Exception:
             self._logger.error(
-                f"Error creating project {project_id}, run '{run_name}': {e}",
+                f"Error creating project {project_id}, run '{run_name}'",
                 exc_info=True,
             )
             raise
@@ -204,10 +205,8 @@ class MLflowLoader(DataLoader):
 
                     self._logger.info(f"Successfully uploaded run {run_id} to MLflow")
 
-        except Exception as e:
-            self._logger.error(
-                f"Error uploading data for run {run_id}: {e}", exc_info=True
-            )
+        except Exception:
+            self._logger.error(f"Error uploading data for run {run_id}", exc_info=True)
             raise
 
     def upload_parameters(self, run_data: pd.DataFrame, run_id: TargetRunId) -> None:

@@ -179,9 +179,10 @@ class ParquetReader:
                 )
                 if len(table) > 0:
                     yield table
-            except Exception as e:
+            except Exception:
                 self._logger.error(
-                    f"Error reading part file {part_file} for run {run_file_prefix}: {e}"
+                    f"Error reading part file {part_file} for run {run_file_prefix}",
+                    exc_info=True,
                 )
                 continue
 

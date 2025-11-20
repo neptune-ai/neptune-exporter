@@ -125,9 +125,9 @@ class SummaryManager:
                 "file_info": file_info,
                 "step_statistics": step_stats,
             }
-        except Exception as e:
+        except Exception:
             self._logger.error(
-                f"Error analyzing project {project_directory}: {e}", exc_info=True
+                f"Error analyzing project {project_directory}", exc_info=True
             )
             return None
 
@@ -155,10 +155,8 @@ class SummaryManager:
                 "max_step": max(step_values),
                 "unique_steps": len(set(step_values)),
             }
-        except Exception as e:
-            self._logger.warning(
-                f"Could not calculate step statistics: {e}", exc_info=True
-            )
+        except Exception:
+            self._logger.error("Could not calculate step statistics", exc_info=True)
             return {
                 "total_steps": 0,
                 "min_step": None,

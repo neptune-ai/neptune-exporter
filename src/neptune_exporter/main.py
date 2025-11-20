@@ -285,8 +285,8 @@ def export(
             )
         else:
             logger.info("Export completed successfully!")
-    except Exception as e:
-        logger.error(f"Export failed: {e}", exc_info=True)
+    except Exception:
+        logger.error("Export failed", exc_info=True)
         raise click.Abort()
 
     finally:
@@ -491,8 +491,8 @@ def load(
             runs=[SourceRunId(run_id) for run_id in runs_list] if runs_list else None,
         )
         logger.info(f"{loader_name} loading completed successfully!")
-    except Exception as e:
-        logger.error(f"{loader_name} loading failed: {e}", exc_info=True)
+    except Exception:
+        logger.error(f"{loader_name} loading failed", exc_info=True)
         raise click.Abort()
 
 
@@ -543,8 +543,8 @@ def summary(data_path: Path, verbose: bool, log_file: Path) -> None:
         summary_data = summary_manager.get_data_summary()
         ReportFormatter.print_data_summary(summary_data, data_path)
 
-    except Exception as e:
-        logger.error(f"Failed to generate summary: {e}", exc_info=True)
+    except Exception:
+        logger.error("Failed to generate summary", exc_info=True)
         raise click.Abort()
 
 

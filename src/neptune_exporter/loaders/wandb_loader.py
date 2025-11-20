@@ -146,9 +146,9 @@ class WandBLoader(DataLoader):
                 return TargetRunId(run.id)
 
             return None
-        except Exception as e:
+        except Exception:
             self._logger.error(
-                f"Error finding project {project_id}, run '{run_name}': {e}",
+                f"Error finding project {project_id}, run '{run_name}'",
                 exc_info=True,
             )
             return None
@@ -212,9 +212,9 @@ class WandBLoader(DataLoader):
             self._logger.info(f"Created run '{run_name}' with W&B ID {wandb_run_id}")
             return TargetRunId(wandb_run_id)
 
-        except Exception as e:
+        except Exception:
             self._logger.error(
-                f"Error creating project {project_id}, run '{run_name}': {e}",
+                f"Error creating project {project_id}, run '{run_name}'",
                 exc_info=True,
             )
             raise
@@ -253,10 +253,8 @@ class WandBLoader(DataLoader):
 
             self._logger.info(f"Successfully uploaded run {run_id} to W&B")
 
-        except Exception as e:
-            self._logger.error(
-                f"Error uploading data for run {run_id}: {e}", exc_info=True
-            )
+        except Exception:
+            self._logger.error(f"Error uploading data for run {run_id}", exc_info=True)
             if self._active_run:
                 self._active_run.finish(exit_code=1)
                 self._active_run = None
@@ -453,9 +451,10 @@ class WandBLoader(DataLoader):
                             np_histogram=(hist.get("values", []), hist.get("edges", []))
                         )
                         self._active_run.log({attr_name: wandb_hist}, step=step)
-                    except Exception as e:
-                        self._logger.warning(
-                            f"Failed to log histogram for {attr_path} at step {step}: {e}"
+                    except Exception:
+                        self._logger.error(
+                            f"Failed to log histogram for {attr_path} at step {step}",
+                            exc_info=True,
                         )
 
         self._logger.info(f"Uploaded artifacts for run {run_id}")
