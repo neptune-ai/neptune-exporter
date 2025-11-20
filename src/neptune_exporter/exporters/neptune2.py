@@ -106,7 +106,9 @@ class Neptune2Exporter(NeptuneExporter):
         with neptune.init_project(
             api_token=self._api_token, project=project_id, mode="read-only"
         ) as project:
-            runs_table = project.fetch_runs_table().to_pandas()
+            runs_table = project.fetch_runs_table(
+                progress_bar=None if self._show_client_logs else False
+            ).to_pandas()
             if not len(runs_table):
                 return []
 
