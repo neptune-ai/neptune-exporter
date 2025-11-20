@@ -97,8 +97,8 @@ class Neptune3Exporter(NeptuneExporter):
                 filters.Attribute("sys/custom_run_id", type="string"), runs
             )
         else:
-            runs_filter = filters.Filter.exists(
-                filters.Attribute("sys/custom_run_id", type="string")
+            runs_filter = filters.Filter.matches(
+                filters.Attribute("sys/custom_run_id", type="string"), ".+"
             )
         return nq_runs.list_runs(project=project_id, runs=runs_filter)
 
