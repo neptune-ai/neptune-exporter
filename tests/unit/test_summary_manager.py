@@ -185,6 +185,38 @@ def test_get_project_summary_with_complex_data():
     assert set(result["runs"]) == {"run1", "run2", "run3"}
 
 
+def test_get_project_summary_with_step_statistics():
+    """Test get_project_summary with step statistics."""
+    mock_reader = Mock(spec=ParquetReader)
+    project_dir = Path("/data/step_statistics_project")
+
+    # Create mock PyArrow table with step statistics
+    mock_table = pa.table(
+        {
+            "project_id": ["step-statistics-project"] * 5,
+            "run_id": ["run1", "run1", "run1", "run2", "run2"],
+            "attribute_type": ["float"] * 5,
+            "attribute_path": ["loss"] * 5,
+            "step": [1.0, 2.0, 3.0, 1.0, 6.0],
+        }
+    )
+
+    mock_generator = iter([mock_table])
+    mock_reader.read_project_data.return_value = mock_generator
+
+    manager = SummaryManager(parquet_reader=mock_reader)
+    result = manager.get_project_summary(project_dir)
+
+    assert result["project_id"] == "step-statistics-project"
+    assert result["total_runs"] == 2
+    assert result["step_statistics"] == {
+        "total_steps": 5,
+        "min_step": 1.0,
+        "max_step": 6.0,
+        "unique_steps": 4,
+    }
+
+
 def test_get_project_summary_multiple_tables():
     """Test get_project_summary when read_project_data returns multiple tables."""
     mock_reader = Mock(spec=ParquetReader)
