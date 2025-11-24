@@ -52,7 +52,9 @@ class MLflowLoader(DataLoader):
         self.name_prefix = name_prefix
         self._logger = logging.getLogger(__name__)
 
-        if tracking_uri:
+        if tracking_uri == "databricks":
+            mlflow.login(backend="databricks", interactive=False)
+        elif tracking_uri:
             mlflow.set_tracking_uri(tracking_uri)
 
         # Configure MLflow logging
