@@ -77,6 +77,11 @@ def cli():
     help="Types of data to exclude from export. Can be specified multiple times.",
 )
 @click.option(
+    "--include-archived-runs",
+    is_flag=True,
+    help="Include archived or trashed runs in export.",
+)
+@click.option(
     "--exporter",
     type=click.Choice(["neptune2", "neptune3"], case_sensitive=False),
     help="Neptune exporter to use.",
@@ -122,6 +127,7 @@ def export(
     attributes: tuple[str, ...],
     classes: tuple[str, ...],
     exclude: tuple[str, ...],
+    include_archived_runs: bool,
     exporter: str,
     data_path: Path,
     files_path: Path,
@@ -232,9 +238,15 @@ def export(
 
     # Create exporter instance
     if exporter == "neptune2":
-        exporter_instance: NeptuneExporter = Neptune2Exporter(api_token=api_token)
+        exporter_instance: NeptuneExporter = Neptune2Exporter(
+            api_token=api_token,
+            include_trashed_runs=include_archived_runs,
+        )
     elif exporter == "neptune3":
-        exporter_instance = Neptune3Exporter(api_token=api_token)
+        exporter_instance = Neptune3Exporter(
+            api_token=api_token,
+            include_archived_runs=include_archived_runs,
+        )
     else:
         raise click.BadParameter(f"Unknown exporter: {exporter}")
 

@@ -56,9 +56,11 @@ class Neptune3Exporter(NeptuneExporter):
         file_attribute_batch_size: int = 16,
         file_series_attribute_batch_size: int = 8,
         max_workers: int = 8,
+        include_archived_runs: bool = False,
         show_client_logs: bool = False,
     ):
         self._quantize_base = Decimal("1.000000")
+        self._include_archived_runs = include_archived_runs
         self._series_attribute_batch_size = series_attribute_batch_size
         self._file_attribute_batch_size = file_attribute_batch_size
         self._file_series_attribute_batch_size = file_series_attribute_batch_size
@@ -99,6 +101,10 @@ class Neptune3Exporter(NeptuneExporter):
         else:
             runs_filter = filters.Filter.matches(
                 filters.Attribute("sys/custom_run_id", type="string"), ".+"
+            )
+        if not self._include_archived_runs:
+            runs_filter = runs_filter & filters.Filter.ne(
+                filters.Attribute("sys/archived", type="bool"), True
             )
         return nq_runs.list_runs(project=project_id, runs=runs_filter)
 

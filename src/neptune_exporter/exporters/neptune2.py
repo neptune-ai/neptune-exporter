@@ -75,7 +75,9 @@ class Neptune2Exporter(NeptuneExporter):
         api_token: Optional[str] = None,
         max_workers: int = 16,
         show_client_logs: bool = False,
+        include_trashed_runs: bool = False,
     ):
+        self._include_trashed_runs = include_trashed_runs
         self._api_token = api_token
         self._quantize_base = Decimal("1.000000")
         self._executor = ThreadPoolExecutor(max_workers=max_workers)
@@ -107,7 +109,9 @@ class Neptune2Exporter(NeptuneExporter):
             api_token=self._api_token, project=project_id, mode="read-only"
         ) as project:
             runs_table = project.fetch_runs_table(
-                progress_bar=None if self._show_client_logs else False
+                columns=["sys/id"],
+                trashed=None if self._include_trashed_runs else False,
+                progress_bar=None if self._show_client_logs else False,
             ).to_pandas()
             if not len(runs_table):
                 return []
