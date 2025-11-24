@@ -697,6 +697,36 @@ class Neptune3Exporter(NeptuneExporter):
         """Get list of exceptions that occurred during export."""
         return self._exception_infos
 
+    def _record_exception(
+        self,
+        project_id: ProjectId,
+        run_ids: list[SourceRunId],
+        attribute_paths: Optional[list[str]],
+        exception: Exception,
+    ) -> None:
+        for run_id in run_ids:
+            if attribute_paths is None:
+                self._exception_infos.append(
+                    ExceptionInfo(
+                        project_id=project_id,
+                        run_id=run_id,
+                        attribute_path=None,
+                        attribute_type=None,
+                        exception=exception,
+                    )
+                )
+            else:
+                for attribute_path in attribute_paths:
+                    self._exception_infos.append(
+                        ExceptionInfo(
+                            project_id=project_id,
+                            run_id=run_id,
+                            attribute_path=attribute_path,
+                            attribute_type=None,
+                            exception=exception,
+                        )
+                    )
+
     def _handle_batch_exception(
         self,
         project_id: ProjectId,
@@ -725,18 +755,11 @@ class Neptune3Exporter(NeptuneExporter):
                 exc_info=True,
             )
 
-        self._exception_infos.extend(
-            [
-                ExceptionInfo(
-                    project_id=project_id,
-                    run_id=run_id,
-                    attribute_path=attribute_path,
-                    attribute_type=None,
-                    exception=exception,
-                )
-                for attribute_path in attribute_batch
-                for run_id in run_ids
-            ]
+        self._record_exception(
+            project_id=project_id,
+            run_ids=run_ids,
+            attribute_paths=attribute_batch,
+            exception=exception,
         )
 
     def _handle_runs_exception(
@@ -765,15 +788,10 @@ class Neptune3Exporter(NeptuneExporter):
                 f"Skipping project {project_id}, run {run_ids}, batch type {batch_type} because of unexpected error.",
                 exc_info=True,
             )
-        self._exception_infos.extend(
-            [
-                ExceptionInfo(
-                    project_id=project_id,
-                    run_id=run_id,
-                    attribute_path=None,
-                    attribute_type=None,
-                    exception=exception,
-                )
-                for run_id in run_ids
-            ]
+
+        self._record_exception(
+            project_id=project_id,
+            run_ids=run_ids,
+            attribute_paths=None,
+            exception=exception,
         )

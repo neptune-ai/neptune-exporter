@@ -700,6 +700,24 @@ class Neptune2Exporter(NeptuneExporter):
         """Get list of exceptions that occurred during export."""
         return self._exception_infos
 
+    def _record_exception(
+        self,
+        project_id: ProjectId,
+        run_id: SourceRunId,
+        attribute_path: Optional[str],
+        attribute_type: Optional[str],
+        exception: Exception,
+    ) -> None:
+        self._exception_infos.append(
+            ExceptionInfo(
+                project_id=project_id,
+                run_id=run_id,
+                attribute_path=attribute_path,
+                attribute_type=attribute_type,
+                exception=exception,
+            )
+        )
+
     def _handle_run_exception(
         self, project_id: ProjectId, run_id: SourceRunId, exception: Exception
     ) -> None:
@@ -722,14 +740,12 @@ class Neptune2Exporter(NeptuneExporter):
                 f"Skipping project {project_id}, run {run_id} because of unexpected error.",
                 exc_info=True,
             )
-        self._exception_infos.append(
-            ExceptionInfo(
-                project_id=project_id,
-                run_id=run_id,
-                attribute_path=None,
-                attribute_type=None,
-                exception=exception,
-            )
+        self._record_exception(
+            project_id=project_id,
+            run_id=run_id,
+            attribute_path=None,
+            attribute_type=None,
+            exception=exception,
         )
 
     def _handle_attribute_exception(
@@ -770,12 +786,10 @@ class Neptune2Exporter(NeptuneExporter):
                 f"Skipping project {project_id}, run {run_id}, attribute {attribute_path} ({attribute_type}) because of unexpected error.",
                 exc_info=True,
             )
-        self._exception_infos.append(
-            ExceptionInfo(
-                project_id=project_id,
-                run_id=run_id,
-                attribute_path=attribute_path,
-                attribute_type=attribute_type,
-                exception=exception,
-            )
+        self._record_exception(
+            project_id=project_id,
+            run_id=run_id,
+            attribute_path=attribute_path,
+            attribute_type=attribute_type,
+            exception=exception,
         )
