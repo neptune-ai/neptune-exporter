@@ -41,7 +41,7 @@ Exports are resumable but not incremental: reruns skip completed runs, so new da
   - Continue batching to avoid large in-memory frames; follow the `download_*` generator pattern.
 - **File handling**:
   - Artifacts are stored under `--files-path/<sanitized_project_id>/...`; keep the relative paths in `file_value.path` stable so loaders can find the payloads.
-  - Fork metadata exists only in Neptune 3 exports; MLflow ignores parents and W&B supports forks in a limited/preview fashion—avoid relying on strict fidelity.
+  - Fork metadata exists only in Neptune 3.x exports; MLflow ignores parents and W&B supports forks in a limited/preview fashion—avoid relying on strict fidelity.
 
 ## Testing notes
 - Prefer function-style pytest tests (no classes) and `unittest.mock.Mock` for doubles.

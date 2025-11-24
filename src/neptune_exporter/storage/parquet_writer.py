@@ -72,7 +72,7 @@ class ParquetWriter:
     def __init__(
         self,
         base_path: Path,
-        target_part_size_bytes: int = 200 * 1024 * 1024,
+        target_part_size_bytes: int = 50 * 1024 * 1024,
     ):
         self.base_path = base_path
         self._target_part_size_bytes = target_part_size_bytes

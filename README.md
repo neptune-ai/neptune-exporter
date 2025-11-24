@@ -1,9 +1,9 @@
 # Neptune Exporter
 
-CLI tool to move Neptune experiments (v2 or v3) to disk as parquet + files, with an option to load them into MLflow or Weights & Biases.
+CLI tool to move Neptune experiments (version 2.x or 3.x) to disk as parquet + files, with an option to load them into MLflow or Weights & Biases.
 
 ## What it does
-- Streams runs from Neptune to local storage using PyArrow tables; artifacts are downloaded alongside the parquet.
+- Streams runs from Neptune to local storage; artifacts are downloaded alongside the parquet.
 - Skips runs that were already exported (presence of `part_0.parquet`), making exports resumable.
 - Loads parquet data into MLflow or W&B while preserving run structure (forks, steps, attributes) as closely as possible.
 - Prints a human-readable summary of what is on disk.
@@ -35,11 +35,11 @@ uv run neptune-exporter export \
   --data-path ./exports/data \
   --files-path ./exports/files
 ```
-Options worth remembering:
-- `-r/--runs`: Neptune run ID filter (regex supported).
+Notable options:
+- `-r/--runs`: Neptune run ID filter, regex supported. In Neptune 3.x run id is user-chosen or auto-generated, stored in `sys/custom_run_id`, in Neptune 2.x it's auto-generated `sys/id`, e.g. `SAN-1`.
 - `-a/--attributes`: One value = regex, multiple values = exact attribute names.
 - `-c/--classes` and `--exclude`: Include/exclude `parameters`, `metrics`, `series`, `files`.
-- `--exporter`: `neptune3` (default) or `neptune2`.
+- `--exporter`: `neptune3` or `neptune2`.
 
 ### Export examples
 - Export everything from a project:  
@@ -78,7 +78,7 @@ uv run neptune-exporter load \
 ## Data layout on disk
 - Parquet path (default `./exports/data`):
   - One directory per project, sanitized for filesystem safety (digest suffix added) but the parquet columns keep the real `project_id`/`run_id`.
-  - Each run is split into `run_id_part_<n>.parquet` (Snappy-compressed); parts roll over around 200 MB compressed.
+  - Each run is split into `run_id_part_<n>.parquet` (Snappy-compressed); parts roll over around 50 MB compressed.
 - Files path (default `./exports/files`):
   - Mirrors the sanitized project directory; file artifacts and file series are saved relative to that root.
   - Kept separate from the parquet path so you can place potentially large artifacts on different/cheaper storage.
@@ -89,7 +89,7 @@ All records use `src/neptune_exporter/model.py::SCHEMA`:
 | Column | Type | Description |
 | --- | --- | --- |
 | `project_id` | string | Neptune project identifier (e.g., `workspace-name/project-name`) |
-| `run_id` | string | Neptune run identifier (Neptune 3: user-chosen or auto-generated; Neptune 2: `sys/id`, e.g., `SAN-1`) |
+| `run_id` | string | Neptune run identifier (Neptune 3.x: user-chosen or auto-generated, stored in `sys/custom_run_id`. Neptune 2.x: auto-generated `sys/id`, e.g. `SAN-1`) |
 | `attribute_path` | string | Full attribute path (e.g., `metrics/accuracy`, `metrics/loss`, `files/dataset_desc.json`) |
 | `attribute_type` | string | One of: `float`, `int`, `string`, `bool`, `datetime`, `string_set`, `float_series`, `string_series`, `histogram_series`, `file`, `file_series` |
 | `step` | decimal(18,6) | Decimal step value (per series/metric/file series) |
@@ -100,7 +100,7 @@ All records use `src/neptune_exporter/model.py::SCHEMA`:
 
 ## Export flow
 - Runs are listed per project and streamed in batches; already-exported runs (those with `part_0.parquet`) are skipped so reruns are resumable. Use this with care: if a run was exported and later received new data in Neptune, that new data will not be picked up unless you re-export to a fresh location.
-- Data is written per run into parquet parts (~200 MB compressed per part), keeping memory usage low.
+- Data is written per run into parquet parts (~50 MB compressed per part), keeping memory usage low.
 - Artifacts and file series are downloaded alongside parquet under `--files-path/<sanitized_project_id>/...`.
 - A run is considered complete once `part_0.parquet` exists; use a fresh `--data-path` if you need a clean re-export.
 
@@ -112,7 +112,7 @@ All records use `src/neptune_exporter/model.py::SCHEMA`:
   - Metrics/series use the integer step; files are uploaded as artifacts from `--files-path`.
 - W&B loader:
   - Requires `--wandb-entity`; project names derive from `project_id` (plus optional `--name-prefix`, sanitized).
-  - String series become W&B Tables, histograms use `wandb.Histogram`, files/file series become artifacts. Forked runs from Neptune 3 are handled best-effort (MLflow ignores parents; W&B has limited preview support).
+  - String series become W&B Tables, histograms use `wandb.Histogram`, files/file series become artifacts. Forked runs from Neptune 3.x are handled best-effort (MLflow ignores parents; W&B has limited preview support).
 - If a target run with the same name already exists in the experiment/project, the loader skips uploading that run to avoid duplicates.
 
 ## Experiment/run mapping to targets
@@ -122,7 +122,7 @@ All records use `src/neptune_exporter/model.py::SCHEMA`:
 - W&B:
   - Neptune `project_id` maps to the W&B project name (sanitized, plus optional `--name-prefix`).
   - `sys/name` becomes the W&B group, so all runs with the same `sys/name` land in the same group.
-  - Runs are created with their Neptune `run_id` (or `custom_run_id`) as the run name. Forks from Neptune 3 are mapped best-effort via `fork_from`; behavior depends on W&B’s fork support.
+  - Runs are created with their Neptune `run_id` (or `custom_run_id`) as the run name. Forks from Neptune 3.x are mapped best-effort via `fork_from`; behavior depends on W&B’s fork support.
 
 ## Attribute/type mapping (detailed)
 - Parameters (`float`, `int`, `string`, `bool`, `datetime`, `string_set`):
