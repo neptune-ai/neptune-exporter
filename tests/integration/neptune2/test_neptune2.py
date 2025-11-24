@@ -1,3 +1,4 @@
+import re
 from typing import Generator
 import json
 import pyarrow as pa
@@ -5,6 +6,16 @@ import pyarrow.compute as pc
 from neptune_exporter import model
 from neptune_exporter.exporters.neptune2 import Neptune2Exporter
 from .data import TEST_DATA
+
+
+def test_neptune2_list_runs(api_token, project, test_runs):
+    exporter = Neptune2Exporter(api_token=api_token)
+
+    runs = exporter.list_runs(
+        project_id=project, runs="|".join(re.escape(run_id) for run_id in test_runs)
+    )
+
+    assert len(runs) == len(test_runs)
 
 
 def test_neptune2_download_parameters_empty(api_token, project, test_runs):
