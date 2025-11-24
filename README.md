@@ -10,7 +10,7 @@ CLI tool to move Neptune experiments (version 2.x or 3.x) to disk as parquet + f
 
 ## Requirements
 - Python 3.13 (managed via [uv](https://github.com/astral-sh/uv)).
-- Neptune credentials: `NEPTUNE_API_TOKEN` and either `--project-ids` or `NEPTUNE_PROJECT`.
+- Neptune credentials: `NEPTUNE_API_TOKEN` (or pass `--api-token`) and either `--project-ids` or `NEPTUNE_PROJECT`.
 - Target credentials when loading:
   - MLflow: `MLFLOW_TRACKING_URI` or `--mlflow-tracking-uri`.
   - W&B: `WANDB_ENTITY`/`--wandb-entity` and `WANDB_API_KEY`/`--wandb-api-key`.
@@ -32,22 +32,26 @@ uv run neptune-exporter --help
 ```bash
 uv run neptune-exporter export \
   -p "my-org/my-project" \
+  --exporter neptune3 \
   --data-path ./exports/data \
   --files-path ./exports/files
 ```
 Notable options:
+- `--exporter` (required): `neptune3` or `neptune2` (match your workspace version).
 - `-r/--runs`: Neptune run ID filter, regex supported. In Neptune 3.x run id is user-chosen or auto-generated, stored in `sys/custom_run_id`, in Neptune 2.x it's auto-generated `sys/id`, e.g. `SAN-1`.
 - `-a/--attributes`: One value = regex, multiple values = exact attribute names.
 - `-c/--classes` and `--exclude`: Include/exclude `parameters`, `metrics`, `series`, `files`.
-- `--exporter`: `neptune3` or `neptune2`.
+- `--include-archived-runs`: Include archived/trashed runs.
+- `--api-token`: Pass the token explicitly instead of `NEPTUNE_API_TOKEN`.
+- `--no-progress`, `-v/--verbose`, `--log-file`: Progress/logging controls for the CLI.
 
 ### Export examples
 - Export everything from a project:  
-  `uv run neptune-exporter export -p "workspace/proj"`
+  `uv run neptune-exporter export -p "workspace/proj" --exporter neptune3`
 - Export only parameters/metrics from runs matching a pattern:  
-  `uv run neptune-exporter export -p "workspace/proj" -r "RUN-.*" -c parameters -c metrics`
+  `uv run neptune-exporter export -p "workspace/proj" --exporter neptune3 -r "RUN-.*" -c parameters -c metrics`
 - Export specific attributes by pattern:  
-  `uv run neptune-exporter export -p "workspace/proj" -a "metrics/accuracy" -a "metrics/loss" -a "config/.*"`
+  `uv run neptune-exporter export -p "workspace/proj" --exporter neptune3 -a "metrics/accuracy" -a "metrics/loss" -a "config/.*"`
 - Export with Neptune 2.x client and split data/files to different locations:  
   `uv run neptune-exporter export -p "workspace/proj" --exporter neptune2 --data-path /mnt/fast/exports/data --files-path /mnt/cold/exports/files`
 
@@ -74,11 +78,12 @@ uv run neptune-exporter load \
   --files-path ./exports/files
 ```
 `--step-multiplier` converts Neptune’s decimal steps into integers for MLflow/W&B (which only accept ints). If your Neptune steps contain decimals, pick a single multiplier (e.g., `1000` for millisteps) and use it consistently for all loads so every series stays aligned.
+Default is `1` (no scaling).
 
 ## Data layout on disk
 - Parquet path (default `./exports/data`):
   - One directory per project, sanitized for filesystem safety (digest suffix added) but the parquet columns keep the real `project_id`/`run_id`.
-  - Each run is split into `run_id_part_<n>.parquet` (Snappy-compressed); parts roll over around 50 MB compressed.
+  - Each run is split into `run_id_part_<n>.parquet` (Snappy-compressed); parts roll over around 50 MB compressed.
 - Files path (default `./exports/files`):
   - Mirrors the sanitized project directory; file artifacts and file series are saved relative to that root.
   - Kept separate from the parquet path so you can place potentially large artifacts on different/cheaper storage.
