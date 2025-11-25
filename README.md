@@ -115,9 +115,10 @@ All records use `src/neptune_exporter/model.py::SCHEMA`:
   - Experiments are named `<project_id>/<experiment_name>` (prefixed with `--name-prefix` if provided).
   - Attribute paths are sanitized to MLflow’s key rules (alphanumeric + `_-. /`, max 250 chars).
   - Metrics/series use the integer step; files are uploaded as artifacts from `--files-path`.
+  - MLflow saves parentship/fork relationships as tags (no native forks).
 - W&B loader:
   - Requires `--wandb-entity`; project names derive from `project_id` (plus optional `--name-prefix`, sanitized).
-  - String series become W&B Tables, histograms use `wandb.Histogram`, files/file series become artifacts. Forked runs from Neptune 3.x are handled best-effort (MLflow ignores parents; W&B has limited preview support).
+  - String series become W&B Tables, histograms use `wandb.Histogram`, files/file series become artifacts. Forked runs from Neptune 3.x are handled best-effort (W&B has limited preview support).
 - If a target run with the same name already exists in the experiment/project, the loader skips uploading that run to avoid duplicates.
 
 ## Experiment/run mapping to targets

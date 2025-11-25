@@ -5,6 +5,7 @@ Notes for contributors extending the exporter (new loaders/targets, schema tweak
 ## Local environment
 - Install deps with `uv sync --dev`.
 - Run checks with `uv run pre-commit run --all-files`.
+- Add pre-commit to git hooks with `uv run pre-commit install`.
 - Run tests with `uv run pytest -v`. Integration-style tests need:
   - `NEPTUNE2_E2E_API_TOKEN`, `NEPTUNE2_E2E_PROJECT`
   - `NEPTUNE3_E2E_API_TOKEN`, `NEPTUNE3_E2E_PROJECT`
@@ -41,7 +42,8 @@ Exports are resumable but not incremental: reruns skip completed runs, so new da
   - Continue batching to avoid large in-memory frames; follow the `download_*` generator pattern.
 - **File handling**:
   - Artifacts are stored under `--files-path/<sanitized_project_id>/...`; keep the relative paths in `file_value.path` stable so loaders can find the payloads.
-  - Fork metadata exists only in Neptune 3.x exports; MLflow ignores parents and W&B supports forks in a limited/preview fashion—avoid relying on strict fidelity.
+- **Forking**:
+  - Fork metadata exists only in Neptune 3.x exports. W&B supports forks only in a limited/preview fashion—avoid relying on strict fidelity. MLflow does not support forking and saves parents as tags instead. 
 
 ## Testing notes
 - Prefer function-style pytest tests (no classes) and `unittest.mock.Mock` for doubles.
