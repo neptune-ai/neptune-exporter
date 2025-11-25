@@ -13,6 +13,7 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
+import datetime
 import logging
 import os
 from typing import Optional
@@ -114,14 +115,12 @@ def cli():
 @click.option(
     "--log-file",
     type=click.Path(path_type=Path),
-    default="./neptune_exporter.log",
-    help="Path for logging file. Default: ./neptune_exporter.log",
+    help="Path for logging file. Default: ./neptune_exporter-{datetime}.log",
 )
 @click.option(
     "--error-report-file",
     type=click.Path(path_type=Path),
-    default="./neptune_exporter_errors.jsonl",
-    help="Path for error report file. Default: ./neptune_exporter_errors.jsonl",
+    help="Path for error report file. Default: ./neptune_exporter_errors-{datetime}.jsonl",
 )
 @click.option(
     "--no-progress",
@@ -140,8 +139,8 @@ def export(
     files_path: Path,
     api_token: str | None,
     verbose: bool,
-    log_file: Path,
-    error_report_file: Path,
+    log_file: Path | None,
+    error_report_file: Path | None,
     no_progress: bool,
 ) -> None:
     """Export Neptune experiment data to parquet files.
@@ -235,6 +234,13 @@ def export(
     if not export_classes_set.issubset(valid_export_classes):
         invalid = export_classes_set - valid_export_classes
         raise click.BadParameter(f"Invalid export classes: {', '.join(invalid)}")
+
+    if not log_file:
+        log_file = Path(f"./neptune_exporter-{datetime.datetime.now().isoformat()}.log")
+    if not error_report_file:
+        error_report_file = Path(
+            f"./neptune_exporter_errors-{datetime.datetime.now().isoformat()}.jsonl"
+        )
 
     # Configure logging
     configure_logging(
@@ -382,8 +388,7 @@ def export(
 @click.option(
     "--log-file",
     type=click.Path(path_type=Path),
-    default="./neptune_exporter.log",
-    help="Path for logging file. Default: ./neptune_exporter.log",
+    help="Path for logging file. Default: ./neptune_exporter-{datetime}.log",
 )
 @click.option(
     "--no-progress",
@@ -402,7 +407,7 @@ def load(
     wandb_api_key: str | None,
     name_prefix: str | None,
     verbose: bool,
-    log_file: Path,
+    log_file: Path | None,
     no_progress: bool,
 ) -> None:
     """Load exported Neptune data from parquet files to target platforms (MLflow or W&B).
@@ -443,6 +448,9 @@ def load(
     # Validate data path exists
     if not data_path.exists():
         raise click.BadParameter(f"Data path does not exist: {data_path}")
+
+    if not log_file:
+        log_file = Path(f"./neptune_exporter-{datetime.datetime.now().isoformat()}.log")
 
     # Create parquet reader
     parquet_reader = ParquetReader(base_path=data_path)
