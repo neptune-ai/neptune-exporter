@@ -21,6 +21,7 @@ import pyarrow.parquet as pq
 import tempfile
 
 from neptune_exporter.export_manager import ExportManager
+from neptune_exporter.exporters.error_reporter import ErrorReporter, ErrorSummary
 from neptune_exporter.storage.parquet_writer import ParquetWriter
 from neptune_exporter.storage.parquet_reader import ParquetReader
 from neptune_exporter import model
@@ -32,6 +33,8 @@ def test_export_manager_skips_existing_runs():
     mock_exporter = Mock()
     mock_reader = Mock(spec=ParquetReader)
     mock_writer = Mock(spec=ParquetWriter)
+    mock_error_reporter = Mock(spec=ErrorReporter)
+    mock_error_reporter.get_summary.return_value = ErrorSummary(exception_count=0)
 
     # Mock writer base_path
     mock_writer.base_path = Path("/fake/path")
@@ -50,6 +53,7 @@ def test_export_manager_skips_existing_runs():
         exporter=mock_exporter,
         reader=mock_reader,
         writer=mock_writer,
+        error_reporter=mock_error_reporter,
         files_destination=Path("/fake/files"),
     )
 
@@ -88,6 +92,8 @@ def test_export_manager_with_no_existing_data():
     mock_exporter = Mock()
     mock_reader = Mock(spec=ParquetReader)
     mock_writer = Mock(spec=ParquetWriter)
+    mock_error_reporter = Mock(spec=ErrorReporter)
+    mock_error_reporter.get_summary.return_value = ErrorSummary(exception_count=0)
 
     # Mock writer base_path
     mock_writer.base_path = Path("/fake/path")
@@ -103,6 +109,7 @@ def test_export_manager_with_no_existing_data():
         exporter=mock_exporter,
         reader=mock_reader,
         writer=mock_writer,
+        error_reporter=mock_error_reporter,
         files_destination=Path("/fake/files"),
     )
 
@@ -137,6 +144,8 @@ def test_export_manager_with_partial_existing_data():
     mock_exporter = Mock()
     mock_reader = Mock(spec=ParquetReader)
     mock_writer = Mock(spec=ParquetWriter)
+    mock_error_reporter = Mock(spec=ErrorReporter)
+    mock_error_reporter.get_summary.return_value = ErrorSummary(exception_count=0)
 
     # Mock writer base_path
     mock_writer.base_path = Path("/fake/path")
@@ -155,6 +164,7 @@ def test_export_manager_with_partial_existing_data():
         exporter=mock_exporter,
         reader=mock_reader,
         writer=mock_writer,
+        error_reporter=mock_error_reporter,
         files_destination=Path("/fake/files"),
     )
 
@@ -191,6 +201,9 @@ def test_export_manager_integration_with_real_files():
         # Create real storage and reader
         storage = ParquetWriter(base_path=temp_path)
         reader = ParquetReader(base_path=temp_path)
+
+        # Create error reporter
+        error_reporter = ErrorReporter(path=temp_path / "errors.jsonl")
 
         # Create some existing data
         existing_data = pa.Table.from_pydict(
@@ -241,6 +254,7 @@ def test_export_manager_integration_with_real_files():
             exporter=mock_exporter,
             reader=reader,
             writer=storage,
+            error_reporter=error_reporter,
             files_destination=Path("/fake/files"),
         )
 

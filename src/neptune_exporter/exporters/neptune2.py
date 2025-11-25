@@ -32,7 +32,8 @@ import neptune.exceptions
 from neptune import management
 
 from neptune_exporter import model
-from neptune_exporter.exporters.exporter import ExceptionInfo, NeptuneExporter
+from neptune_exporter.exporters.exporter import NeptuneExporter
+from neptune_exporter.exporters.error_reporter import ErrorReporter
 from neptune_exporter.types import ProjectId, SourceRunId
 
 _ATTRIBUTE_TYPE_MAP = {
@@ -72,11 +73,13 @@ _ARTIFACT_TYPES: Sequence[str] = ("artifact",)
 class Neptune2Exporter(NeptuneExporter):
     def __init__(
         self,
+        error_reporter: ErrorReporter,
         api_token: Optional[str] = None,
         max_workers: int = 16,
         show_client_logs: bool = False,
         include_trashed_runs: bool = False,
     ):
+        self._error_reporter = error_reporter
         self._include_trashed_runs = include_trashed_runs
         self._api_token = api_token
         self._quantize_base = Decimal("1.000000")
@@ -84,7 +87,6 @@ class Neptune2Exporter(NeptuneExporter):
         self._logger = logging.getLogger(__name__)
         self._show_client_logs = show_client_logs
         self._initialize_client(show_client_logs=show_client_logs)
-        self._exception_infos: list[ExceptionInfo] = []
 
     def _initialize_client(self, show_client_logs: bool) -> None:
         if show_client_logs:
@@ -696,28 +698,6 @@ class Neptune2Exporter(NeptuneExporter):
 
         return True
 
-    def get_exception_infos(self) -> list[ExceptionInfo]:
-        """Get list of exceptions that occurred during export."""
-        return self._exception_infos
-
-    def _record_exception(
-        self,
-        project_id: ProjectId,
-        run_id: SourceRunId,
-        attribute_path: Optional[str],
-        attribute_type: Optional[str],
-        exception: Exception,
-    ) -> None:
-        self._exception_infos.append(
-            ExceptionInfo(
-                project_id=project_id,
-                run_id=run_id,
-                attribute_path=attribute_path,
-                attribute_type=attribute_type,
-                exception=exception,
-            )
-        )
-
     def _handle_run_exception(
         self, project_id: ProjectId, run_id: SourceRunId, exception: Exception
     ) -> None:
@@ -740,7 +720,7 @@ class Neptune2Exporter(NeptuneExporter):
                 f"Skipping project {project_id}, run {run_id} because of unexpected error.",
                 exc_info=True,
             )
-        self._record_exception(
+        self._error_reporter.record_exception(
             project_id=project_id,
             run_id=run_id,
             attribute_path=None,
@@ -786,7 +766,7 @@ class Neptune2Exporter(NeptuneExporter):
                 f"Skipping project {project_id}, run {run_id}, attribute {attribute_path} ({attribute_type}) because of unexpected error.",
                 exc_info=True,
             )
-        self._record_exception(
+        self._error_reporter.record_exception(
             project_id=project_id,
             run_id=run_id,
             attribute_path=attribute_path,

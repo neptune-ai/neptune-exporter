@@ -2,11 +2,14 @@ from datetime import timedelta
 import os
 import pathlib
 import tempfile
+
+from neptune_exporter.exporters.error_reporter import ErrorReporter
 from .data import TEST_DATA, TEST_NOW
 
 import pytest
 
 import neptune
+from neptune_exporter.exporters.neptune2 import Neptune2Exporter
 
 
 @pytest.fixture(scope="session")
@@ -99,3 +102,12 @@ def test_runs(project, api_token) -> None:
 def temp_dir():
     with tempfile.TemporaryDirectory() as temp_dir:
         yield pathlib.Path(temp_dir)
+
+
+@pytest.fixture
+def exporter(api_token, temp_dir):
+    """Fixture providing a Neptune2Exporter instance."""
+    return Neptune2Exporter(
+        error_reporter=ErrorReporter(path=temp_dir / "errors.jsonl"),
+        api_token=api_token,
+    )

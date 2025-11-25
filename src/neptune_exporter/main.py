@@ -18,6 +18,7 @@ import os
 from typing import Optional
 import click
 from pathlib import Path
+from neptune_exporter.exporters.error_reporter import ErrorReporter
 from neptune_exporter.exporters.exporter import NeptuneExporter
 from neptune_exporter.exporters.neptune2 import Neptune2Exporter
 from neptune_exporter.exporters.neptune3 import Neptune3Exporter
@@ -117,6 +118,12 @@ def cli():
     help="Path for logging file. Default: ./neptune_exporter.log",
 )
 @click.option(
+    "--error-report-file",
+    type=click.Path(path_type=Path),
+    default="./neptune_exporter_errors.jsonl",
+    help="Path for error report file. Default: ./neptune_exporter_errors.jsonl",
+)
+@click.option(
     "--no-progress",
     is_flag=True,
     help="Disable progress bar.",
@@ -134,6 +141,7 @@ def export(
     api_token: str | None,
     verbose: bool,
     log_file: Path,
+    error_report_file: Path,
     no_progress: bool,
 ) -> None:
     """Export Neptune experiment data to parquet files.
@@ -236,14 +244,19 @@ def export(
 
     logger = logging.getLogger(__name__)
 
+    # Create error reporter instance
+    error_reporter = ErrorReporter(path=error_report_file)
+
     # Create exporter instance
     if exporter == "neptune2":
         exporter_instance: NeptuneExporter = Neptune2Exporter(
+            error_reporter=error_reporter,
             api_token=api_token,
             include_trashed_runs=include_archived_runs,
         )
     elif exporter == "neptune3":
         exporter_instance = Neptune3Exporter(
+            error_reporter=error_reporter,
             api_token=api_token,
             include_archived_runs=include_archived_runs,
         )
@@ -259,6 +272,7 @@ def export(
         exporter=exporter_instance,
         reader=reader,
         writer=writer,
+        error_reporter=error_reporter,
         files_destination=files_path,
         progress_bar=not no_progress,
     )

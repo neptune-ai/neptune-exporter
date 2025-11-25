@@ -4,13 +4,10 @@ import json
 import pyarrow as pa
 import pyarrow.compute as pc
 from neptune_exporter import model
-from neptune_exporter.exporters.neptune2 import Neptune2Exporter
 from .data import TEST_DATA
 
 
-def test_neptune2_list_runs(api_token, project, test_runs):
-    exporter = Neptune2Exporter(api_token=api_token)
-
+def test_neptune2_list_runs(exporter, project, test_runs):
     runs = exporter.list_runs(
         project_id=project, runs="|".join(re.escape(run_id) for run_id in test_runs)
     )
@@ -18,9 +15,7 @@ def test_neptune2_list_runs(api_token, project, test_runs):
     assert len(runs) == len(test_runs)
 
 
-def test_neptune2_download_parameters_empty(api_token, project, test_runs):
-    exporter = Neptune2Exporter(api_token=api_token)
-
+def test_neptune2_download_parameters_empty(exporter, project, test_runs):
     parameters = _to_table(
         exporter.download_parameters(
             project_id=project,
@@ -32,9 +27,7 @@ def test_neptune2_download_parameters_empty(api_token, project, test_runs):
     assert parameters.num_rows == 0
 
 
-def test_neptune2_download_parameters(api_token, project, test_runs):
-    exporter = Neptune2Exporter(api_token=api_token)
-
+def test_neptune2_download_parameters(exporter, project, test_runs):
     parameters = _to_table(
         exporter.download_parameters(
             project_id=project,
@@ -60,9 +53,7 @@ def test_neptune2_download_parameters(api_token, project, test_runs):
     assert expected_paths.issubset(actual_paths)
 
 
-def test_neptune2_download_metrics_empty(api_token, project, test_runs):
-    exporter = Neptune2Exporter(api_token=api_token)
-
+def test_neptune2_download_metrics_empty(exporter, project, test_runs):
     metrics = _to_table(
         exporter.download_metrics(
             project_id=project,
@@ -74,9 +65,7 @@ def test_neptune2_download_metrics_empty(api_token, project, test_runs):
     assert metrics.num_rows == 0
 
 
-def test_neptune2_download_metrics(api_token, project, test_runs):
-    exporter = Neptune2Exporter(api_token=api_token)
-
+def test_neptune2_download_metrics(exporter, project, test_runs):
     metrics = _to_table(
         exporter.download_metrics(
             project_id=project,
@@ -100,8 +89,7 @@ def test_neptune2_download_metrics(api_token, project, test_runs):
     assert expected_paths.issubset(actual_paths)
 
 
-def test_neptune2_download_series_empty(api_token, project, test_runs):
-    exporter = Neptune2Exporter(api_token=api_token)
+def test_neptune2_download_series_empty(exporter, project, test_runs):
     series = _to_table(
         exporter.download_series(
             project_id=project,
@@ -112,8 +100,7 @@ def test_neptune2_download_series_empty(api_token, project, test_runs):
     assert series.num_rows == 0
 
 
-def test_neptune2_download_series(api_token, project, test_runs):
-    exporter = Neptune2Exporter(api_token=api_token)
+def test_neptune2_download_series(exporter, project, test_runs):
     series = _to_table(
         exporter.download_series(
             project_id=project,
@@ -137,8 +124,7 @@ def test_neptune2_download_series(api_token, project, test_runs):
     assert expected_paths.issubset(actual_paths)
 
 
-def test_neptune2_download_files_empty(api_token, project, test_runs, temp_dir):
-    exporter = Neptune2Exporter(api_token=api_token)
+def test_neptune2_download_files_empty(exporter, project, test_runs, temp_dir):
     files = _to_table(
         exporter.download_files(
             project_id=project,
@@ -150,8 +136,7 @@ def test_neptune2_download_files_empty(api_token, project, test_runs, temp_dir):
     assert files.num_rows == 0
 
 
-def test_neptune2_download_files(api_token, project, test_runs, temp_dir):
-    exporter = Neptune2Exporter(api_token=api_token)
+def test_neptune2_download_files(exporter, project, test_runs, temp_dir):
     files = _to_table(
         exporter.download_files(
             project_id=project,
@@ -203,10 +188,8 @@ def test_neptune2_download_files(api_token, project, test_runs, temp_dir):
             assert "metadata" in item, "Artifact file data should have metadata"
 
 
-def test_neptune2_list_runs_with_regex_filter(api_token, project, test_runs):
+def test_neptune2_list_runs_with_regex_filter(exporter, project, test_runs):
     """Test list_runs filters runs using regex pattern."""
-    exporter = Neptune2Exporter(api_token=api_token)
-
     # Test with pattern that matches all (should return at least test_runs)
     all_matching = exporter.list_runs(project_id=project, runs=".*")
     assert len(all_matching) >= len(test_runs)

@@ -20,6 +20,7 @@ from pathlib import Path
 from tqdm import tqdm
 import pyarrow as pa
 import pyarrow.compute as pc
+from neptune_exporter.exporters.error_reporter import ErrorReporter
 from neptune_exporter.exporters.exporter import NeptuneExporter
 from neptune_exporter.storage.parquet_writer import ParquetWriter, RunWriterContext
 from neptune_exporter.storage.parquet_reader import ParquetReader
@@ -33,6 +34,7 @@ class ExportManager:
         exporter: NeptuneExporter,
         reader: ParquetReader,
         writer: ParquetWriter,
+        error_reporter: ErrorReporter,
         files_destination: Path,
         batch_size: int = 16,
         progress_bar: bool = True,
@@ -40,6 +42,7 @@ class ExportManager:
         self._exporter = exporter
         self._reader = reader
         self._writer = writer
+        self._error_reporter = error_reporter
         self._files_destination = files_destination
         self._batch_size = batch_size
         self._progress_bar = progress_bar
@@ -185,10 +188,10 @@ class ExportManager:
                     # Update progress bar for completed batch
                     runs_pbar.update(len(batch_run_ids))
 
-        exception_infos = self._exporter.get_exception_infos()
-        if exception_infos:
+        exception_summary = self._error_reporter.get_summary()
+        if exception_summary.exception_count > 0:
             self._logger.error(
-                f"{len(exception_infos)} exceptions occurred during export. See the logs for details."
+                f"{exception_summary.exception_count} exceptions occurred during export. See the logs for details."
             )
 
         return total_runs

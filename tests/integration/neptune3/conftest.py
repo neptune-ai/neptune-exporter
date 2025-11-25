@@ -19,6 +19,8 @@ from neptune_query.internal.context import (
 )
 from neptune_query.internal.filters import _Filter
 from neptune_query.internal.retrieval.search import fetch_experiment_sys_attrs
+from neptune_exporter.exporters.error_reporter import ErrorReporter
+from neptune_exporter.exporters.neptune3 import Neptune3Exporter
 from .data import (
     TEST_DATA,
     TEST_NOW,
@@ -146,3 +148,12 @@ def test_runs(project, api_token, client) -> None:
 def temp_dir():
     with tempfile.TemporaryDirectory() as temp_dir:
         yield pathlib.Path(temp_dir)
+
+
+@pytest.fixture
+def exporter(api_token, temp_dir):
+    """Fixture providing a Neptune3Exporter instance."""
+    return Neptune3Exporter(
+        error_reporter=ErrorReporter(path=temp_dir / "errors.jsonl"),
+        api_token=api_token,
+    )

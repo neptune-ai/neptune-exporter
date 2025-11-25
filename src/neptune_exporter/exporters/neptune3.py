@@ -27,7 +27,8 @@ from concurrent.futures import ThreadPoolExecutor, as_completed
 import logging
 
 from neptune_exporter import model
-from neptune_exporter.exporters.exporter import ExceptionInfo, NeptuneExporter
+from neptune_exporter.exporters.exporter import NeptuneExporter
+from neptune_exporter.exporters.error_reporter import ErrorReporter
 from neptune_exporter.types import ProjectId, SourceRunId
 
 
@@ -51,6 +52,7 @@ _FILE_SERIES_TYPES: Sequence[str] = ("file_series",)
 class Neptune3Exporter(NeptuneExporter):
     def __init__(
         self,
+        error_reporter: ErrorReporter,
         api_token: Optional[str] = None,
         series_attribute_batch_size: int = 128,
         file_attribute_batch_size: int = 16,
@@ -67,7 +69,7 @@ class Neptune3Exporter(NeptuneExporter):
         self._executor = ThreadPoolExecutor(max_workers=max_workers)
         self._logger = logging.getLogger(__name__)
         self._initialize_client(api_token=api_token, show_client_logs=show_client_logs)
-        self._exception_infos: list[ExceptionInfo] = []
+        self._error_reporter = error_reporter
 
     def _initialize_client(
         self, api_token: Optional[str], show_client_logs: bool
@@ -693,40 +695,6 @@ class Neptune3Exporter(NeptuneExporter):
             }
         )
 
-    def get_exception_infos(self) -> list[ExceptionInfo]:
-        """Get list of exceptions that occurred during export."""
-        return self._exception_infos
-
-    def _record_exception(
-        self,
-        project_id: ProjectId,
-        run_ids: list[SourceRunId],
-        attribute_paths: Optional[list[str]],
-        exception: Exception,
-    ) -> None:
-        for run_id in run_ids:
-            if attribute_paths is None:
-                self._exception_infos.append(
-                    ExceptionInfo(
-                        project_id=project_id,
-                        run_id=run_id,
-                        attribute_path=None,
-                        attribute_type=None,
-                        exception=exception,
-                    )
-                )
-            else:
-                for attribute_path in attribute_paths:
-                    self._exception_infos.append(
-                        ExceptionInfo(
-                            project_id=project_id,
-                            run_id=run_id,
-                            attribute_path=attribute_path,
-                            attribute_type=None,
-                            exception=exception,
-                        )
-                    )
-
     def _handle_batch_exception(
         self,
         project_id: ProjectId,
@@ -755,7 +723,7 @@ class Neptune3Exporter(NeptuneExporter):
                 exc_info=True,
             )
 
-        self._record_exception(
+        self._error_reporter.record_batch_exception(
             project_id=project_id,
             run_ids=run_ids,
             attribute_paths=attribute_batch,
@@ -789,7 +757,7 @@ class Neptune3Exporter(NeptuneExporter):
                 exc_info=True,
             )
 
-        self._record_exception(
+        self._error_reporter.record_batch_exception(
             project_id=project_id,
             run_ids=run_ids,
             attribute_paths=None,
