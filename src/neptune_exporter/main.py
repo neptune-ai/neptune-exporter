@@ -15,20 +15,23 @@
 
 import logging
 import os
-from typing import Optional
-import click
+from datetime import datetime
 from pathlib import Path
+from typing import Optional
+
+import click
+
+from neptune_exporter.export_manager import ExportManager
 from neptune_exporter.exporters.error_reporter import ErrorReporter
 from neptune_exporter.exporters.exporter import NeptuneExporter
 from neptune_exporter.exporters.neptune2 import Neptune2Exporter
 from neptune_exporter.exporters.neptune3 import Neptune3Exporter
-from neptune_exporter.export_manager import ExportManager
-from neptune_exporter.storage.parquet_writer import ParquetWriter
-from neptune_exporter.storage.parquet_reader import ParquetReader
+from neptune_exporter.loader_manager import LoaderManager
 from neptune_exporter.loaders.loader import DataLoader
 from neptune_exporter.loaders.mlflow_loader import MLflowLoader
 from neptune_exporter.loaders.wandb_loader import WandBLoader
-from neptune_exporter.loader_manager import LoaderManager
+from neptune_exporter.storage.parquet_reader import ParquetReader
+from neptune_exporter.storage.parquet_writer import ParquetWriter
 from neptune_exporter.summary_manager import SummaryManager
 from neptune_exporter.types import ProjectId, SourceRunId
 from neptune_exporter.validation import ReportFormatter
@@ -115,7 +118,7 @@ def cli():
     "--log-file",
     type=click.Path(path_type=Path),
     default="./neptune_exporter.log",
-    help="Path for logging file. Default: ./neptune_exporter.log",
+    help="Path for logging file. A timestamp suffix (YYYYMMDD_HHMMSS) will be automatically added to the filename. Default: ./neptune_exporter.log",
 )
 @click.option(
     "--error-report-file",
@@ -148,6 +151,10 @@ def export(
 
     This tool exports data from Neptune projects including parameters, metrics,
     series data, and files to parquet format for further analysis.
+
+    The log file specified with --log-file will have a timestamp suffix
+    automatically added (e.g., neptune_exporter_20250115_143022.log) to ensure
+    unique log files for each export run.
 
     Examples:
 
@@ -243,6 +250,15 @@ def export(
     )
 
     logger = logging.getLogger(__name__)
+    logger.info(f"Exporting from {exporter} exporter using arguments:")
+    logger.info(f"  Project IDs: {', '.join(project_ids_list)}")
+    logger.info(f"  Runs: {runs}")
+    logger.info(
+        f"  Attributes: {', '.join(attributes_list) if isinstance(attributes_list, list) else attributes_list}"
+    )
+    logger.info(f"  Export classes: {', '.join(export_classes_list)}")
+    logger.info(f"  Exclude: {', '.join(exclude_set)}")
+    logger.info(f"  Include archived runs: {include_archived_runs}")
 
     # Create error reporter instance
     error_reporter = ErrorReporter(path=error_report_file)
@@ -372,7 +388,7 @@ def export(
     "--log-file",
     type=click.Path(path_type=Path),
     default="./neptune_exporter.log",
-    help="Path for logging file. Default: ./neptune_exporter.log",
+    help="Path for logging file. A timestamp suffix (YYYYMMDD_HHMMSS) will be automatically added to the filename. Default: ./neptune_exporter.log",
 )
 @click.option(
     "--no-progress",
@@ -399,11 +415,15 @@ def load(
     This tool loads previously exported Neptune data from parquet files
     and uploads it to MLflow or Weights & Biases for further analysis and tracking.
 
+    The log file specified with --log-file will have a timestamp suffix
+    automatically added (e.g., neptune_exporter_20250115_143022.log) to ensure
+    unique log files for each load run.
+
     Examples:
 
     \b
-    # Load all data from exported parquet files to MLflow (default)
-    neptune-exporter load
+    # Load all data from exported parquet files to MLflow
+    neptune-exporter load --loader mlflow
 
     \b
     # Load to Weights & Biases
@@ -435,6 +455,30 @@ def load(
 
     # Create parquet reader
     parquet_reader = ParquetReader(base_path=data_path)
+
+    # Configure logging
+    configure_logging(
+        stderr_level=logging.INFO if verbose else logging.ERROR,
+        log_file=log_file if log_file else None,
+    )
+
+    logger = logging.getLogger(__name__)
+
+    logger.info(
+        f"Starting {loader} loading from {data_path.absolute()} using arguments:"
+    )
+    logger.info(
+        f"  Project IDs: {', '.join(project_ids_list) if project_ids_list else 'all'}"
+    )
+    logger.info(f"  Runs: {', '.join(runs_list) if runs_list else 'all'}")
+    logger.info(f"  Step multiplier: {step_multiplier}")
+    logger.info(f"  Files directory: {files_path.absolute()}")
+    if mlflow_tracking_uri:
+        logger.info(f"  MLflow tracking URI: {mlflow_tracking_uri}")
+    if wandb_entity:
+        logger.info(f"  W&B entity: {wandb_entity}")
+    if name_prefix:
+        logger.info(f"  Name prefix: {name_prefix}")
 
     # Create appropriate loader based on --loader flag
     data_loader: DataLoader
@@ -474,12 +518,6 @@ def load(
     else:
         raise click.BadParameter(f"Unknown loader: {loader}")
 
-    # Configure logging
-    configure_logging(
-        stderr_level=logging.INFO if verbose else logging.ERROR,
-        log_file=log_file if log_file else None,
-    )
-
     # Create loader manager
     loader_manager = LoaderManager(
         parquet_reader=parquet_reader,
@@ -488,14 +526,6 @@ def load(
         step_multiplier=step_multiplier,
         progress_bar=not no_progress,
     )
-
-    logger = logging.getLogger(__name__)
-    logger.info(f"Starting {loader_name} loading from {data_path.absolute()}")
-    logger.info(f"Files directory: {files_path.absolute()}")
-    if project_ids_list:
-        logger.info(f"Project IDs: {', '.join(project_ids_list)}")
-    if runs_list:
-        logger.info(f"Run IDs: {', '.join(runs_list)}")
 
     try:
         loader_manager.load(
@@ -528,13 +558,17 @@ def load(
     "--log-file",
     type=click.Path(path_type=Path),
     default="./neptune_exporter.log",
-    help="Path for logging file. Default: ./neptune_exporter.log",
+    help="Path for logging file. A timestamp suffix (YYYYMMDD_HHMMSS) will be automatically added to the filename. Default: ./neptune_exporter.log",
 )
 def summary(data_path: Path, verbose: bool, log_file: Path) -> None:
     """Show summary of exported Neptune data.
 
     This command shows a summary of available data in the exported parquet files,
     including project counts, run counts, and attribute types.
+
+    The log file specified with --log-file will have a timestamp suffix
+    automatically added (e.g., neptune_exporter_20250115_143022.log) to ensure
+    unique log files for each summary run.
     """
     # Validate data path exists
     if not data_path.exists():
@@ -568,6 +602,16 @@ def main():
 
 
 def configure_logging(stderr_level: Optional[int], log_file: Optional[Path]) -> None:
+    """Configure logging with optional file handler.
+
+    If a log_file path is provided, a timestamp suffix is automatically added
+    to the filename (before the extension) to ensure unique log files for each run.
+    For example, './neptune_exporter.log' becomes './neptune_exporter_20250115_143022.log'.
+
+    Args:
+        stderr_level: Logging level for stderr stream handler (None to disable).
+        log_file: Path for log file. Timestamp suffix will be added automatically.
+    """
     logger = logging.getLogger("neptune_exporter")
     logger.setLevel(logging.INFO)
     FORMAT = "%(asctime)s %(name)s:%(levelname)s: %(message)s"
@@ -579,7 +623,21 @@ def configure_logging(stderr_level: Optional[int], log_file: Optional[Path]) -> 
         logger.addHandler(stream_handler)
 
     if log_file:
-        file_handler = logging.FileHandler(log_file)
+        # Add timestamp suffix to log file name
+        timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+        log_file_path = Path(log_file)
+        if log_file_path.suffix:
+            # Has extension: insert timestamp before extension
+            log_file_with_timestamp = log_file_path.with_stem(
+                f"{log_file_path.stem}_{timestamp}"
+            )
+        else:
+            # No extension: append timestamp
+            log_file_with_timestamp = (
+                log_file_path.parent / f"{log_file_path.name}_{timestamp}"
+            )
+
+        file_handler = logging.FileHandler(log_file_with_timestamp, mode="w")
         file_handler.setFormatter(logging.Formatter(FORMAT))
         file_handler.setLevel(logging.INFO)
         logger.addHandler(file_handler)
