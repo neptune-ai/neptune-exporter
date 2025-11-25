@@ -277,10 +277,21 @@ def export(
         progress_bar=not no_progress,
     )
 
-    logger.info(f"Starting export of {len(project_ids_list)} project(s)...")
+    logger.info(f"Starting export of projects: {', '.join(project_ids_list)}")
+    logger.info(f"Runs: {runs}")
+    logger.info(f"Attributes: {attributes_list}")
     logger.info(f"Export classes: {', '.join(export_classes_list)}")
+    logger.info(f"Include archived runs: {include_archived_runs}")
+    logger.info(f"Exporter: {exporter}")
     logger.info(f"Data path: {data_path.absolute()}")
     logger.info(f"Files path: {files_path.absolute()}")
+    logger.info(
+        f"API token: {'*' * len(api_token)}" if api_token else "No API token provided"
+    )
+    logger.info(f"Verbose: {verbose}")
+    logger.info(f"Log file: {log_file.absolute()}")
+    logger.info(f"Error report file: {error_report_file.absolute()}")
+    logger.info(f"No progress: {no_progress}")
 
     try:
         runs_exported = export_manager.run(
@@ -490,12 +501,24 @@ def load(
     )
 
     logger = logging.getLogger(__name__)
-    logger.info(f"Starting {loader_name} loading from {data_path.absolute()}")
+
+    logger.info(f"Starting loading data from {data_path.absolute()}")
     logger.info(f"Files directory: {files_path.absolute()}")
-    if project_ids_list:
-        logger.info(f"Project IDs: {', '.join(project_ids_list)}")
-    if runs_list:
-        logger.info(f"Run IDs: {', '.join(runs_list)}")
+    logger.info(f"Project IDs: {project_ids_list}")
+    logger.info(f"Runs: {runs_list}")
+    logger.info(f"Step multiplier: {step_multiplier}")
+    logger.info(f"Loader: {loader}")
+    logger.info(f"MLflow tracking URI: {mlflow_tracking_uri}")
+    logger.info(f"W&B entity: {wandb_entity}")
+    logger.info(
+        f"W&B API key: {'*' * len(wandb_api_key)}"
+        if wandb_api_key
+        else "No W&B API key provided"
+    )
+    logger.info(f"Name prefix: {name_prefix}")
+    logger.info(f"Verbose: {verbose}")
+    logger.info(f"Log file: {log_file.absolute()}")
+    logger.info(f"No progress: {no_progress}")
 
     try:
         loader_manager.load(
@@ -547,6 +570,10 @@ def summary(data_path: Path, verbose: bool, log_file: Path) -> None:
     )
 
     logger = logging.getLogger(__name__)
+
+    logger.info(f"Generating summary of data from data path: {data_path.absolute()}")
+    logger.info(f"Verbose: {verbose}")
+    logger.info(f"Log file: {log_file.absolute()}")
 
     # Create parquet reader and summary manager
     parquet_reader = ParquetReader(base_path=data_path)
