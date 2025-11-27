@@ -225,13 +225,19 @@ class ParquetReader:
     ) -> pa.Table:
         """Filter a table by attribute types."""
 
+        masks = []
         if attribute_types is not None:
-            mask = pc.is_in(table["attribute_type"], pa.array(attribute_types))
-            table = table.filter(mask)
+            masks.append(pc.is_in(table["attribute_type"], pa.array(attribute_types)))
 
         if attribute_paths is not None:
-            mask = pc.is_in(table["attribute_path"], pa.array(attribute_paths))
-            table = table.filter(mask)
+            masks.append(pc.is_in(table["attribute_path"], pa.array(attribute_paths)))
+
+        if masks:
+            # Combine all masks with AND logic
+            combined_mask = masks[0]
+            for mask in masks[1:]:
+                combined_mask = pc.and_(combined_mask, mask)
+            table = table.filter(combined_mask)
 
         return table
 
