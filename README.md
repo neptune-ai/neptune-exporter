@@ -8,12 +8,8 @@ CLI tool to move Neptune experiments (version 2.x or 3.x) to disk as parquet + f
 - Loads parquet data into MLflow or W&B while preserving run structure (forks, steps, attributes) as closely as possible.
 - Prints a human-readable summary of what is on disk.
 
-## Requirements
-- Python 3.13 (managed via [uv](https://github.com/astral-sh/uv)).
-- Neptune credentials: `NEPTUNE_API_TOKEN` (or pass `--api-token`) and either `--project-ids` or `NEPTUNE_PROJECT`.
-- Target credentials when loading:
-  - MLflow: `MLFLOW_TRACKING_URI` or `--mlflow-tracking-uri`.
-  - W&B: `WANDB_ENTITY`/`--wandb-entity` and `WANDB_API_KEY`/`--wandb-api-key`.
+## Install & run locally
+This project is not published on PyPI. Clone the repository and run it directly with `uv`.
 
 Install dependencies in the repo:
 
@@ -21,11 +17,18 @@ Install dependencies in the repo:
 uv sync
 ```
 
-Run all CLI commands via uv:
+Run the CLI:
 
 ```bash
 uv run neptune-exporter --help
 ```
+
+## Requirements
+- Python 3.13 (managed via [uv](https://docs.astral.sh/uv/)).
+- Neptune credentials: `NEPTUNE_API_TOKEN` (or pass `--api-token`) and either `--project-ids` or `NEPTUNE_PROJECT`.
+- Target credentials when loading:
+  - MLflow: `MLFLOW_TRACKING_URI` or `--mlflow-tracking-uri`.
+  - W&B: `WANDB_ENTITY`/`--wandb-entity` and `WANDB_API_KEY`/`--wandb-api-key`.
 
 ## Quick start
 1) Export Neptune data to disk (core):
