@@ -32,11 +32,20 @@ from __future__ import annotations
 import logging
 import os
 import re
-import shutil
 from dataclasses import dataclass
 from pathlib import Path
 from tempfile import mkdtemp
-from typing import TYPE_CHECKING, Any, ClassVar, Dict, Generator, Optional, Set, Tuple, Type
+from typing import (
+    TYPE_CHECKING,
+    Any,
+    ClassVar,
+    Dict,
+    Generator,
+    Optional,
+    Set,
+    Tuple,
+    Type,
+)
 
 import pandas as pd
 import pyarrow as pa
@@ -45,7 +54,7 @@ from neptune_exporter.loaders.loader import DataLoader
 from neptune_exporter.types import ProjectId, TargetExperimentId, TargetRunId
 
 if TYPE_CHECKING:
-    from zenml.models import ArtifactVersionResponse, ModelVersionResponse
+    from zenml.models import ModelVersionResponse
 
 try:
     from zenml.client import Client
@@ -116,7 +125,9 @@ class DirectoryMaterializer(BaseMaterializer):  # type: ignore[misc]
 
         for src_dir_raw, _, files in fileio.walk(src):
             # fileio.walk may return bytes or str, normalize to str
-            src_dir = src_dir_raw.decode() if isinstance(src_dir_raw, bytes) else src_dir_raw
+            src_dir = (
+                src_dir_raw.decode() if isinstance(src_dir_raw, bytes) else src_dir_raw
+            )
             dst_dir = os.path.join(dst, os.path.relpath(src_dir, src))
             fileio.makedirs(dst_dir)
 
@@ -333,7 +344,9 @@ class ZenMLLoader(DataLoader):
         """
         sanitized = re.sub(r"[^a-zA-Z0-9_\-\s/]", "_", name)
         if len(sanitized) > max_len:
-            self._logger.warning("Truncated name '%s' to '%s'", name, sanitized[:max_len])
+            self._logger.warning(
+                "Truncated name '%s' to '%s'", name, sanitized[:max_len]
+            )
             sanitized = sanitized[:max_len]
         if not sanitized:
             sanitized = "neptune-import"
@@ -361,7 +374,8 @@ class ZenMLLoader(DataLoader):
         model_name = self._get_model_name(project_id)
 
         try:
-            models = self._client.list_models(name=model_name)
+            models_page = self._client.list_models(name=model_name)
+            models = list(models_page)
         except Exception:
             self._logger.error(
                 "Error listing ZenML models for name '%s'", model_name, exc_info=True
@@ -594,11 +608,17 @@ class ZenMLLoader(DataLoader):
             series_path = f"series/{attr_path}"
 
             if stats.min_value is not None:
-                self._set_nested_value(all_metadata, f"{series_path}/min", stats.min_value)
+                self._set_nested_value(
+                    all_metadata, f"{series_path}/min", stats.min_value
+                )
             if stats.max_value is not None:
-                self._set_nested_value(all_metadata, f"{series_path}/max", stats.max_value)
+                self._set_nested_value(
+                    all_metadata, f"{series_path}/max", stats.max_value
+                )
             if stats.final_value is not None:
-                self._set_nested_value(all_metadata, f"{series_path}/final", stats.final_value)
+                self._set_nested_value(
+                    all_metadata, f"{series_path}/final", stats.final_value
+                )
 
             self._set_nested_value(all_metadata, f"{series_path}/count", stats.count)
 
@@ -618,6 +638,41 @@ class ZenMLLoader(DataLoader):
                 continue
             value = paths[0] if len(paths) == 1 else paths
             self._set_nested_value(all_metadata, key, value)
+
+    def _get_model_version_response(
+        self, model_version_id: str
+    ) -> Optional["ModelVersionResponse"]:
+        """Fetch a ZenML ModelVersionResponse by ID, with caching.
+
+        The response object is required by link_artifact_version_to_model_version(),
+        which expects full response objects rather than just UUIDs.
+
+        Args:
+            model_version_id: The ZenML Model Version ID.
+
+        Returns:
+            The ModelVersionResponse object, or None if fetch fails.
+        """
+        # Check cache first
+        cache_key = f"mv_{model_version_id}"
+        if hasattr(self, "_mv_cache") and cache_key in self._mv_cache:
+            return self._mv_cache[cache_key]
+
+        # Initialize cache if needed
+        if not hasattr(self, "_mv_cache"):
+            self._mv_cache: Dict[str, "ModelVersionResponse"] = {}
+
+        try:
+            mv = self._client.get_model_version(model_version_id)
+            self._mv_cache[cache_key] = mv
+            return mv
+        except Exception:
+            self._logger.warning(
+                "Failed to fetch model version '%s' for artifact linking",
+                model_version_id,
+                exc_info=True,
+            )
+            return None
 
     def _upload_artifact_to_zenml(
         self,
@@ -683,31 +738,32 @@ class ZenMLLoader(DataLoader):
                 neptune_attr_path,
             )
 
-            # Link the artifact to the model version
-            # We use the zen_store directly instead of link_artifact_version_to_model_version
-            # because we already have the model version ID and don't need to fetch the full object
-            try:
-                from uuid import UUID as PyUUID
-                from zenml.models import ModelVersionArtifactRequest
-
-                self._client.zen_store.create_model_version_artifact_link(
-                    ModelVersionArtifactRequest(
-                        artifact_version=artifact_version.id,
-                        model_version=PyUUID(model_version_id),
+            # Link the artifact to the model version using the public API
+            model_version = self._get_model_version_response(model_version_id)
+            if model_version is not None:
+                try:
+                    link_artifact_version_to_model_version(
+                        artifact_version=artifact_version,
+                        model_version=model_version,
                     )
-                )
-                self._logger.debug(
-                    "Linked artifact '%s' to model version '%s'",
-                    artifact_name,
-                    model_version_id,
-                )
-            except Exception:
+                    self._logger.debug(
+                        "Linked artifact '%s' to model version '%s'",
+                        artifact_name,
+                        model_version_id,
+                    )
+                except Exception:
+                    self._logger.warning(
+                        "Failed to link artifact '%s' to model version '%s'; "
+                        "artifact was saved but not linked",
+                        artifact_name,
+                        model_version_id,
+                        exc_info=True,
+                    )
+            else:
                 self._logger.warning(
-                    "Failed to link artifact '%s' to model version '%s'; "
-                    "artifact was saved but not linked",
-                    artifact_name,
+                    "Could not fetch model version '%s'; artifact '%s' saved but not linked",
                     model_version_id,
-                    exc_info=True,
+                    artifact_name,
                 )
 
             return artifact_version_id
@@ -756,7 +812,9 @@ class ZenMLLoader(DataLoader):
 
             # meta_key is like "files/artifacts/model"
             # Extract the Neptune attribute path (remove "files/" prefix)
-            neptune_attr_path = meta_key[6:] if meta_key.startswith("files/") else meta_key
+            neptune_attr_path = (
+                meta_key[6:] if meta_key.startswith("files/") else meta_key
+            )
 
             for rel_path in rel_paths:
                 abs_path = files_directory / rel_path
@@ -863,6 +921,8 @@ class ZenMLLoader(DataLoader):
         metadata: Dict[str, Any],
     ) -> None:
         """Log aggregated metadata to the ZenML Model Version."""
+        from uuid import UUID as PyUUID
+
         if not metadata:
             return
 
@@ -874,39 +934,18 @@ class ZenMLLoader(DataLoader):
             )
 
         try:
-            # The design document assumes a log_metadata API that accepts
-            # model_version_id directly. If the actual ZenML version in use exposes
-            # a different signature, this call may raise a TypeError; users should
-            # then adjust the installed ZenML version or this integration.
-            log_metadata(  # type: ignore[call-arg]
+            # Convert string ID to UUID as required by ZenML's log_metadata API
+            model_version_uuid = PyUUID(str(run_id))
+            log_metadata(
                 metadata=metadata,
-                model_version_id=str(run_id),
+                model_version_id=model_version_uuid,
             )
             self._logger.info("Uploaded metadata for ZenML model version %s", run_id)
-        except TypeError:
-            # Fallback to a more generic API that uses resource_type/resource_id,
-            # which is present in many ZenML versions.
-            try:
-                from zenml.enums import MetadataResourceTypes  # type: ignore
-
-                log_metadata(  # type: ignore[call-arg]
-                    metadata=metadata,
-                    resource_type=MetadataResourceTypes.MODEL_VERSION,
-                    resource_id=str(run_id),
-                )
-                self._logger.info(
-                    "Uploaded metadata for ZenML model version %s using "
-                    "resource_type/resource_id API",
-                    run_id,
-                )
-            except Exception:
-                self._logger.error(
-                    "Failed to log metadata for ZenML model version %s", run_id, exc_info=True
-                )
-                raise
         except Exception:
             self._logger.error(
-                "Failed to log metadata for ZenML model version %s", run_id, exc_info=True
+                "Failed to log metadata for ZenML model version %s",
+                run_id,
+                exc_info=True,
             )
             raise
 
@@ -949,15 +988,16 @@ class ZenMLLoader(DataLoader):
             return None
 
         try:
-            versions = self._client.list_model_versions(
+            versions_page = self._client.list_model_versions(
                 model_name_or_id=str(experiment_id),
                 name=run_name,
             )
+            versions = list(versions_page)
         except TypeError:
             # Older ZenML versions may not support name filtering; fall back to
             # manual filtering if listing all versions is allowed.
             try:
-                versions = self._client.list_model_versions(
+                versions_page = self._client.list_model_versions(
                     model_name_or_id=str(experiment_id)
                 )
             except Exception:
@@ -969,7 +1009,7 @@ class ZenMLLoader(DataLoader):
                 return None
 
             versions = [
-                v for v in versions if getattr(v, "name", None) == run_name
+                v for v in versions_page if getattr(v, "name", None) == run_name
             ]
         except Exception:
             self._logger.warning(
@@ -1078,7 +1118,9 @@ class ZenMLLoader(DataLoader):
         self._set_nested_value(all_metadata, "neptune_import/source", "neptune")
         self._set_nested_value(all_metadata, "neptune_import/tool", "neptune-exporter")
         self._set_nested_value(all_metadata, "neptune_import/loader", "zenml")
-        self._set_nested_value(all_metadata, "neptune_import/target_run_id", str(run_id))
+        self._set_nested_value(
+            all_metadata, "neptune_import/target_run_id", str(run_id)
+        )
 
         try:
             for part in run_data:
@@ -1099,7 +1141,9 @@ class ZenMLLoader(DataLoader):
                 )
 
             # Finalize aggregated data into metadata dict
-            self._finalize_series_metadata(series_stats=series_stats, all_metadata=all_metadata)
+            self._finalize_series_metadata(
+                series_stats=series_stats, all_metadata=all_metadata
+            )
 
             # Upload files as ZenML artifacts and link to model version
             # This replaces the old _merge_file_refs_into_metadata call
@@ -1115,7 +1159,9 @@ class ZenMLLoader(DataLoader):
             if tags:
                 self._set_nested_value(all_metadata, "sys/tags", sorted(tags))
             if experiment_tags:
-                self._set_nested_value(all_metadata, "sys/group_tags", sorted(experiment_tags))
+                self._set_nested_value(
+                    all_metadata, "sys/group_tags", sorted(experiment_tags)
+                )
 
             # Attempt to update model version description and tags from sys/ fields
             description = sys_info.get("sys/description")

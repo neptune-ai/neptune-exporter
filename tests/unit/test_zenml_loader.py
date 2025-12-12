@@ -161,7 +161,9 @@ def test_create_experiment_uses_existing_model() -> None:
 
     experiment_id = loader.create_experiment("org/my-project", "experiment-name")
 
-    mock_client.list_models.assert_called_once_with(name="neptune-export-org-my-project")
+    mock_client.list_models.assert_called_once_with(
+        name="neptune-export-org-my-project"
+    )
     mock_client.create_model.assert_not_called()
     assert experiment_id == "model-456"
 
@@ -244,19 +246,25 @@ def test_create_run_without_experiment_id_calls_get_or_create_model() -> None:
 
 def test_log_metadata_to_zenml_uses_model_version_id() -> None:
     """Test _log_metadata_to_zenml calls zenml.log_metadata with expected args."""
+    from uuid import UUID as PyUUID
+
     loader, _ = _create_loader()
+
+    # Use a valid UUID since the implementation converts to UUID
+    model_version_uuid_str = "669e2121-d812-4ce2-9738-6b6be3a004a3"
+    expected_uuid = PyUUID(model_version_uuid_str)
 
     with patch(
         "neptune_exporter.loaders.zenml_loader.log_metadata"
     ) as mock_log_metadata:
         metadata = {"a": 1, "b": "value"}
-        loader._log_metadata_to_zenml(run_id="mv-123", metadata=metadata)  # type: ignore[arg-type]
+        loader._log_metadata_to_zenml(run_id=model_version_uuid_str, metadata=metadata)  # type: ignore[arg-type]
 
     # Primary API should be used (metadata + model_version_id)
     assert mock_log_metadata.call_count == 1
     _, kwargs = mock_log_metadata.call_args
     assert kwargs["metadata"] == metadata
-    assert kwargs["model_version_id"] == "mv-123"
+    assert kwargs["model_version_id"] == expected_uuid
 
 
 def test_upload_run_data_aggregates_and_logs_metadata() -> None:
@@ -269,131 +277,131 @@ def test_upload_run_data_aggregates_and_logs_metadata() -> None:
     run_ids = ["RUN-123"] * num_rows
 
     attribute_paths = [
-        "parameters/float_param",        # 0 float
-        "parameters/int_param",          # 1 int
-        "parameters/string_param",       # 2 string
-        "parameters/bool_param",         # 3 bool
-        "parameters/datetime_param",     # 4 datetime
-        "parameters/string_set_param",   # 5 string_set
-        "sys/tags",                      # 6 tags string_set
-        "sys/group_tags",                # 7 group tags string_set
-        "sys/name",                      # 8 run display name
-        "sys/description",               # 9 description
-        "metrics/accuracy",              # 10 float_series step 1
-        "metrics/accuracy",              # 11 float_series step 2
-        "artifacts/model",               # 12 file reference
+        "parameters/float_param",  # 0 float
+        "parameters/int_param",  # 1 int
+        "parameters/string_param",  # 2 string
+        "parameters/bool_param",  # 3 bool
+        "parameters/datetime_param",  # 4 datetime
+        "parameters/string_set_param",  # 5 string_set
+        "sys/tags",  # 6 tags string_set
+        "sys/group_tags",  # 7 group tags string_set
+        "sys/name",  # 8 run display name
+        "sys/description",  # 9 description
+        "metrics/accuracy",  # 10 float_series step 1
+        "metrics/accuracy",  # 11 float_series step 2
+        "artifacts/model",  # 12 file reference
     ]
 
     attribute_types = [
-        "float",         # 0
-        "int",           # 1
-        "string",        # 2
-        "bool",          # 3
-        "datetime",      # 4
-        "string_set",    # 5
-        "string_set",    # 6
-        "string_set",    # 7
-        "string",        # 8
-        "string",        # 9
+        "float",  # 0
+        "int",  # 1
+        "string",  # 2
+        "bool",  # 3
+        "datetime",  # 4
+        "string_set",  # 5
+        "string_set",  # 6
+        "string_set",  # 7
+        "string",  # 8
+        "string",  # 9
         "float_series",  # 10
         "float_series",  # 11
-        "file",          # 12
+        "file",  # 12
     ]
 
     steps = [
-        None,                       # 0
-        None,                       # 1
-        None,                       # 2
-        None,                       # 3
-        None,                       # 4
-        None,                       # 5
-        None,                       # 6
-        None,                       # 7
-        None,                       # 8
-        None,                       # 9
-        Decimal("1.0"),             # 10
-        Decimal("2.0"),             # 11
-        None,                       # 12
+        None,  # 0
+        None,  # 1
+        None,  # 2
+        None,  # 3
+        None,  # 4
+        None,  # 5
+        None,  # 6
+        None,  # 7
+        None,  # 8
+        None,  # 9
+        Decimal("1.0"),  # 10
+        Decimal("2.0"),  # 11
+        None,  # 12
     ]
 
     timestamps = [
-        pd.NaT,                     # 0
-        pd.NaT,                     # 1
-        pd.NaT,                     # 2
-        pd.NaT,                     # 3
-        pd.NaT,                     # 4
-        pd.NaT,                     # 5
-        pd.NaT,                     # 6
-        pd.NaT,                     # 7
-        pd.NaT,                     # 8
-        pd.NaT,                     # 9
-        pd.NaT,                     # 10
-        pd.NaT,                     # 11
-        pd.NaT,                     # 12
+        pd.NaT,  # 0
+        pd.NaT,  # 1
+        pd.NaT,  # 2
+        pd.NaT,  # 3
+        pd.NaT,  # 4
+        pd.NaT,  # 5
+        pd.NaT,  # 6
+        pd.NaT,  # 7
+        pd.NaT,  # 8
+        pd.NaT,  # 9
+        pd.NaT,  # 10
+        pd.NaT,  # 11
+        pd.NaT,  # 12
     ]
 
     int_values = [
-        None,   # 0
-        5,      # 1
-        None,   # 2
-        None,   # 3
-        None,   # 4
-        None,   # 5
-        None,   # 6
-        None,   # 7
-        None,   # 8
-        None,   # 9
-        None,   # 10
-        None,   # 11
-        None,   # 12
+        None,  # 0
+        5,  # 1
+        None,  # 2
+        None,  # 3
+        None,  # 4
+        None,  # 5
+        None,  # 6
+        None,  # 7
+        None,  # 8
+        None,  # 9
+        None,  # 10
+        None,  # 11
+        None,  # 12
     ]
 
     float_values = [
-        1.23,   # 0
-        None,   # 1
-        None,   # 2
-        None,   # 3
-        None,   # 4
-        None,   # 5
-        None,   # 6
-        None,   # 7
-        None,   # 8
-        None,   # 9
-        0.8,    # 10
-        0.9,    # 11
-        None,   # 12
+        1.23,  # 0
+        None,  # 1
+        None,  # 2
+        None,  # 3
+        None,  # 4
+        None,  # 5
+        None,  # 6
+        None,  # 7
+        None,  # 8
+        None,  # 9
+        0.8,  # 10
+        0.9,  # 11
+        None,  # 12
     ]
 
     string_values = [
-        None,                   # 0
-        None,                   # 1
-        "hello",                # 2
-        None,                   # 3
-        None,                   # 4
-        None,                   # 5
-        None,                   # 6
-        None,                   # 7
-        "Run Name",             # 8
-        "Run description",      # 9
-        None,                   # 10
-        None,                   # 11
-        None,                   # 12
+        None,  # 0
+        None,  # 1
+        "hello",  # 2
+        None,  # 3
+        None,  # 4
+        None,  # 5
+        None,  # 6
+        None,  # 7
+        "Run Name",  # 8
+        "Run description",  # 9
+        None,  # 10
+        None,  # 11
+        None,  # 12
     ]
 
     bool_values = [
-        None,    # 0
-        None,    # 1
-        None,    # 2
-        True,    # 3
-        None,    # 4
-        None,    # 5
-        None,    # 6
-        None,    # 7
-        None,    # 8
-        None,    # 9
-        None,    # 10
-        None,    # 11
-        None,    # 12
+        None,  # 0
+        None,  # 1
+        None,  # 2
+        True,  # 3
+        None,  # 4
+        None,  # 5
+        None,  # 6
+        None,  # 7
+        None,  # 8
+        None,  # 9
+        None,  # 10
+        None,  # 11
+        None,  # 12
     ]
 
     datetime_values = [
@@ -413,35 +421,35 @@ def test_upload_run_data_aggregates_and_logs_metadata() -> None:
     ]
 
     string_set_values = [
-        None,                          # 0
-        None,                          # 1
-        None,                          # 2
-        None,                          # 3
-        None,                          # 4
-        ["a", "b"],                    # 5
-        ["tag1", "tag2"],              # 6
-        ["group1", "group2"],          # 7
-        None,                          # 8
-        None,                          # 9
-        None,                          # 10
-        None,                          # 11
-        None,                          # 12
+        None,  # 0
+        None,  # 1
+        None,  # 2
+        None,  # 3
+        None,  # 4
+        ["a", "b"],  # 5
+        ["tag1", "tag2"],  # 6
+        ["group1", "group2"],  # 7
+        None,  # 8
+        None,  # 9
+        None,  # 10
+        None,  # 11
+        None,  # 12
     ]
 
     file_values = [
-        None,                                   # 0
-        None,                                   # 1
-        None,                                   # 2
-        None,                                   # 3
-        None,                                   # 4
-        None,                                   # 5
-        None,                                   # 6
-        None,                                   # 7
-        None,                                   # 8
-        None,                                   # 9
-        None,                                   # 10
-        None,                                   # 11
-        {"path": "artifact/model.pkl"},         # 12
+        None,  # 0
+        None,  # 1
+        None,  # 2
+        None,  # 3
+        None,  # 4
+        None,  # 5
+        None,  # 6
+        None,  # 7
+        None,  # 8
+        None,  # 9
+        None,  # 10
+        None,  # 11
+        {"path": "artifact/model.pkl"},  # 12
     ]
 
     histogram_values = [None] * num_rows
@@ -541,6 +549,7 @@ def test_upload_run_data_aggregates_and_logs_metadata() -> None:
 def test_upload_files_as_artifacts_with_save_artifact(tmp_path: Path) -> None:
     """Test _upload_files_as_artifacts uploads files when save_artifact is available."""
     from uuid import UUID as PyUUID
+
     loader, mock_client = _create_loader()
 
     # Create a mock file in the temporary directory
@@ -556,16 +565,22 @@ def test_upload_files_as_artifacts_with_save_artifact(tmp_path: Path) -> None:
     mock_artifact_version = Mock()
     mock_artifact_version.id = PyUUID(artifact_version_uuid)
 
-    # Mock the zen_store for linking
-    mock_zen_store = Mock()
-    mock_client.zen_store = mock_zen_store
+    # Mock the model version response for get_model_version
+    mock_model_version = Mock()
+    mock_model_version.id = PyUUID(model_version_uuid)
+    mock_client.get_model_version.return_value = mock_model_version
 
     file_refs = {"files/artifacts/model": ["artifact/model.pkl"]}
     all_metadata: dict = {}
 
-    with patch(
-        "neptune_exporter.loaders.zenml_loader.save_artifact",
-    ) as mock_save_artifact:
+    with (
+        patch(
+            "neptune_exporter.loaders.zenml_loader.save_artifact",
+        ) as mock_save_artifact,
+        patch(
+            "neptune_exporter.loaders.zenml_loader.link_artifact_version_to_model_version",
+        ) as mock_link_artifact,
+    ):
         mock_save_artifact.return_value = mock_artifact_version
 
         loader._upload_files_as_artifacts(
@@ -581,13 +596,21 @@ def test_upload_files_as_artifacts_with_save_artifact(tmp_path: Path) -> None:
     assert save_call_kwargs["name"] == "neptune-artifacts-model"
     assert save_call_kwargs["data"] == test_file
     assert "neptune-import" in save_call_kwargs["tags"]
-    assert save_call_kwargs["user_metadata"]["neptune_attribute_path"] == "artifacts/model"
+    assert (
+        save_call_kwargs["user_metadata"]["neptune_attribute_path"] == "artifacts/model"
+    )
 
-    # Verify zen_store.create_model_version_artifact_link was called
-    assert mock_zen_store.create_model_version_artifact_link.call_count == 1
+    # Verify link_artifact_version_to_model_version was called with proper objects
+    assert mock_link_artifact.call_count == 1
+    link_call_kwargs = mock_link_artifact.call_args[1]
+    assert link_call_kwargs["artifact_version"] == mock_artifact_version
+    assert link_call_kwargs["model_version"] == mock_model_version
 
     # Verify artifact ID is stored in metadata (stored as string)
-    assert all_metadata["artifacts"]["artifacts"]["model"]["zenml_artifact_id"] == artifact_version_uuid
+    assert (
+        all_metadata["artifacts"]["artifacts"]["model"]["zenml_artifact_id"]
+        == artifact_version_uuid
+    )
 
     # Verify file paths are still stored as fallback
     assert all_metadata["files"]["artifacts"]["model"] == "artifact/model.pkl"
@@ -621,6 +644,7 @@ def test_upload_files_as_artifacts_skips_missing_files(tmp_path: Path) -> None:
 def test_upload_artifact_to_zenml_handles_directory(tmp_path: Path) -> None:
     """Test _upload_artifact_to_zenml handles directory artifacts correctly."""
     from uuid import UUID as PyUUID
+
     loader, mock_client = _create_loader()
 
     # Create a directory with files
@@ -658,12 +682,14 @@ def test_upload_artifact_to_zenml_handles_directory(tmp_path: Path) -> None:
     save_call_kwargs = mock_save_artifact.call_args[1]
     # The materializer should be DirectoryMaterializer for directories
     from neptune_exporter.loaders.zenml_loader import DirectoryMaterializer
+
     assert save_call_kwargs["materializer"] == DirectoryMaterializer
 
 
 def test_upload_artifact_to_zenml_handles_single_file(tmp_path: Path) -> None:
     """Test _upload_artifact_to_zenml handles single file artifacts correctly."""
     from uuid import UUID as PyUUID
+
     loader, mock_client = _create_loader()
 
     # Create a single file
@@ -698,4 +724,5 @@ def test_upload_artifact_to_zenml_handles_single_file(tmp_path: Path) -> None:
     # Verify FileMaterializer was used for files
     save_call_kwargs = mock_save_artifact.call_args[1]
     from neptune_exporter.loaders.zenml_loader import FileMaterializer
+
     assert save_call_kwargs["materializer"] == FileMaterializer
