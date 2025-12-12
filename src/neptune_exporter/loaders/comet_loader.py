@@ -260,12 +260,9 @@ class CometLoader(DataLoader):
             attr_name = self._sanitize_attribute_name(attr_path)
 
             # Create temporary file with text content
-            # Use delete=False to prevent automatic deletion before Comet reads it
-            tmp_file = tempfile.NamedTemporaryFile(
-                mode="w", suffix=".txt", encoding="utf-8", delete=False
-            )
-            tmp_file_path = tmp_file.name
-            try:
+            with tempfile.NamedTemporaryFile(
+                mode="w", suffix=".txt", encoding="utf-8"
+            ) as tmp_file:
                 series_step: Optional[int] = None
                 for _, row in group.iterrows():
                     if pd.notna(row["string_value"]):
@@ -283,22 +280,12 @@ class CometLoader(DataLoader):
                             f"{series_step}; {timestamp}; {row['string_value']}\n"
                         )
                         tmp_file.write(text_line)
-
-                # Upload to Comet - it will read the file synchronously
+                tmp_file_path = tmp_file.name
                 self._comet_experiment.log_asset(
                     file_data=tmp_file_path,
                     file_name=attr_name,
                     step=series_step,
                 )
-            finally:
-                # Clean up the temporary file after Comet has read it
-                try:
-                    if os.path.exists(tmp_file_path):
-                        os.unlink(tmp_file_path)
-                except Exception as e:
-                    self._logger.warning(
-                        f"Failed to delete temporary file {tmp_file_path}: {e}"
-                    )
 
     def _upload_file_series(
         self, step_multiplier: int, files_base_path: Path, run_data: pd.DataFrame
