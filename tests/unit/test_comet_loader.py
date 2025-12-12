@@ -32,7 +32,7 @@ sys.modules["comet_ml"] = mock_comet_ml
 sys.modules["comet_ml.messages"] = mock_comet_ml.messages
 sys.modules["comet_ml.api"] = mock_comet_ml.api
 
-from neptune_exporter.loaders.comet_loader import CometLoader
+from neptune_exporter.loaders.comet_loader import CometLoader  # noqa: E402
 
 
 def test_init():
@@ -92,9 +92,7 @@ def test_get_project_name():
     )
 
     # Test sanitization (removes invalid characters)
-    assert (
-        loader._get_project_name("my@org#project") == "test-prefix_my_org_project"
-    )
+    assert loader._get_project_name("my@org#project") == "test-prefix_my_org_project"
 
 
 def test_convert_step_to_int():
@@ -451,9 +449,7 @@ def test_upload_artifacts_histogram_series():
     )
 
     files_base_path = Path("/test/files")
-    loader.upload_artifacts(
-        test_data, "RUN-123", files_base_path, step_multiplier=1
-    )
+    loader.upload_artifacts(test_data, "RUN-123", files_base_path, step_multiplier=1)
 
     # Verify log_histogram_3d was called
     mock_experiment.log_histogram_3d.assert_called_once()
@@ -605,7 +601,9 @@ def test_upload_run_data():
     )
 
     with (
-        patch("neptune_exporter.loaders.comet_loader.comet_ml.Experiment") as mock_experiment_class,
+        patch(
+            "neptune_exporter.loaders.comet_loader.comet_ml.Experiment"
+        ) as mock_experiment_class,
         patch("pathlib.Path.exists", return_value=True),
         patch("pathlib.Path.is_file", return_value=True),
     ):
