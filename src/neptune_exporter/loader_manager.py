@@ -124,10 +124,25 @@ class LoaderManager:
                 in_degree[metadata.run_id] = 1
             # Otherwise, run is a root (orphaned or no parent)
 
+        # Determine if we have timezone-aware creation times
+        has_timezone_aware = any(
+            metadata.creation_time is not None
+            and metadata.creation_time.tzinfo is not None
+            for metadata in run_metadata
+        )
+
+        # Create appropriate max datetime based on whether we have timezone-aware datetimes
+        if has_timezone_aware:
+            max_datetime = datetime.datetime(
+                9999, 12, 31, 23, 59, 59, 999999, tzinfo=datetime.timezone.utc
+            )
+        else:
+            max_datetime = datetime.datetime.max
+
         # Kahn's algorithm: start with nodes with in-degree 0
         # Results are sorted by metadata.creation_time, those without creation time are last
         queue = [
-            (metadata.creation_time or datetime.datetime.max, metadata)
+            (metadata.creation_time or max_datetime, metadata)
             for metadata in run_metadata
             if in_degree[metadata.run_id] == 0
         ]
@@ -145,7 +160,7 @@ class LoaderManager:
                     heapq.heappush(
                         queue,
                         (
-                            child_metadata.creation_time or datetime.datetime.max,
+                            child_metadata.creation_time or max_datetime,
                             child_metadata,
                         ),
                     )
@@ -164,7 +179,7 @@ class LoaderManager:
                 if metadata.run_id not in result_ids
             ]
             remaining_metadata.sort(
-                key=lambda x: (x.creation_time or datetime.datetime.max, x.run_id)
+                key=lambda x: (x.creation_time or max_datetime, x.run_id)
             )
             result.extend(remaining_metadata)
 

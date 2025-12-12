@@ -207,9 +207,13 @@ def test_topological_sort_creation_time_order():
     run1_id = "RUN-1"
     run2_id = "RUN-2"
     run3_id = "RUN-3"
-    creation_time1 = datetime.datetime(2025, 1, 1, 12, 0, 0)
+    creation_time1 = datetime.datetime(
+        2025, 1, 1, 12, 0, 0, tzinfo=datetime.timezone.utc
+    )
     creation_time2 = None
-    creation_time3 = datetime.datetime(2025, 1, 1, 12, 0, 2)
+    creation_time3 = datetime.datetime(
+        2025, 1, 1, 12, 0, 2, tzinfo=datetime.timezone.utc
+    )
 
     run1_metadata = RunMetadata(
         project_id="project1",
@@ -240,6 +244,7 @@ def test_topological_sort_creation_time_order():
         fork_step=None,
         creation_time=creation_time3,
     )
+
     # Mock reader
     mock_reader.list_run_files.return_value = [run3_id, run2_id, run1_id]
     mock_reader.read_run_metadata.side_effect = [
