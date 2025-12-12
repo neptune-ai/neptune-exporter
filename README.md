@@ -24,11 +24,29 @@ Neptune Exporter is a CLI tool to move Neptune experiments (version `2.x` or `3.
 > [!IMPORTANT]
 > This project is not published on PyPI. Clone the Git repository and run it directly with `uv`.
 
-Install dependencies in the repo:
+Install core dependencies (required for export functionality):
 
 ```bash
 uv sync
 ```
+
+### Optional Loader Dependencies
+
+The loaders (MLflow, W&B) are **optional dependencies**. Install them only if you plan to use them:
+
+```bash
+# Install MLflow loader
+uv sync --group mlflow
+
+# Install W&B loader
+uv sync --group wandb
+
+# Install all loaders
+uv sync --group all-loaders
+```
+
+> [!NOTE]
+> If you try to use a loader without its dependencies installed, you'll get a clear error message with installation instructions.
 
 Run the CLI:
 
