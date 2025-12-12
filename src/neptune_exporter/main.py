@@ -28,8 +28,6 @@ from neptune_exporter.exporters.neptune2 import Neptune2Exporter
 from neptune_exporter.exporters.neptune3 import Neptune3Exporter
 from neptune_exporter.loader_manager import LoaderManager
 from neptune_exporter.loaders.loader import DataLoader
-from neptune_exporter.loaders.mlflow_loader import MLflowLoader
-from neptune_exporter.loaders.wandb_loader import WandBLoader
 from neptune_exporter.storage.parquet_reader import ParquetReader
 from neptune_exporter.storage.parquet_writer import ParquetWriter
 from neptune_exporter.summary_manager import SummaryManager
@@ -483,6 +481,13 @@ def load(
     # Create appropriate loader based on --loader flag
     data_loader: DataLoader
     if loader == "mlflow":
+        try:
+            from neptune_exporter.loaders.mlflow_loader import MLflowLoader
+        except ImportError as e:
+            raise click.BadParameter(
+                "MLflow loader is not available. Install MLflow with: uv sync --group mlflow"
+            ) from e
+        
         if not mlflow_tracking_uri:
             mlflow_tracking_uri = os.getenv("MLFLOW_TRACKING_URI")
             if not mlflow_tracking_uri:
@@ -496,6 +501,13 @@ def load(
         )
         loader_name = "MLflow"
     elif loader == "wandb":
+        try:
+            from neptune_exporter.loaders.wandb_loader import WandBLoader
+        except ImportError as e:
+            raise click.BadParameter(
+                "W&B loader is not available. Install wandb with: uv sync --group wandb"
+            ) from e
+        
         if not wandb_entity:
             wandb_entity = os.getenv("WANDB_ENTITY")
             if not wandb_entity:

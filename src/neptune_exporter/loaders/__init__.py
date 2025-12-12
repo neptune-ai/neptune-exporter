@@ -16,7 +16,19 @@
 """Loaders package for uploading data to target platforms."""
 
 from .loader import DataLoader
-from .mlflow_loader import MLflowLoader
-from .wandb_loader import WandBLoader
 
-__all__ = ["DataLoader", "MLflowLoader", "WandBLoader"]
+# Optional loaders - imported lazily to avoid requiring dependencies
+__all__ = ["DataLoader"]
+
+# Try to import optional loaders, but don't fail if they're not available
+try:
+    from .mlflow_loader import MLflowLoader
+    __all__.append("MLflowLoader")
+except ImportError:
+    pass
+
+try:
+    from .wandb_loader import WandBLoader
+    __all__.append("WandBLoader")
+except ImportError:
+    pass

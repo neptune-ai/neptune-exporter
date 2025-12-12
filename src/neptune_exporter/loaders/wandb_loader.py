@@ -22,10 +22,17 @@ from pathlib import Path
 from typing import Generator, Optional, Any
 import pandas as pd
 import pyarrow as pa
-import wandb
 
 from neptune_exporter.types import ProjectId, TargetRunId, TargetExperimentId
 from neptune_exporter.loaders.loader import DataLoader
+
+# Import wandb - raise error if not available
+try:
+    import wandb
+except ImportError as e:
+    raise ImportError(
+        "wandb is not installed. Install it with: uv sync --group wandb"
+    ) from e
 
 
 class WandBLoader(DataLoader):
