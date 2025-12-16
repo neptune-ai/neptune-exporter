@@ -18,6 +18,7 @@ Neptune Exporter is a CLI tool to move Neptune experiments (version `2.x` or `3.
 - Target credentials when loading:
   - MLflow tracking URI, set with `MLFLOW_TRACKING_URI` or `--mlflow-tracking-uri`.
   - W&B entity and API key, set with `WANDB_ENTITY`/`--wandb-entity` and `WANDB_API_KEY`/`--wandb-api-key`.
+  - Lightning AI LitLogger requires the teamspace name (`--litlogger-teamspace`) and the auth credentials (set via `lightning login` or `--litlogger-user-id` and `--litlogger-api-key`)
 
 ## Installation
 
@@ -179,21 +180,25 @@ All records use `src/neptune_exporter/model.py::SCHEMA`:
 - **Parameters** (`float`, `int`, `string`, `bool`, `datetime`, `string_set`):
   - MLflow: logged as params (values stringified by the client).
   - W&B: logged as config with native types (string_set → list).
+  - LitLogger: logged as params to a tabular view
 - **Float series** (`float_series`):
-  - Both targets: logged as metrics using the integer step (`--step-multiplier` applied).
+  - All targets: logged as metrics using the integer step (`--step-multiplier` applied).
   - Timestamps are forwarded when present.
 - **String series** (`string_series`):
   - MLflow: saved as artifacts (one text file per series).
   - W&B: logged as a Table with columns `step`, `value`, `timestamp`.
+  - LitLogger: saved as artifacts (one text file per series).
 - **Histogram series** (`histogram_series`):
   - MLflow: uploaded as artifacts containing the histogram payload.
   - W&B: logged as `wandb.Histogram`.
+  - LitLogger: uploaded as image containing a histogram plot and as artifacts containing the histogram payload
 - **Files** (`file`) and **file series** (`file_series`):
   - Downloaded to `--files-path/<sanitized_project_id>/...` with relative paths stored in `file_value.path`.
-  - MLflow/W&B: uploaded as artifacts. File series include the step in the artifact name/path so steps remain distinguishable.
+  - MLflow/W&B/LitLogger: uploaded as artifacts. File series include the step in the artifact name/path so steps remain distinguishable.
 - **Attribute names**:
   - MLflow: sanitized to allowed chars (alphanumeric + `_-. /`), truncated at 250 chars.
   - W&B: sanitized to allowed pattern (`^[_a-zA-Z][_a-zA-Z0-9]*$`); invalid chars become `_`, and names are forced to start with a letter or underscore.
+  - LitLogger: sanitized to allowed pattern (`^[a-zA-Z][a-zA-Z0-9]*$`); invalid chars become `-`, and names are forced to start with a letter
 
 For details on Neptune attribute types, see the [documentation](https://docs.neptune.ai/attribute_types).
 
