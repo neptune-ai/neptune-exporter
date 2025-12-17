@@ -395,6 +395,7 @@ def export(
 @click.option(
     "--litlogger-user-id",
     help="Lightning.ai user ID for authentication. Only used with --loader litlogger.",
+)
 @click.option(
     "--name-prefix",
     help="Optional prefix for experiment/project and run names.",
