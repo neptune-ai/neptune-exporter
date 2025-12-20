@@ -1,12 +1,18 @@
 # Neptune Exporter
 
-Neptune Exporter is a CLI tool to move Neptune experiments (version `2.x` or `3.x`) to disk as parquet and files, with an option to load them into MLflow, Weights & Biases, ZenML, or Comet.
+Neptune Exporter is a CLI tool to move Neptune experiments (version `2.x` or `3.x`) to disk as parquet and files, with an option to load them into the following alternative tools:
+
+- Comet
+- Lightning AI
+- MLflow
+- Weights & Biases
+- ZenML
 
 ## What it does
 
 - Streams runs from Neptune to local storage. Artifacts are downloaded alongside the parquet.
 - Skips runs that were already exported (presence of `part_0.parquet`), making exports resumable.
-- Loads parquet data into MLflow, W&B, ZenML, or Comet while preserving run structure (forks, steps, attributes) as closely as possible.
+- Loads parquet data into alternative tools while preserving run structure (forks, steps, attributes) as closely as possible.
 - Prints a human-readable summary of what is on disk.
 
 ## Requirements
