@@ -4,6 +4,7 @@ Neptune Exporter is a CLI tool to move Neptune experiments (version `2.x` or `3.
 
 - Comet
 - Lightning AI
+- Minfx (Neptune v2 compatible)
 - MLflow
 - Weights & Biases
 - ZenML
@@ -27,6 +28,7 @@ Neptune Exporter is a CLI tool to move Neptune experiments (version `2.x` or `3.
   - ZenML server connection via `zenml login` (see [ZenML docs](https://docs.zenml.io/deploying-zenml/connecting-to-zenml/connect-in-with-your-user-interactive)).
   - Comet workspace and API key, set with `COMET_WORKSPACE`/`--comet-workspace` and `COMET_API_KEY`/`--comet-api-key`.
   - Lightning AI LitLogger requires auth credentials (set via `lightning login` or `--litlogger-user-id` and `--litlogger-api-key`). Optionally specify `--litlogger-owner` for the user or organization name where teamspaces will be created (defaults to the authenticated user).
+  - Minfx (Neptune v2) project and API token, set with `MINFX_NEPTUNE_V2_PROJECT`/`--minfx-neptune-v2-project` and `MINFX_NEPTUNE_V2_API_TOKEN`/`--minfx-neptune-v2-api-token`.
 
 ## Installation
 
@@ -43,6 +45,12 @@ To use the ZenML loader, install with the optional extra:
 
 ```bash
 uv sync --extra zenml
+```
+
+To use the Minfx loader, ensure minfx is installed:
+
+```bash
+uv pip install minfx
 ```
 
 Run the CLI:
@@ -148,6 +156,15 @@ uv run neptune-exporter export -p "workspace/proj" --exporter neptune2 --data-pa
     --litlogger-owner my-org \
     --data-path ./exports/data \
     --files-path ./exports/files
+
+  # Minfx (Neptune v2 compatible)
+  # Note: Must export with --exporter neptune2 for minfx compatibility
+  uv run neptune-exporter load \
+    --loader minfx_neptune_v2 \
+    --minfx-neptune-v2-project "target-workspace/target-project" \
+    --minfx-neptune-v2-api-token "$MINFX_NEPTUNE_V2_API_TOKEN" \
+    --data-path ./exports/data \
+    --files-path ./exports/files
   ```
 
   > [!NOTE]
@@ -156,6 +173,12 @@ uv run neptune-exporter export -p "workspace/proj" --exporter neptune2 --data-pa
 
   > [!NOTE]
   > For ZenML, ensure you are logged into a ZenML server via `zenml login` before running the load command. The ZenML loader does not use `--step-multiplier` since it aggregates time-series into summary statistics rather than logging individual points. To store Neptune files in your ZenML artifact store (e.g., S3, GCS, Azure), configure a cloud [artifact store](https://docs.zenml.io/stacks/stack-components/artifact-stores) in your active stack using `zenml stack set <stack-name>` before running the load.
+
+  > [!NOTE]
+  > For Minfx (Neptune v2), the `--step-multiplier` option is not needed since Neptune v2 natively supports float steps. The loader recreates runs in a Neptune-compatible backend and stores the original run ID in `import/original_run_id` for tracking and duplicate prevention.
+
+  > [!IMPORTANT]
+  > When exporting data for Minfx, you **must** use `--exporter neptune2` during the export step, as Minfx is compatible with Neptune v2 API only. Using `--exporter neptune3` will result in incompatible data structures.
 
 ## Data layout on disk
 
@@ -223,6 +246,15 @@ All records use `src/neptune_exporter/model.py::SCHEMA`:
   - Neptune runs become Experiments within their project's teamspace, named after the `run_id` (plus optional `--name-prefix`), max 64 chars.
   - Parameters are stored as experiment metadata (searchable/filterable in the UI). Metrics use integer steps (`--step-multiplier` applied).
   - Files and artifacts are uploaded preserving directory structure. String series become `.txt` files, histograms become PNG images.
+- **Minfx (Neptune v2) loader**:
+  - **Important**: Data must be exported with `--exporter neptune2` for compatibility.
+  - Requires `--minfx-neptune-v2-project` and `--minfx-neptune-v2-api-token` (or environment variables).
+  - Uses Neptune v2 API via `minfx.neptune_v2` to recreate runs in a Neptune-compatible backend.
+  - Supports native float steps (no `--step-multiplier` needed). Timestamps are preserved for time-series data.
+  - Stores original run IDs in `import/original_run_id` namespace for tracking and duplicate prevention (avoids polluting `sys/` namespace).
+  - Fork relationships are stored as metadata in `import/forking/parent` and `import/forking/step` (Neptune v2 doesn't support native forking).
+  - Recreates artifacts using Neptune's internal artifact registration API. Files are uploaded with auto-detected extensions for proper UI rendering.
+  - Skips histogram series (not supported in Neptune v2 API) and auto-generated source code diffs.
 - If a target run with the same name already exists in the experiment or project, the loader skips uploading that run to avoid duplicates.
 
 ## Experiment/run mapping to targets
@@ -246,6 +278,11 @@ All records use `src/neptune_exporter/model.py::SCHEMA`:
   - Neptune `project_id` maps to a Lightning.ai Teamspace (created automatically if it doesn't exist, sanitized to max 64 chars).
   - Neptune runs become Experiments within their project's teamspace, named after `run_id` (or `custom_run_id`, plus optional `--name-prefix`, max 64 chars).
   - Neptune's `sys/name` is stored as metadata (`neptune_project` and `neptune_run`) for traceability. Fork relationships are not natively supported.
+- **Minfx (Neptune v2):**
+  - Neptune `project_id` is ignored; all data goes to the target project specified by `--minfx-neptune-v2-project`.
+  - Neptune's `sys/name` (experiment name) becomes the run's `sys/name` in the target Neptune v2 instance.
+  - Original `run_id` is stored in `import/original_run_id` (not `sys/custom_run_id`) to avoid polluting the system namespace.
+  - Fork relationships are stored in `import/forking/parent` and `import/forking/step` as metadata (Neptune v2 doesn't support native forking via the API).
 
 ## Attribute/type mapping (detailed)
 
@@ -255,33 +292,39 @@ All records use `src/neptune_exporter/model.py::SCHEMA`:
   - ZenML: logged as nested metadata with native types (datetime → ISO string, string_set → list); paths are split for dashboard cards.
   - Comet: logged as parameters with native types (string_set → list).
   - LitLogger: logged as experiment metadata (string key-value pairs, searchable/filterable in the UI).
+  - Minfx: logged with native types (datetime → timestamp, string_set → StringSet). Preserves `sys/hostname`, `sys/tags`, and `sys/group_tags` from original data; other `sys/*` attributes are skipped as they're managed by Neptune.
 - **Float series** (`float_series`):
   - MLflow/W&B/Comet/LitLogger: logged as metrics using the integer step (`--step-multiplier` applied). Timestamps are forwarded when present.
   - ZenML: aggregated into summary statistics (min/max/final/count) stored as metadata, since the Model Control Plane doesn't have native time-series visualization.
+  - Minfx: logged as FloatSeries with native float steps and timestamps preserved. Uses batch assignment for performance (reduces API calls).
 - **String series** (`string_series`):
   - MLflow: saved as artifacts (one text file per series).
   - W&B: logged as a Table with columns `step`, `value`, `timestamp`.
   - ZenML: not uploaded (skipped).
   - Comet: uploaded as text assets.
   - LitLogger: uploaded as text assets.
+  - Minfx: logged as StringSeries with steps preserved. Uses batch assignment for performance.
 - **Histogram series** (`histogram_series`):
   - MLflow: uploaded as artifacts containing the histogram payload.
   - W&B: logged as `wandb.Histogram`.
   - ZenML: not uploaded (skipped).
   - Comet: logged as `histogram_3d`.
-  - LitLogger: uploaded as image containing a histogram plot and as artifacts containing the histogram payload
+  - LitLogger: uploaded as image containing a histogram plot and as artifacts containing the histogram payload.
+  - Minfx: not uploaded (skipped - not supported in Neptune v2 API).
 - **Files** (`file`) and **file series** (`file_series`):
   - Downloaded to `--files-path/<sanitized_project_id>/...` with relative paths stored in `file_value.path`.
   - MLflow/W&B: uploaded as artifacts. File series include the step in the artifact name/path so steps remain distinguishable.
   - ZenML: uploaded via `save_artifact()` and linked to Model Versions.
   - Comet: uploaded as assets. Comet detects images and uploads them as images.
   - LitLogger: uploaded as artifacts.
+  - Minfx: uploaded with auto-detected file extensions (via magic bytes) for proper UI rendering. Artifacts are recreated using Neptune's internal artifact registration API. File series preserve step information. Source code files are handled specially to maintain Neptune's source code tracking structure.
 - **Attribute names**:
   - MLflow: sanitized to allowed chars (alphanumeric + `_-. /`), truncated at 250 chars.
   - W&B: sanitized to allowed pattern (`^[_a-zA-Z][_a-zA-Z0-9]*$`); invalid chars become `_`, and names are forced to start with a letter or underscore.
   - ZenML: sanitized to allowed chars (alphanumeric + `_-. /` and spaces), max 250 chars; paths are split into nested metadata for dashboard card organization.
   - Comet: sanitized to allowed pattern (`^[_a-zA-Z][_a-zA-Z0-9]*$`); invalid chars become `_`, and names are forced to start with a letter or underscore.
   - LitLogger: sanitized to allowed pattern (`^[a-zA-Z0-9_-]+$`); invalid chars become `_`. Experiment and teamspace names are truncated to 64 chars.
+  - Minfx: no sanitization required - Neptune v2 accepts the original attribute paths as-is. Skips `sys/*` attributes except allowed ones (`sys/hostname`, `sys/tags`, `sys/group_tags`).
 
 For details on Neptune attribute types, see the [documentation](https://docs.neptune.ai/attribute_types).
 
