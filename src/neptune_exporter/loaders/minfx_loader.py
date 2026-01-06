@@ -14,10 +14,10 @@
 # limitations under the License.
 
 """
-Minfx loader for importing parquet-exported using API compatible with Neptune V2.
+Minfx loader for importing parquet-exported data using Neptune-SDK compatible API.
 
-This loader uses minfx.neptune_v2 to import data that was previously exported
-from Neptune, allowing migration between Neptune-SDK compatible backends.
+This loader uses minfx to import data that was previously exported from Neptune,
+allowing migration between Neptune-SDK compatible backends.
 
 Implementation Notes (from debugging session):
 ----------------------------------------------
@@ -113,7 +113,7 @@ _FILE_SERIES_TYPE = "file_series"
 _FILE_SET_TYPE = "file_set"
 _ARTIFACT_TYPE = "artifact"
 
-# Skipped types (no native support in Neptune v2)
+# Skipped types (no native support in minfx)
 _HISTOGRAM_SERIES_TYPE = "histogram_series"
 
 # File type detection magic bytes
@@ -316,8 +316,8 @@ def _log_artifact_metadata_as_strings(
                     run[f"{base_path}/metadata/{key}"] = str(meta_item["value"])
 
 
-class MinfxNeptuneV2Loader(DataLoader):
-    """Minfx loader for importing parquet-exported using API compatible with Neptune V2."""
+class MinfxLoader(DataLoader):
+    """Minfx loader for importing parquet-exported data using Neptune-SDK compatible API."""
 
     def __init__(
         self,
@@ -327,13 +327,13 @@ class MinfxNeptuneV2Loader(DataLoader):
         show_client_logs: bool = False,
     ):
         """
-        Initialize Neptune v2 loader.
+        Initialize Minfx loader.
 
         Args:
-            project: Target Neptune project path (workspace/project)
-            api_token: Optional Neptune API token for authentication
+            project: Target Minfx project path (workspace/project)
+            api_token: Optional Minfx API token for authentication
             name_prefix: Optional prefix for run names
-            show_client_logs: Enable verbose Neptune client logging
+            show_client_logs: Enable verbose client logging
         """
         self._project = project
         self._api_token = api_token
@@ -471,8 +471,8 @@ class MinfxNeptuneV2Loader(DataLoader):
             project_id: Original Neptune project ID (unused, we use self._project)
             run_name: Name for the run (will be set as custom_run_id)
             experiment_id: Experiment name (will be set as sys/name)
-            parent_run_id: Parent run sys/id for forking (not supported in v2 API)
-            fork_step: Fork step (not supported in v2 API)
+            parent_run_id: Parent run sys/id for forking (not supported in minfx API)
+            fork_step: Fork step (not supported in minfx API)
             step_multiplier: Step multiplier (unused for Neptune - supports floats)
 
         Returns:
@@ -481,7 +481,7 @@ class MinfxNeptuneV2Loader(DataLoader):
         prefixed_name = self._get_run_name(run_name)
 
         try:
-            # Neptune v2 doesn't support forking via init_run
+            # Minfx doesn't support forking via init_run
             # We'll store fork info as metadata instead
             #
             # CRITICAL: Disable ALL automatic tracking to avoid adding extra data.
@@ -507,6 +507,9 @@ class MinfxNeptuneV2Loader(DataLoader):
 
             # Store original run ID for finding/tracking without using sys/custom_run_id
             self._active_run["import/original_run_id"] = prefixed_name
+
+            # Store original project ID for traceability
+            self._active_run["import/original_project_id"] = str(project_id)
 
             # Store fork relationship as metadata if provided
             # Use import/ namespace to avoid reserved sys/ namespace
@@ -577,7 +580,7 @@ class MinfxNeptuneV2Loader(DataLoader):
     def upload_parameters(self, run_data: pd.DataFrame, run_id: TargetRunId) -> None:
         """Upload parameters to Neptune run.
 
-        Neptune v2 API: run[path] = value
+        Minfx API: run[path] = value
 
         PERFORMANCE: Pre-filters sys/ attributes and uses itertuples() instead of
         iterrows() for ~10x faster iteration.
@@ -687,7 +690,7 @@ class MinfxNeptuneV2Loader(DataLoader):
     def upload_series(self, run_data: pd.DataFrame, run_id: TargetRunId) -> None:
         """Upload string series to Neptune run.
 
-        Note: histogram_series is skipped (no native Neptune v2 support)
+        Note: histogram_series is skipped (no native minfx support)
         """
         if self._active_run is None:
             raise RuntimeError("No active run")
@@ -705,7 +708,7 @@ class MinfxNeptuneV2Loader(DataLoader):
         if not histogram_data.empty:
             unique_paths = histogram_data["attribute_path"].nunique()
             self._logger.warning(
-                f"Skipped {unique_paths} histogram_series attributes (not supported in Neptune v2)"
+                f"Skipped {unique_paths} histogram_series attributes (not supported in minfx)"
             )
 
     def upload_files(

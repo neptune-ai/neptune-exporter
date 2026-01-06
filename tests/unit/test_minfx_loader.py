@@ -30,9 +30,7 @@ def temp_dir(tmp_path):
 @pytest.fixture
 def mock_neptune():
     """Create a mock neptune module."""
-    with patch(
-        "neptune_exporter.loaders.minfx_neptunev2_loader.neptune"
-    ) as mock_neptune_module:
+    with patch("neptune_exporter.loaders.minfx_loader.neptune") as mock_neptune_module:
         mock_neptune_module.init_run = MagicMock()
         mock_neptune_module.init_project = MagicMock()
         mock_neptune_module.ANONYMOUS_API_TOKEN = "test-anonymous-token"
@@ -42,18 +40,16 @@ def mock_neptune():
 @pytest.fixture
 def mock_file():
     """Create a mock File class (neptune.types.File)."""
-    with patch(
-        "neptune_exporter.loaders.minfx_neptunev2_loader.File"
-    ) as mock_file_class:
+    with patch("neptune_exporter.loaders.minfx_loader.File") as mock_file_class:
         yield mock_file_class
 
 
 @pytest.fixture
 def loader(mock_neptune, mock_file):
-    """Create a loader instance with mocked neptune."""
-    from neptune_exporter.loaders.minfx_neptunev2_loader import MinfxNeptuneV2Loader
+    """Create a loader instance with mocked minfx."""
+    from neptune_exporter.loaders.minfx_loader import MinfxLoader
 
-    return MinfxNeptuneV2Loader(
+    return MinfxLoader(
         project="test-workspace/test-project",
         api_token="test-api-token",
         name_prefix="test-prefix",
@@ -61,10 +57,10 @@ def loader(mock_neptune, mock_file):
 
 
 def test_init(mock_neptune, mock_file):
-    """Test MinfxNeptuneV2Loader initialization."""
-    from neptune_exporter.loaders.minfx_neptunev2_loader import MinfxNeptuneV2Loader
+    """Test MinfxLoader initialization."""
+    from neptune_exporter.loaders.minfx_loader import MinfxLoader
 
-    loader = MinfxNeptuneV2Loader(
+    loader = MinfxLoader(
         project="test-workspace/test-project",
         api_token="test-api-token",
         name_prefix="test-prefix",
@@ -77,10 +73,10 @@ def test_init(mock_neptune, mock_file):
 
 
 def test_init_without_api_token(mock_neptune, mock_file):
-    """Test MinfxNeptuneV2Loader initialization without API token."""
-    from neptune_exporter.loaders.minfx_neptunev2_loader import MinfxNeptuneV2Loader
+    """Test MinfxLoader initialization without API token."""
+    from neptune_exporter.loaders.minfx_loader import MinfxLoader
 
-    loader = MinfxNeptuneV2Loader(
+    loader = MinfxLoader(
         project="test-workspace/test-project",
         name_prefix="test-prefix",
     )
@@ -104,10 +100,10 @@ def test_get_run_name(loader):
 
 def test_get_run_name_without_prefix(mock_neptune, mock_file):
     """Test run name generation without prefix."""
-    from neptune_exporter.loaders.minfx_neptunev2_loader import MinfxNeptuneV2Loader
+    from neptune_exporter.loaders.minfx_loader import MinfxLoader
 
     # Arrange
-    loader_no_prefix = MinfxNeptuneV2Loader(
+    loader_no_prefix = MinfxLoader(
         project="test-workspace/test-project",
     )
     expected_name = "run-456"
@@ -252,7 +248,9 @@ def test_get_value_for_tuple_datetime(loader):
 
 
 def test_get_value_for_tuple_string_set(loader):
-    """Test value extraction for string_set type (list to set conversion) from tuple."""
+    """Test value extraction for string_set type (list to StringSet conversion) from tuple."""
+    from neptune.types import StringSet
+
     # Arrange
     df = pd.DataFrame(
         {
@@ -270,9 +268,9 @@ def test_get_value_for_tuple_string_set(loader):
     # Act
     actual_value = loader._get_value_for_tuple(row, "string_set")
 
-    # Assert
-    assert actual_value == {"value1", "value2", "value3"}
-    assert isinstance(actual_value, set)
+    # Assert - returns Neptune's StringSet type for API compatibility
+    assert isinstance(actual_value, StringSet)
+    assert actual_value.values == {"value1", "value2", "value3"}
 
 
 def test_create_experiment(loader):
@@ -294,7 +292,7 @@ def test_find_run_not_found(loader):
 
 
 def test_create_run(mock_neptune, loader):
-    """Test creating a Neptune run."""
+    """Test creating a Minfx run."""
     # Arrange
     mock_run = MagicMock()
     mock_run.__getitem__ = MagicMock(
@@ -319,14 +317,15 @@ def test_create_run(mock_neptune, loader):
         capture_stderr=False,  # Disable stderr capture
         capture_traceback=False,  # Disable traceback
     )
-    # Verify import/original_run_id was set
+    # Verify import/original_run_id and import/original_project_id were set
     setitem_calls = mock_run.__setitem__.call_args_list
     paths_set = {call[0][0] for call in setitem_calls}
     assert "import/original_run_id" in paths_set
+    assert "import/original_project_id" in paths_set
 
 
 def test_create_run_with_parent(mock_neptune, loader):
-    """Test creating a Neptune run with fork parent."""
+    """Test creating a Minfx run with fork parent."""
     # Arrange
     mock_run = MagicMock()
     mock_run.__getitem__ = MagicMock(
@@ -351,7 +350,7 @@ def test_create_run_with_parent(mock_neptune, loader):
 
 
 def test_upload_parameters(mock_neptune, loader):
-    """Test parameter upload to Neptune."""
+    """Test parameter upload to Minfx."""
     # Arrange
     mock_run = MagicMock()
     mock_run.__setitem__ = MagicMock()
@@ -426,6 +425,8 @@ def test_upload_parameters_skips_sys_attributes(mock_neptune, loader):
 
 def test_upload_parameters_string_set(mock_neptune, loader):
     """Test parameter upload with string_set type."""
+    from neptune.types import StringSet
+
     # Arrange
     mock_run = MagicMock()
     mock_run.__setitem__ = MagicMock()
@@ -453,16 +454,16 @@ def test_upload_parameters_string_set(mock_neptune, loader):
     # Find the call for test/tags
     for call in setitem_calls:
         if call[0][0] == "test/tags":
-            # Value should be a set
-            assert isinstance(call[0][1], set)
-            assert call[0][1] == {"tag1", "tag2", "tag3"}
+            # Value should be Neptune's StringSet type for API compatibility
+            assert isinstance(call[0][1], StringSet)
+            assert call[0][1].values == {"tag1", "tag2", "tag3"}
             break
     else:
         pytest.fail("test/tags attribute not uploaded")
 
 
 def test_upload_metrics(mock_neptune, loader):
-    """Test metrics upload to Neptune using batch FloatSeries."""
+    """Test metrics upload to Minfx using batch FloatSeries."""
     # Arrange
     mock_run = MagicMock()
     loader._active_run = mock_run
@@ -491,7 +492,7 @@ def test_upload_metrics(mock_neptune, loader):
 
 
 def test_upload_string_series(mock_neptune, loader):
-    """Test string series upload to Neptune using batch StringSeries."""
+    """Test string series upload to Minfx using batch StringSeries."""
     # Arrange
     mock_run = MagicMock()
     loader._active_run = mock_run
@@ -519,7 +520,7 @@ def test_upload_string_series(mock_neptune, loader):
 
 
 def test_upload_files(mock_neptune, mock_file, loader, temp_dir):
-    """Test file upload to Neptune."""
+    """Test file upload to Minfx."""
     # Arrange
     mock_run = MagicMock()
     mock_upload = MagicMock()
@@ -681,9 +682,9 @@ def test_upload_run_data_histogram_series_warning(mock_neptune, loader, temp_dir
         histogram_warning_found = any(
             "histogram_series" in str(call) for call in warning_calls
         )
-        assert histogram_warning_found, (
-            f"Expected histogram_series warning, got: {warning_calls}"
-        )
+        assert (
+            histogram_warning_found
+        ), f"Expected histogram_series warning, got: {warning_calls}"
 
 
 def test_upload_file_set_with_files_zip(mock_neptune, loader, temp_dir):

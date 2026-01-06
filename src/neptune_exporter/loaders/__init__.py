@@ -32,17 +32,17 @@ except Exception:  # pragma: no cover - litlogger and LitLoggerLoader are option
     LITLOGGER_AVAILABLE = False  # type: ignore[misc,assignment]
 
 try:
-    from .minfx_neptunev2_loader import MinfxNeptuneV2Loader
+    from .minfx_loader import MinfxLoader
 
-    MINFX_NEPTUNE_AVAILABLE = True
-except Exception:  # pragma: no cover - minfx.neptune_v2 is optional
-    MinfxNeptuneV2Loader = None  # type: ignore[misc,assignment]
-    MINFX_NEPTUNE_AVAILABLE = False  # type: ignore[misc,assignment]
+    MINFX_AVAILABLE = True
+except Exception:  # pragma: no cover - minfx is optional
+    MinfxLoader = None  # type: ignore[misc,assignment]
+    MINFX_AVAILABLE = False  # type: ignore[misc,assignment]
 
 __all__ = ["DataLoader", "MLflowLoader", "WandBLoader"]
 if LITLOGGER_AVAILABLE:
     __all__.append("LitLoggerLoader")
 if ZENML_AVAILABLE:
     __all__.append("ZenMLLoader")
-if MINFX_NEPTUNE_AVAILABLE:
-    __all__.append("MinfxNeptuneV2Loader")
+if MINFX_AVAILABLE:
+    __all__.append("MinfxLoader")

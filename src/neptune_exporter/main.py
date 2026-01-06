@@ -362,7 +362,7 @@ def export(
 @click.option(
     "--loader",
     type=click.Choice(
-        ["mlflow", "wandb", "litlogger", "zenml", "comet", "minfx_neptune_v2"],
+        ["mlflow", "wandb", "litlogger", "zenml", "comet", "minfx"],
         case_sensitive=False,
     ),
     help="Target platform loader to use.",
@@ -400,12 +400,12 @@ def export(
     help="Lightning.ai user ID for authentication. Only used with --loader litlogger.",
 )
 @click.option(
-    "--minfx-neptune-v2-project",
-    help="Minfx project (for Neptune V2). Only used with --loader minfx_neptune_v2.",
+    "--minfx-project",
+    help="Minfx project. Only used with --loader minfx.",
 )
 @click.option(
-    "--minfx-neptune-v2-api-token",
-    help="Minfx API TOKEN (for Neptune V2). Only used with --loader minfx_neptune_v2.",
+    "--minfx-api-token",
+    help="Minfx API token. Only used with --loader minfx.",
 )
 @click.option(
     "--name-prefix",
@@ -441,8 +441,8 @@ def load(
     litlogger_owner: str | None,
     litlogger_api_key: str | None,
     litlogger_user_id: str | None,
-    minfx_neptune_v2_project: str | None,
-    minfx_neptune_v2_api_token: str | None,
+    minfx_project: str | None,
+    minfx_api_token: str | None,
     name_prefix: str | None,
     verbose: bool,
     log_file: Path,
@@ -454,7 +454,7 @@ def load(
 
     This tool loads previously exported Neptune data from parquet files
     and uploads it to MLflow, Weights & Biases, Comet, LitLogger, or Minfx
-    (Neptune v2) for further analysis and tracking.
+    for further analysis and tracking.
 
     The log file specified with --log-file will have a timestamp suffix
     automatically added (e.g., neptune_exporter_20250115_143022.log) to ensure
@@ -507,8 +507,8 @@ def load(
     lightning login && neptune-exporter load --loader litlogger
 
     \b
-    # Load to Minfx (via Neptune V2)
-    neptune-exporter load --loader minfx_neptune_v2 --minfx-neptune-v2-project "target-org/target-project" --minfx-neptune-v2-api-token xxx
+    # Load to Minfx
+    neptune-exporter load --loader minfx --minfx-project "target-org/target-project" --minfx-api-token xxx
     """
     # Convert tuples to lists and handle None values
     project_ids_list = list(project_ids) if project_ids else None
@@ -643,38 +643,38 @@ def load(
             show_client_logs=verbose,
         )
         loader_name = "LitLogger"
-    elif loader == "minfx_neptune_v2":
-        from neptune_exporter.loaders.minfx_neptunev2_loader import (
-            MinfxNeptuneV2Loader,
+    elif loader == "minfx":
+        from neptune_exporter.loaders.minfx_loader import (
+            MinfxLoader,
         )
-        from neptune_exporter.loaders import MINFX_NEPTUNE_AVAILABLE
+        from neptune_exporter.loaders import MINFX_AVAILABLE
 
-        if not MINFX_NEPTUNE_AVAILABLE:
+        if not MINFX_AVAILABLE:
             raise click.BadParameter(
-                "minfx_neptune_v2 loader selected but minfx.neptune_v2 is not installed. "
+                "minfx loader selected but minfx is not installed. "
                 "Install with `pip install minfx`."
             )
 
-        if not minfx_neptune_v2_project:
-            minfx_neptune_v2_project = os.getenv("MINFX_NEPTUNE_V2_PROJECT")
-            if not minfx_neptune_v2_project:
+        if not minfx_project:
+            minfx_project = os.getenv("MINFX_PROJECT")
+            if not minfx_project:
                 raise click.BadParameter(
-                    "Neptune project is required when using --loader minfx_neptune_v2. "
-                    "You can set it as an environment variable MINFX_NEPTUNE_V2_PROJECT or "
-                    "provide it with --minfx-neptune-v2-project."
+                    "Minfx project is required when using --loader minfx. "
+                    "You can set it as an environment variable MINFX_PROJECT or "
+                    "provide it with --minfx-project."
                 )
-        if not minfx_neptune_v2_api_token:
-            minfx_neptune_v2_api_token = os.getenv("MINFX_NEPTUNE_V2_API_TOKEN")
-            # API token is optional - Neptune client can use other auth methods
+        if not minfx_api_token:
+            minfx_api_token = os.getenv("MINFX_API_TOKEN")
+            # API token is optional - minfx client can use other auth methods
 
-        data_loader = MinfxNeptuneV2Loader(
-            project=minfx_neptune_v2_project,
-            api_token=minfx_neptune_v2_api_token,
+        data_loader = MinfxLoader(
+            project=minfx_project,
+            api_token=minfx_api_token,
             name_prefix=name_prefix,
             show_client_logs=verbose,
         )
-        loader_name = "Minfx Neptune v2"
-        logger.info(f"  Minfx Neptune v2 project: {minfx_neptune_v2_project}")
+        loader_name = "Minfx"
+        logger.info(f"  Minfx project: {minfx_project}")
     else:
         raise click.BadParameter(f"Unknown loader: {loader}")
 
