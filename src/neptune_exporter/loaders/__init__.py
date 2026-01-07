@@ -32,10 +32,12 @@ except Exception:  # pragma: no cover - litlogger and LitLoggerLoader are option
     LITLOGGER_AVAILABLE = False  # type: ignore[misc,assignment]
 
 try:
+    from . import minfx_loader
     from .minfx_loader import MinfxLoader
 
     MINFX_AVAILABLE = True
 except Exception:  # pragma: no cover - minfx is optional
+    minfx_loader = None  # type: ignore[misc,assignment]
     MinfxLoader = None  # type: ignore[misc,assignment]
     MINFX_AVAILABLE = False  # type: ignore[misc,assignment]
 

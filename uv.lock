@@ -1568,6 +1568,19 @@ wheels = [
 ]
 
 [[package]]
+name = "minfx"
+version = "0.4.0"
+source = { registry = "https://pypi.org/simple" }
+dependencies = [
+    { name = "neptune" },
+    { name = "neptune-scale" },
+]
+sdist = { url = "https://files.pythonhosted.org/packages/c5/11/cdbdbcf17c204cac012511fe21705fa3815de940789aa3117edfaea0df49/minfx-0.4.0.tar.gz", hash = "sha256:e917684fa4fd51381acac517f61fed1b61f24ab88b49b0a35cf02f52586594d0", size = 4422, upload-time = "2025-12-21T10:39:32.541Z" }
+wheels = [
+    { url = "https://files.pythonhosted.org/packages/24/05/b0e6e691576c389ba120147e80e76be535cc4d712bd9c38080f0aac54d38/minfx-0.4.0-py3-none-any.whl", hash = "sha256:d0ff8c279cc6dff32275a60290f1bcaccd6cb846b421adb69e57429cdcc61294", size = 4776, upload-time = "2025-12-21T10:39:31.33Z" },
+]
+
+[[package]]
 name = "mlflow"
 version = "3.7.0"
 source = { registry = "https://pypi.org/simple" }
@@ -1892,6 +1905,9 @@ litlogger = [
     { name = "litlogger" },
     { name = "matplotlib" },
 ]
+minfx = [
+    { name = "minfx" },
+]
 zenml = [
     { name = "zenml" },
 ]
@@ -1911,6 +1927,7 @@ requires-dist = [
     { name = "comet-ml", marker = "extra == 'cometml'", specifier = ">=3.55.0" },
     { name = "litlogger", marker = "extra == 'litlogger'", specifier = ">=0.1.0,<0.2.0" },
     { name = "matplotlib", marker = "extra == 'litlogger'" },
+    { name = "minfx", marker = "extra == 'minfx'" },
     { name = "mlflow", specifier = ">=3.4.0,<4.0.0" },
     { name = "neptune", specifier = ">=1.14.0,<2.0.0" },
     { name = "neptune-query", specifier = ">=1.5.1,<2.0.0" },
@@ -1919,7 +1936,7 @@ requires-dist = [
     { name = "wandb", specifier = ">=0.22.3,<1.0.0" },
     { name = "zenml", marker = "extra == 'zenml'", specifier = ">=0.90.0,<1.0.0" },
 ]
-provides-extras = ["zenml", "cometml", "litlogger"]
+provides-extras = ["zenml", "cometml", "litlogger", "minfx"]
 
 [package.metadata.requires-dev]
 dev = [

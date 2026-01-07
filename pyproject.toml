@@ -30,6 +30,7 @@ litlogger = [
     "litlogger>=0.1.0,<0.2.0",
     "matplotlib",
 ]
+minfx = ["minfx"]
 
 [project.scripts]
 neptune-exporter = "neptune_exporter.main:main"

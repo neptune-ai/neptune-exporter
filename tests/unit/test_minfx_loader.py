@@ -682,9 +682,9 @@ def test_upload_run_data_histogram_series_warning(mock_neptune, loader, temp_dir
         histogram_warning_found = any(
             "histogram_series" in str(call) for call in warning_calls
         )
-        assert (
-            histogram_warning_found
-        ), f"Expected histogram_series warning, got: {warning_calls}"
+        assert histogram_warning_found, (
+            f"Expected histogram_series warning, got: {warning_calls}"
+        )
 
 
 def test_upload_file_set_with_files_zip(mock_neptune, loader, temp_dir):
