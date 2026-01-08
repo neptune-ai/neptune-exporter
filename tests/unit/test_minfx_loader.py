@@ -30,11 +30,15 @@ def temp_dir(tmp_path):
 @pytest.fixture
 def mock_neptune():
     """Create a mock neptune module."""
-    with patch("neptune_exporter.loaders.minfx_loader.neptune") as mock_neptune_module:
-        mock_neptune_module.init_run = MagicMock()
-        mock_neptune_module.init_project = MagicMock()
-        mock_neptune_module.ANONYMOUS_API_TOKEN = "test-anonymous-token"
-        yield mock_neptune_module
+    # Need to mock both the module import and where it's used
+    mock_neptune_module = MagicMock()
+    mock_neptune_module.init_run = MagicMock()
+    mock_neptune_module.init_project = MagicMock()
+    mock_neptune_module.ANONYMOUS_API_TOKEN = "test-anonymous-token"
+    
+    with patch.dict("sys.modules", {"minfx.neptune_v2": mock_neptune_module}):
+        with patch("neptune_exporter.loaders.minfx_loader.neptune", mock_neptune_module):
+            yield mock_neptune_module
 
 
 @pytest.fixture
