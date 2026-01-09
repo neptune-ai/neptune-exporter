@@ -1889,12 +1889,10 @@ version = "0.1.0"
 source = { editable = "." }
 dependencies = [
     { name = "click" },
-    { name = "mlflow" },
     { name = "neptune" },
     { name = "neptune-query" },
     { name = "pyarrow" },
     { name = "tqdm" },
-    { name = "wandb" },
 ]
 
 [package.optional-dependencies]
@@ -1907,6 +1905,12 @@ litlogger = [
 ]
 minfx = [
     { name = "minfx" },
+]
+mlflow = [
+    { name = "mlflow" },
+]
+wandb = [
+    { name = "wandb" },
 ]
 zenml = [
     { name = "zenml" },
@@ -1928,15 +1932,15 @@ requires-dist = [
     { name = "litlogger", marker = "extra == 'litlogger'", specifier = ">=0.1.0,<0.2.0" },
     { name = "matplotlib", marker = "extra == 'litlogger'" },
     { name = "minfx", marker = "extra == 'minfx'" },
-    { name = "mlflow", specifier = ">=3.4.0,<4.0.0" },
+    { name = "mlflow", marker = "extra == 'mlflow'", specifier = ">=3.4.0,<4.0.0" },
     { name = "neptune", specifier = ">=1.14.0,<2.0.0" },
     { name = "neptune-query", specifier = ">=1.5.1,<2.0.0" },
     { name = "pyarrow", specifier = ">=21.0.0,<22.0.0" },
     { name = "tqdm", specifier = ">=4.67.1,<5.0.0" },
-    { name = "wandb", specifier = ">=0.22.3,<1.0.0" },
+    { name = "wandb", marker = "extra == 'wandb'", specifier = ">=0.22.3,<1.0.0" },
     { name = "zenml", marker = "extra == 'zenml'", specifier = ">=0.90.0,<1.0.0" },
 ]
-provides-extras = ["zenml", "cometml", "litlogger", "minfx"]
+provides-extras = ["mlflow", "wandb", "zenml", "cometml", "litlogger", "minfx"]
 
 [package.metadata.requires-dev]
 dev = [
