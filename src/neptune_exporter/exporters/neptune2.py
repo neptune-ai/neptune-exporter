@@ -331,15 +331,22 @@ class Neptune2Exporter(NeptuneExporter):
                         project_id, run_id, attribute_path, attribute_type, e
                     )
 
-        if all_data_dfs:
-            converted_df = self._convert_metrics_to_schema(all_data_dfs, project_id)
-            return pa.RecordBatch.from_pandas(converted_df, schema=model.SCHEMA)
-        return None
+        if not all_data_dfs:
+            return None
+
+        converted_df = self._convert_metrics_to_schema(all_data_dfs, project_id)
+        if converted_df is None:
+            return None
+
+        return pa.RecordBatch.from_pandas(converted_df, schema=model.SCHEMA)
 
     def _convert_metrics_to_schema(
         self, all_data_dfs: list[pd.DataFrame], project_id: ProjectId
-    ) -> pd.DataFrame:
+    ) -> Optional[pd.DataFrame]:
         all_data_df = pd.concat(all_data_dfs)
+
+        if all_data_df.empty:
+            return None
 
         result_df = pd.DataFrame(
             {
@@ -437,15 +444,22 @@ class Neptune2Exporter(NeptuneExporter):
                         project_id, run_id, attribute_path, attribute_type, e
                     )
 
-        if all_data_dfs:
-            converted_df = self._convert_series_to_schema(all_data_dfs, project_id)
-            return pa.RecordBatch.from_pandas(converted_df, schema=model.SCHEMA)
-        return None
+        if not all_data_dfs:
+            return None
+
+        converted_df = self._convert_series_to_schema(all_data_dfs, project_id)
+        if converted_df is None:
+            return None
+
+        return pa.RecordBatch.from_pandas(converted_df, schema=model.SCHEMA)
 
     def _convert_series_to_schema(
         self, all_data_dfs: list[pd.DataFrame], project_id: ProjectId
-    ) -> pd.DataFrame:
+    ) -> Optional[pd.DataFrame]:
         all_data_df = pd.concat(all_data_dfs)
+
+        if all_data_df.empty:
+            return None
 
         result_df = pd.DataFrame(
             {
@@ -639,15 +653,23 @@ class Neptune2Exporter(NeptuneExporter):
                         project_id, run_id, attribute_path, attribute_type, e
                     )
 
-        if all_data_dfs:
-            converted_df = self._convert_files_to_schema(all_data_dfs, project_id)
-            return pa.RecordBatch.from_pandas(converted_df, schema=model.SCHEMA)
-        return None
+        if not all_data_dfs:
+            return None
+
+        converted_df = self._convert_files_to_schema(all_data_dfs, project_id)
+        if converted_df is None:
+            return None
+
+        return pa.RecordBatch.from_pandas(converted_df, schema=model.SCHEMA)
 
     def _convert_files_to_schema(
         self, all_data_dfs: list[dict[str, Any]], project_id: ProjectId
-    ) -> pd.DataFrame:
+    ) -> Optional[pd.DataFrame]:
         all_data_df = pd.DataFrame(all_data_dfs)
+
+        if all_data_df.empty:
+            return None
+
         result_df = pd.DataFrame(
             {
                 "project_id": project_id,

@@ -75,7 +75,9 @@ def test_neptune2_download_metrics(exporter, project, test_runs):
     )
 
     # Verify we have data for all test runs
-    expected_run_ids = {run_id for run_id in test_runs}
+    expected_run_ids = {
+        run_id for run_id in test_runs if test_runs[run_id].float_series
+    }
     actual_run_ids = set(metrics.column("run_id").to_pylist())
     assert expected_run_ids == actual_run_ids
 
@@ -110,7 +112,9 @@ def test_neptune2_download_series(exporter, project, test_runs):
     )
 
     # Verify we have data for all test runs
-    expected_run_ids = {run_id for run_id in test_runs}
+    expected_run_ids = {
+        run_id for run_id in test_runs if test_runs[run_id].string_series
+    }
     actual_run_ids = set(series.column("run_id").to_pylist())
     assert expected_run_ids == actual_run_ids
 
@@ -147,7 +151,7 @@ def test_neptune2_download_files(exporter, project, test_runs, temp_dir):
     )
 
     # Verify we have data for all test runs
-    expected_run_ids = {run_id for run_id in test_runs}
+    expected_run_ids = {run_id for run_id in test_runs if test_runs[run_id].files}
     actual_run_ids = set(files.column("run_id").to_pylist())
     assert expected_run_ids == actual_run_ids
 
@@ -195,7 +199,7 @@ def test_neptune2_list_runs_with_regex_filter(exporter, project, test_runs):
     assert len(all_matching) >= len(test_runs)
     assert set(test_runs).issubset(set(all_matching))
 
-    first_run_id = test_runs[0]
+    first_run_id = next(iter(test_runs.keys()))
     prefix_pattern = f".*{first_run_id[4:]}$"
     prefix_matching = exporter.list_runs(project_id=project, runs=prefix_pattern)
     assert first_run_id in prefix_matching

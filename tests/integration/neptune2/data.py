@@ -47,6 +47,19 @@ TEST_NOW = datetime(2025, 1, 1, 0, 0, 0, 0, timezone.utc)
 
 TEST_DATA = [
     ExperimentData(
+        name="test_exporter_empty",
+        run_id=str(uuid.uuid4()),
+        config={},
+        string_sets={},
+        float_series={},
+        string_series={},
+        files={},
+        file_series={},
+        file_sets={},
+        artifacts={},
+    )
+] + [
+    ExperimentData(
         name=f"test_exporter_{i}",
         run_id=str(uuid.uuid4()),
         config={

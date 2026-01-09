@@ -31,6 +31,7 @@ def project() -> str:
 @pytest.fixture(scope="session")
 def test_runs(project, api_token) -> None:
     runs = {}
+    run_data = {}
 
     for experiment in TEST_DATA:
         # Create new experiment with all data
@@ -90,12 +91,13 @@ def test_runs(project, api_token) -> None:
         for path, value in experiment.artifacts.items():
             run[path].track_files(value)
 
-        runs[experiment.name] = run
+        runs[run._sys_id] = run
+        run_data[run._sys_id] = experiment
 
     for run in runs.values():
         run.stop()
 
-    return [run._sys_id for run in runs.values()]
+    return run_data
 
 
 @pytest.fixture
