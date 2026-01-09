@@ -35,9 +35,11 @@ def mock_neptune():
     mock_neptune_module.init_run = MagicMock()
     mock_neptune_module.init_project = MagicMock()
     mock_neptune_module.ANONYMOUS_API_TOKEN = "test-anonymous-token"
-    
+
     with patch.dict("sys.modules", {"minfx.neptune_v2": mock_neptune_module}):
-        with patch("neptune_exporter.loaders.minfx_loader.neptune", mock_neptune_module):
+        with patch(
+            "neptune_exporter.loaders.minfx_loader.neptune", mock_neptune_module
+        ):
             yield mock_neptune_module
 
 
