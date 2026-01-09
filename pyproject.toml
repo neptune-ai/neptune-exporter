@@ -6,12 +6,10 @@ readme = "README.md"
 requires-python = ">=3.13,<3.15"
 dependencies = [
     "click>=8.1.0,<9.0.0",
-    "mlflow>=3.4.0,<4.0.0",
     "neptune>=1.14.0,<2.0.0",
     "neptune-query>=1.5.1,<2.0.0",
     "pyarrow>=21.0.0,<22.0.0",
     "tqdm>=4.67.1,<5.0.0",
-    "wandb>=0.22.3,<1.0.0",
 ]
 
 [dependency-groups]
@@ -24,6 +22,8 @@ dev = [
 ]
 
 [project.optional-dependencies]
+mlflow = ["mlflow>=3.4.0,<4.0.0"]
+wandb = ["wandb>=0.22.3,<1.0.0"]
 zenml = ["zenml>=0.90.0,<1.0.0"]
 cometml = ["comet-ml>=3.55.0"]
 litlogger = [

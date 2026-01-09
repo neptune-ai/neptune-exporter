@@ -16,8 +16,30 @@
 """Loaders package for uploading data to target platforms."""
 
 from .loader import DataLoader
-from .mlflow_loader import MLflowLoader
-from .wandb_loader import WandBLoader
+
+try:
+    from .mlflow_loader import MLflowLoader
+
+    MLFLOW_AVAILABLE = True
+except Exception:  # pragma: no cover - mlflow and MLflowLoader are optional
+    MLflowLoader = None  # type: ignore[misc,assignment]
+    MLFLOW_AVAILABLE = False  # type: ignore[misc,assignment]
+
+try:
+    from .wandb_loader import WandBLoader
+
+    WANDB_AVAILABLE = True
+except Exception:  # pragma: no cover - wandb and WandBLoader are optional
+    WandBLoader = None  # type: ignore[misc,assignment]
+    WANDB_AVAILABLE = False  # type: ignore[misc,assignment]
+
+try:
+    from .comet_loader import CometLoader
+
+    COMET_AVAILABLE = True
+except Exception:  # pragma: no cover - comet-ml and CometLoader are optional
+    CometLoader = None  # type: ignore[misc,assignment]
+    COMET_AVAILABLE = False  # type: ignore[misc,assignment]
 
 try:
     from .zenml_loader import ZenMLLoader, ZENML_AVAILABLE
@@ -41,7 +63,13 @@ except Exception:  # pragma: no cover - minfx is optional
     MinfxLoader = None  # type: ignore[misc,assignment]
     MINFX_AVAILABLE = False  # type: ignore[misc,assignment]
 
-__all__ = ["DataLoader", "MLflowLoader", "WandBLoader"]
+__all__ = ["DataLoader"]
+if MLFLOW_AVAILABLE:
+    __all__.append("MLflowLoader")
+if WANDB_AVAILABLE:
+    __all__.append("WandBLoader")
+if COMET_AVAILABLE:
+    __all__.append("CometLoader")
 if LITLOGGER_AVAILABLE:
     __all__.append("LitLoggerLoader")
 if ZENML_AVAILABLE:

@@ -27,11 +27,7 @@ from neptune_exporter.exporters.exporter import NeptuneExporter
 from neptune_exporter.exporters.neptune2 import Neptune2Exporter
 from neptune_exporter.exporters.neptune3 import Neptune3Exporter
 from neptune_exporter.loader_manager import LoaderManager
-from neptune_exporter.loaders.litlogger_loader import LitLoggerLoader
 from neptune_exporter.loaders.loader import DataLoader
-from neptune_exporter.loaders.mlflow_loader import MLflowLoader
-from neptune_exporter.loaders.wandb_loader import WandBLoader
-from neptune_exporter.loaders.comet_loader import CometLoader
 from neptune_exporter.storage.parquet_reader import ParquetReader
 from neptune_exporter.storage.parquet_writer import ParquetWriter
 from neptune_exporter.summary_manager import SummaryManager
@@ -552,6 +548,15 @@ def load(
     # Create appropriate loader based on --loader flag
     data_loader: DataLoader
     if loader == "mlflow":
+        from neptune_exporter.loaders.mlflow_loader import MLflowLoader
+        from neptune_exporter.loaders import MLFLOW_AVAILABLE
+
+        if not MLFLOW_AVAILABLE:
+            raise click.BadParameter(
+                "MLflow loader selected but mlflow is not installed. "
+                "Install with `uv sync --extra mlflow`."
+            )
+
         if not mlflow_tracking_uri:
             mlflow_tracking_uri = os.getenv("MLFLOW_TRACKING_URI")
             if not mlflow_tracking_uri:
@@ -565,6 +570,15 @@ def load(
         )
         loader_name = "MLflow"
     elif loader == "wandb":
+        from neptune_exporter.loaders.wandb_loader import WandBLoader
+        from neptune_exporter.loaders import WANDB_AVAILABLE
+
+        if not WANDB_AVAILABLE:
+            raise click.BadParameter(
+                "W&B loader selected but wandb is not installed. "
+                "Install with `uv sync --extra wandb`."
+            )
+
         if not wandb_entity:
             wandb_entity = os.getenv("WANDB_ENTITY")
             if not wandb_entity:
@@ -593,7 +607,7 @@ def load(
         if not ZENML_AVAILABLE:
             raise click.BadParameter(
                 "ZenML loader selected but zenml is not installed. "
-                "Install with `pip install 'neptune-exporter[zenml]'` and "
+                "Install with `uv sync --extra zenml` and "
                 "ensure you are logged into a ZenML server (e.g., via `zenml login`)."
             )
 
@@ -603,6 +617,15 @@ def load(
         )
         loader_name = "ZenML"
     elif loader == "comet":
+        from neptune_exporter.loaders.comet_loader import CometLoader
+        from neptune_exporter.loaders import COMET_AVAILABLE
+
+        if not COMET_AVAILABLE:
+            raise click.BadParameter(
+                "Comet loader selected but comet-ml is not installed. "
+                "Install with `uv sync --extra cometml`."
+            )
+
         import comet_ml
 
         if not comet_workspace:
@@ -626,6 +649,15 @@ def load(
         )
         loader_name = "Comet"
     elif loader == "litlogger":
+        from neptune_exporter.loaders.litlogger_loader import LitLoggerLoader
+        from neptune_exporter.loaders import LITLOGGER_AVAILABLE
+
+        if not LITLOGGER_AVAILABLE:
+            raise click.BadParameter(
+                "LitLogger loader selected but litlogger is not installed. "
+                "Install with `uv sync --extra litlogger`."
+            )
+
         # Teamspace is optional for litlogger - uses default if not provided
         if not litlogger_owner:
             litlogger_owner = os.getenv("LITLOGGER_OWNER")
@@ -652,7 +684,7 @@ def load(
         if not MINFX_AVAILABLE:
             raise click.BadParameter(
                 "minfx loader selected but minfx is not installed. "
-                "Install with `pip install minfx`."
+                "Install with `uv sync --extra minfx`."
             )
 
         if not minfx_project:
