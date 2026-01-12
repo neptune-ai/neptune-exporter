@@ -16,8 +16,9 @@ def test_neptune2_list_runs(exporter, project, test_runs):
 
 
 def test_neptune2_list_runs_with_query(exporter, project, test_runs):
-    test_run_id_0 = test_runs[0]
-    test_run_id_1 = test_runs[2]
+    test_run_ids = list(test_runs.keys())
+    test_run_id_0 = test_run_ids[0]
+    test_run_id_1 = test_run_ids[2]
 
     runs = exporter.list_runs(
         project_id=project,

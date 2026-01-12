@@ -1,6 +1,13 @@
 # Neptune Exporter
 
-Neptune Exporter is a CLI tool to move Neptune experiments (version `2.x` or `3.x`) to disk as parquet and files, with an option to load them into any supported tracker.
+Neptune Exporter is a CLI tool to move Neptune experiments (version `2.x` or `3.x`) to disk as parquet and files, with an option to load them into the following alternative tools:
+
+- Comet
+- Lightning AI
+- Minfx
+- MLflow
+- Weights & Biases
+- ZenML
 
 ## What it does
 
