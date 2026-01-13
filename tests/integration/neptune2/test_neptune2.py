@@ -15,6 +15,19 @@ def test_neptune2_list_runs(exporter, project, test_runs):
     assert len(runs) == len(test_runs)
 
 
+def test_neptune2_list_runs_with_query(exporter, project, test_runs):
+    test_run_ids = list(test_runs.keys())
+    test_run_id_0 = test_run_ids[0]
+    test_run_id_1 = test_run_ids[2]
+
+    runs = exporter.list_runs(
+        project_id=project,
+        query=f'`sys/id`:string = "{test_run_id_0}" OR `sys/id`:string = "{test_run_id_1}"',
+    )
+
+    assert len(runs) == 2
+
+
 def test_neptune2_download_parameters_empty(exporter, project, test_runs):
     parameters = _to_table(
         exporter.download_parameters(

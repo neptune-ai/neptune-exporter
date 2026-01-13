@@ -54,6 +54,11 @@ def cli():
     help="Filter runs by pattern (e.g., 'RUN-*' or specific run ID).",
 )
 @click.option(
+    "--runs-query",
+    "-q",
+    help="Filter runs by a custom nql query. Only supported by Neptune 2 exporter. See https://docs-legacy.neptune.ai/usage/nql for more details.",
+)
+@click.option(
     "--attributes",
     "-a",
     multiple=True,
@@ -132,6 +137,7 @@ def cli():
 def export(
     project_ids: tuple[str, ...],
     runs: str | None,
+    runs_query: str | None,
     attributes: tuple[str, ...],
     classes: tuple[str, ...],
     exclude: tuple[str, ...],
@@ -251,6 +257,7 @@ def export(
     logger.info(f"Exporting from {exporter} exporter using arguments:")
     logger.info(f"  Project IDs: {', '.join(project_ids_list)}")
     logger.info(f"  Runs: {runs}")
+    logger.info(f"  Runs query: {runs_query}")
     logger.info(
         f"  Attributes: {', '.join(attributes_list) if isinstance(attributes_list, list) else attributes_list}"
     )
@@ -300,6 +307,7 @@ def export(
         runs_exported = export_manager.run(
             project_ids=[ProjectId(project_id) for project_id in project_ids_list],
             runs=runs,
+            runs_query=runs_query,
             attributes=attributes_list,
             export_classes=export_classes_set,  # type: ignore
         )
@@ -308,6 +316,8 @@ def export(
             logger.info("No runs found matching the specified criteria.")
             if runs:
                 logger.info(f"   Filter: {runs}")
+            if runs_query:
+                logger.info(f"   Runs query: {runs_query}")
             logger.info(
                 "   Try adjusting your run filter or check if the project contains any runs."
             )

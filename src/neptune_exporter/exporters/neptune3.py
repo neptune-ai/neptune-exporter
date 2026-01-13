@@ -91,12 +91,19 @@ class Neptune3Exporter(NeptuneExporter):
         )
 
     def list_runs(
-        self, project_id: ProjectId, runs: Optional[str] = None
+        self,
+        project_id: ProjectId,
+        runs: Optional[str] = None,
+        query: Optional[str] = None,
     ) -> list[SourceRunId]:
         """
         List Neptune runs.
         The runs parameter is a regex pattern that the sys/custom_run_id must match.
         """
+        if query is not None:
+            raise NotImplementedError(
+                "Query parameter is not implemented in neptune 3 client"
+            )
         if runs is not None:
             runs_filter = filters.Filter.matches(
                 filters.Attribute("sys/custom_run_id", type="string"), runs
@@ -109,6 +116,7 @@ class Neptune3Exporter(NeptuneExporter):
             runs_filter = runs_filter & filters.Filter.ne(
                 filters.Attribute("sys/archived", type="bool"), True
             )
+
         return nq_runs.list_runs(project=project_id, runs=runs_filter)
 
     def download_parameters(

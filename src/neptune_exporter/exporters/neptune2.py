@@ -102,7 +102,10 @@ class Neptune2Exporter(NeptuneExporter):
         return cast(list[ProjectId], management.get_project_list())
 
     def list_runs(
-        self, project_id: ProjectId, runs: Optional[str] = None
+        self,
+        project_id: ProjectId,
+        runs: Optional[str] = None,
+        query: Optional[str] = None,
     ) -> list[SourceRunId]:
         """
         List Neptune runs.
@@ -112,6 +115,7 @@ class Neptune2Exporter(NeptuneExporter):
             api_token=self._api_token, project=project_id, mode="read-only"
         ) as project:
             runs_table = project.fetch_runs_table(
+                query=query,
                 columns=["sys/id"],
                 trashed=None if self._include_trashed_runs else False,
                 progress_bar=None if self._show_client_logs else False,

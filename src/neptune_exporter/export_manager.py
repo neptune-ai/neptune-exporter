@@ -52,6 +52,7 @@ class ExportManager:
         self,
         project_ids: list[ProjectId],
         runs: None | str = None,
+        runs_query: None | str = None,
         attributes: None | str | list[str] = None,
         export_classes: Iterable[
             Literal["parameters", "metrics", "series", "files"]
@@ -65,7 +66,9 @@ class ExportManager:
             unit="project",
             disable=not self._progress_bar,
         ):
-            run_ids = self._exporter.list_runs(project_id, runs)
+            run_ids = self._exporter.list_runs(
+                project_id=project_id, runs=runs, query=runs_query
+            )
             project_runs[project_id] = run_ids
 
         # Check if any runs were found

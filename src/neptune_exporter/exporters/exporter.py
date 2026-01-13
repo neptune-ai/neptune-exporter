@@ -33,7 +33,10 @@ class NeptuneExporter(ABC):
 
     @abstractmethod
     def list_runs(
-        self, project_id: ProjectId, runs: Optional[str] = None
+        self,
+        project_id: ProjectId,
+        runs: Optional[str] = None,
+        query: Optional[str] = None,
     ) -> list[SourceRunId]:
         """List Neptune runs."""
         pass
