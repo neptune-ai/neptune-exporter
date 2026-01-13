@@ -41,17 +41,23 @@ Install dependencies in the repo:
 uv sync
 ```
 
-To use the ZenML loader, install with the optional extra:
+To use specific loaders, install their optional dependencies:
 
 ```bash
-uv sync --extra zenml
+# Install a single loader (e.g., MLflow)
+uv sync --extra mlflow
+
+# Install multiple loaders (e.g., MLflow, W&B, and ZenML)
+uv sync --extra mlflow --extra wandb --extra zenml
 ```
 
-To use the Minfx loader, ensure minfx is installed:
-
-```bash
-uv pip install minfx
-```
+Available optional dependencies:
+- `cometml` - for Comet loader
+- `litlogger` - for Lightning AI LitLogger loader
+- `minfx` - for Minfx loader
+- `mlflow` - for MLflow loader
+- `wandb` - for Weights & Biases loader
+- `zenml` - for ZenML loader
 
 Run the CLI:
 
