@@ -89,6 +89,7 @@ Options:
 | `--api-token`                            | Pass the token explicitly instead of using the `NEPTUNE_API_TOKEN` environment variable.                                                                                                                                                                                                      |
 | `--no-progress`, `-v`/`--verbose`, `--log-file` | Progress and logging controls for the CLI.                                                                                                                                                                                                                                                    |
 | `--runs-query` | `neptune2` only: Specify [Neptune Query Language](https://docs-legacy.neptune.ai/usage/nql/) syntax to filter runs to export.|
+| `--include-metric-previews`| `neptune3` only: Include [Metric Previews](https://docs.neptune.ai/metric_previews) in the export. Preview metrics will be exported as "normal" metrics and `preview_completion` information will be discarded.|
 
 #### Export examples
 
