@@ -185,6 +185,10 @@ uv run neptune-exporter export -p "workspace/proj" --exporter neptune2 --runs-qu
   > Default is `1` (no scaling).
 
   > [!NOTE]
+  > To load data into a **W&B Dedicated Cloud** instance (single-tenant), set the `WANDB_BASE_URL` environment variable to your instance URL (for example, `https://<your-instance>.wandb.io`) before running the load command.  
+  > The W&B loader will then create projects and runs directly in that Dedicated instance instead of multi-tenant SaaS (wandb.ai).
+
+  > [!NOTE]
   > For ZenML, ensure you are logged into a ZenML server via `zenml login` before running the load command. The ZenML loader does not use `--step-multiplier` since it aggregates time-series into summary statistics rather than logging individual points. To store Neptune files in your ZenML artifact store (e.g., S3, GCS, Azure), configure a cloud [artifact store](https://docs.zenml.io/stacks/stack-components/artifact-stores) in your active stack using `zenml stack set <stack-name>` before running the load.
 
   > [!NOTE]
