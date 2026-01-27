@@ -375,7 +375,7 @@ def export(
 @click.option(
     "--loader",
     type=click.Choice(
-        ["mlflow", "wandb", "litlogger", "zenml", "comet", "minfx"],
+        ["mlflow", "wandb", "litlogger", "zenml", "comet", "minfx", "pluto"],
         case_sensitive=False,
     ),
     help="Target platform loader to use.",
@@ -421,6 +421,10 @@ def export(
     help="Minfx API token. Only used with --loader minfx.",
 )
 @click.option(
+    "--pluto-api-key",
+    help="Pluto API key for authentication. Only used with --loader pluto.",
+)
+@click.option(
     "--name-prefix",
     help="Optional prefix for experiment/project and run names.",
 )
@@ -456,6 +460,7 @@ def load(
     litlogger_user_id: str | None,
     minfx_project: str | None,
     minfx_api_token: str | None,
+    pluto_api_key: str | None,
     name_prefix: str | None,
     verbose: bool,
     log_file: Path,
@@ -692,6 +697,26 @@ def load(
             show_client_logs=verbose,
         )
         loader_name = "LitLogger"
+    elif loader == "pluto":
+        from neptune_exporter.loaders import PlutoLoader, PLUTO_AVAILABLE
+
+        if not PLUTO_AVAILABLE:
+            raise click.BadParameter(
+                "Pluto loader selected but pluto SDK is not available. "
+                "Install with `pip install pluto-ml` or `pluto-ml-nightly` and try again."
+            )
+
+        # Resolve Pluto API key: CLI option -> environment variable
+        if not pluto_api_key:
+            pluto_api_key = os.getenv("PLUTO_API_KEY")
+
+        data_loader = PlutoLoader(
+            api_key=pluto_api_key,
+            host=None,
+            name_prefix=name_prefix,
+            show_client_logs=verbose,
+        )
+        loader_name = "Pluto"
     elif loader == "minfx":
         from neptune_exporter.loaders.minfx_loader import (
             MinfxLoader,
