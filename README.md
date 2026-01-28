@@ -300,7 +300,11 @@ All records use `src/neptune_exporter/model.py::SCHEMA`:
   - Files are uploaded with type-aware previews (images via `Image`, text via `Text`, others via `Artifact`) in manageable chunks.
   - String series (logs) are uploaded as two Text artifacts: `logs/stdout` and `logs/stderr` (and also printed to the console during load).
   - Supports decimal steps natively (no `--step-multiplier` needed). Histograms are logged by step.
-  - Skips already-loaded runs by checking **local cache file** (`.pluto_upload_cache.txt` in current directory or `NEPTUNE_EXPORTER_PLUTO_BASE_DIR`). Cache stores `project_id::run_name` keys. Delete this file or run from a different directory to re-upload the same runs. The loader does **not** check the Pluto backend for existing runs.
+  - Skips already-loaded runs by checking a **local cache file**:
+    - `.pluto_upload_cache.txt` in current directory or `NEPTUNE_EXPORTER_PLUTO_BASE_DIR`.
+    - Cache stores `project_id::run_name` keys.
+    - Delete this file or run from a different directory to re-upload the same runs.
+    - The loader does **not** check the Pluto backend for existing runs.
 - If a target run with the same name already exists in the experiment or project, the loader skips uploading that run to avoid duplicates.
 
 ## Experiment/run mapping to targets
