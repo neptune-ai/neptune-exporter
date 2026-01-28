@@ -141,7 +141,7 @@ def _create_combined_parquet(files: dict, out_path: Path) -> Path:
             "attribute_path": "metrics/value_distribution",
             "step": Decimal(0),
             "timestamp": 0,
-            "histogram_value": [freq, bin_edges],   # <-- THIS
+            "histogram_value": [freq, bin_edges],  # <-- THIS
             "string_value": None,
             "float_value": None,
             "int_value": None,
@@ -153,7 +153,11 @@ def _create_combined_parquet(files: dict, out_path: Path) -> Path:
     )
 
     # File series: include both PNG and SVG previews
-    png_meta = {"path": files["png"].name, "size": files["png"].stat().st_size, "hash": ""}
+    png_meta = {
+        "path": files["png"].name,
+        "size": files["png"].stat().st_size,
+        "hash": "",
+    }
     rows.append(
         {
             "attribute_type": "file_series",
@@ -171,7 +175,11 @@ def _create_combined_parquet(files: dict, out_path: Path) -> Path:
         }
     )
 
-    svg_meta = {"path": files["svg"].name, "size": files["svg"].stat().st_size, "hash": ""}
+    svg_meta = {
+        "path": files["svg"].name,
+        "size": files["svg"].stat().st_size,
+        "hash": "",
+    }
     rows.append(
         {
             "attribute_type": "file_series",
@@ -311,7 +319,7 @@ def test_pluto_loader_combined(tmp_path, caplog):
         caplog.set_level("INFO")
 
         try:
-            import pluto  # type: ignore
+            pass  # type: ignore
         except Exception as e:
             pytest.skip(f"Pluto SDK not installed for live upload: {e}")
 
@@ -350,7 +358,9 @@ def test_pluto_loader_combined(tmp_path, caplog):
             experiment_id=experiment_id,
         )
         print(f"find_run returned: {found}")
-        assert found is not None, "Expected run to be detected as already loaded via cache"
+        assert found is not None, (
+            "Expected run to be detected as already loaded via cache"
+        )
 
         run_id_2 = loader2.create_run(
             project_id=ProjectId(project),
@@ -360,7 +370,9 @@ def test_pluto_loader_combined(tmp_path, caplog):
         print(f"Pass 2 create_run returned: {run_id_2}")
 
         # On cache hit, your create_run returns TargetRunId(run_name)
-        assert str(run_id_2) == run_name, f"Expected cache-hit run_id to equal run_name, got {run_id_2}"
+        assert str(run_id_2) == run_name, (
+            f"Expected cache-hit run_id to equal run_name, got {run_id_2}"
+        )
 
         loader2.upload_run_data(
             run_data=run_table_generator(parquet_path),
@@ -409,7 +421,6 @@ def test_pluto_loader_combined(tmp_path, caplog):
                 assert len(edges) == len(freq) + 1
             self.data = data
 
-
     class _FakeOp:
         def __init__(self):
             self.update_config_calls = 0
@@ -451,7 +462,9 @@ def test_pluto_loader_combined(tmp_path, caplog):
                 # Treat as a single chunk upload
                 self.file_chunks += 1
                 # Count text artifacts separately
-                text_count = sum(1 for v in payload.values() if isinstance(v, _FakeText))
+                text_count = sum(
+                    1 for v in payload.values() if isinstance(v, _FakeText)
+                )
                 self.text_artifacts += text_count
                 self._logs.append(("files", list(payload.keys())))
                 return
@@ -511,10 +524,16 @@ def test_pluto_loader_combined(tmp_path, caplog):
 
     # Assertions (match printed expectations) with explicit prints before each check
     print(f"Asserting update_config calls == 1 (actual: {op.update_config_calls})")
-    assert op.update_config_calls == 1, f"expected 1 update_config call, got {op.update_config_calls}"
+    assert op.update_config_calls == 1, (
+        f"expected 1 update_config call, got {op.update_config_calls}"
+    )
 
-    print(f"Asserting metrics calls == {expected_metric_calls} (actual: {op.metrics_calls})")
-    assert op.metrics_calls == expected_metric_calls, f"expected {expected_metric_calls} metrics log calls, got {op.metrics_calls}"
+    print(
+        f"Asserting metrics calls == {expected_metric_calls} (actual: {op.metrics_calls})"
+    )
+    assert op.metrics_calls == expected_metric_calls, (
+        f"expected {expected_metric_calls} metrics log calls, got {op.metrics_calls}"
+    )
 
     print(f"Asserting histogram calls == 1 (actual: {op.hist_calls})")
     assert op.hist_calls == 1, f"expected 1 histogram log call, got {op.hist_calls}"
