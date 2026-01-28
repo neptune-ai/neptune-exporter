@@ -239,7 +239,6 @@ class PlutoLoader(DataLoader):
             return TargetRunId(run_name)
 
         tags = ["import:neptune", f"import_project:{project_id}"]
-        pluto_project = str(experiment_id) if experiment_id else str(project_id)
 
         # Use Neptune's experiment name (sys/name) as the Pluto display name if available,
         # falling back to the custom_run_id passed as run_name
