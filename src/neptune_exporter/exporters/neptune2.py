@@ -13,7 +13,7 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
-from concurrent.futures import ThreadPoolExecutor, as_completed
+from concurrent.futures import ThreadPoolExecutor, as_completed, wait, FIRST_COMPLETED
 from decimal import Decimal
 from typing import cast
 from neptune.attributes.attribute import Attribute
@@ -22,10 +22,11 @@ from neptune.attributes.series.fetchable_series import FetchableSeries
 import pandas as pd
 import pyarrow as pa
 from pathlib import Path
-from typing import Any, Generator, Optional, Sequence
+from typing import Any, Callable, Generator, Optional, Sequence
 import re
 import logging
 import json
+import queue
 
 import neptune
 import neptune.exceptions
@@ -84,6 +85,7 @@ class Neptune2Exporter(NeptuneExporter):
         self._api_token = api_token
         self._quantize_base = Decimal("1.000000")
         self._executor = ThreadPoolExecutor(max_workers=max_workers)
+        self._max_workers = max_workers
         self._logger = logging.getLogger(__name__)
         self._show_client_logs = show_client_logs
         self._initialize_client(show_client_logs=show_client_logs)
@@ -134,7 +136,6 @@ class Neptune2Exporter(NeptuneExporter):
         attributes: None | str | Sequence[str],
     ) -> Generator[pa.RecordBatch, None, None]:
         """Download parameters from Neptune runs."""
-        # Submit all run processing tasks to the executor
         future_to_run_id = {
             self._executor.submit(
                 self._process_run_parameters, project_id, run_id, attributes
@@ -271,78 +272,21 @@ class Neptune2Exporter(NeptuneExporter):
         attributes: None | str | Sequence[str],
     ) -> Generator[pa.RecordBatch, None, None]:
         """Download metrics from Neptune runs."""
-        # Submit all run processing tasks to the executor
-        future_to_run_id = {
-            self._executor.submit(
-                self._process_run_metrics, project_id, run_id, attributes
-            ): run_id
-            for run_id in run_ids
-        }
-
-        # Yield results as they complete
-        for future in as_completed(future_to_run_id):
-            run_id = future_to_run_id[future]
+        for run_id, data in self._run_attribute_workers(
+            project_id,
+            run_ids,
+            attributes,
+            _METRIC_TYPES,
+            self._metric_worker,
+        ):
+            if not data:
+                continue
             try:
-                result = future.result()
-                if result is not None:
-                    yield result
+                converted_df = self._convert_metrics_to_schema(data, project_id)
+                if converted_df is not None:
+                    yield pa.RecordBatch.from_pandas(converted_df, schema=model.SCHEMA)
             except Exception as e:
                 self._handle_run_exception(project_id, run_id, e)
-
-    def _process_run_metrics(
-        self,
-        project_id: ProjectId,
-        run_id: SourceRunId,
-        attributes: None | str | Sequence[str],
-    ) -> Optional[pa.RecordBatch]:
-        """Process metrics for a single run."""
-        all_data_dfs: list[pd.DataFrame] = []
-
-        with neptune.init_run(
-            api_token=self._api_token,
-            project=project_id,
-            with_id=run_id,
-            mode="read-only",
-        ) as run:
-            structure = run.get_structure()
-
-            attribute_path, attribute_type = None, None
-            for attribute in self._iterate_attributes(structure):
-                attribute_path, attribute_type = None, None
-                try:
-                    attribute_path = "/".join(attribute._path)
-
-                    # Filter by attribute path if attributes filter is provided
-                    if not self._should_include_attribute(attribute_path, attributes):
-                        continue
-
-                    attribute_type = self._get_attribute_type(attribute)
-                    if attribute_type not in _METRIC_TYPES:
-                        continue
-
-                    series_attribute = cast(FetchableSeries, attribute)
-                    series_df = series_attribute.fetch_values(
-                        progress_bar=None if self._show_client_logs else False
-                    )
-
-                    series_df["run_id"] = run_id
-                    series_df["attribute_path"] = attribute_path
-                    series_df["attribute_type"] = attribute_type
-
-                    all_data_dfs.append(series_df)
-                except Exception as e:
-                    self._handle_attribute_exception(
-                        project_id, run_id, attribute_path, attribute_type, e
-                    )
-
-        if not all_data_dfs:
-            return None
-
-        converted_df = self._convert_metrics_to_schema(all_data_dfs, project_id)
-        if converted_df is None:
-            return None
-
-        return pa.RecordBatch.from_pandas(converted_df, schema=model.SCHEMA)
 
     def _convert_metrics_to_schema(
         self, all_data_dfs: list[pd.DataFrame], project_id: ProjectId
@@ -384,78 +328,21 @@ class Neptune2Exporter(NeptuneExporter):
         attributes: None | str | Sequence[str],
     ) -> Generator[pa.RecordBatch, None, None]:
         """Download series data from Neptune runs."""
-        # Submit all run processing tasks to the executor
-        future_to_run_id = {
-            self._executor.submit(
-                self._process_run_series, project_id, run_id, attributes
-            ): run_id
-            for run_id in run_ids
-        }
-
-        # Yield results as they complete
-        for future in as_completed(future_to_run_id):
-            run_id = future_to_run_id[future]
+        for run_id, data in self._run_attribute_workers(
+            project_id,
+            run_ids,
+            attributes,
+            _SERIES_TYPES,
+            self._series_worker,
+        ):
+            if not data:
+                continue
             try:
-                result = future.result()
-                if result is not None:
-                    yield result
+                converted_df = self._convert_series_to_schema(data, project_id)
+                if converted_df is not None:
+                    yield pa.RecordBatch.from_pandas(converted_df, schema=model.SCHEMA)
             except Exception as e:
                 self._handle_run_exception(project_id, run_id, e)
-
-    def _process_run_series(
-        self,
-        project_id: ProjectId,
-        run_id: SourceRunId,
-        attributes: None | str | Sequence[str],
-    ) -> Optional[pa.RecordBatch]:
-        """Process series data for a single run."""
-        all_data_dfs: list[pd.DataFrame] = []
-
-        with neptune.init_run(
-            api_token=self._api_token,
-            project=project_id,
-            with_id=run_id,
-            mode="read-only",
-        ) as run:
-            structure = run.get_structure()
-
-            attribute_path, attribute_type = None, None
-            for attribute in self._iterate_attributes(structure):
-                attribute_path, attribute_type = None, None
-                try:
-                    attribute_path = "/".join(attribute._path)
-
-                    # Filter by attribute path if attributes filter is provided
-                    if not self._should_include_attribute(attribute_path, attributes):
-                        continue
-
-                    attribute_type = self._get_attribute_type(attribute)
-                    if attribute_type not in _SERIES_TYPES:
-                        continue
-
-                    series_attribute = cast(FetchableSeries, attribute)
-                    series_df = series_attribute.fetch_values(
-                        progress_bar=None if self._show_client_logs else False
-                    )
-
-                    series_df["run_id"] = run_id
-                    series_df["attribute_path"] = attribute_path
-                    series_df["attribute_type"] = attribute_type
-
-                    all_data_dfs.append(series_df)
-                except Exception as e:
-                    self._handle_attribute_exception(
-                        project_id, run_id, attribute_path, attribute_type, e
-                    )
-
-        if not all_data_dfs:
-            return None
-
-        converted_df = self._convert_series_to_schema(all_data_dfs, project_id)
-        if converted_df is None:
-            return None
-
-        return pa.RecordBatch.from_pandas(converted_df, schema=model.SCHEMA)
 
     def _convert_series_to_schema(
         self, all_data_dfs: list[pd.DataFrame], project_id: ProjectId
@@ -501,170 +388,34 @@ class Neptune2Exporter(NeptuneExporter):
         destination = destination.resolve()
         destination.mkdir(parents=True, exist_ok=True)
 
-        # Submit all run processing tasks to the executor
-        future_to_run_id = {
-            self._executor.submit(
-                self._process_run_files, project_id, run_id, attributes, destination
-            ): run_id
-            for run_id in run_ids
-        }
+        def file_worker(project_id, run_id, attribute_queue):
+            return self._file_worker(
+                project_id,
+                run_id,
+                attribute_queue,
+                destination=destination,
+            )
 
-        # Yield results as they complete
-        for future in as_completed(future_to_run_id):
-            run_id = future_to_run_id[future]
+        for run_id, data in self._run_attribute_workers(
+            project_id,
+            run_ids,
+            attributes,
+            (
+                *_FILE_TYPES,
+                *_ARTIFACT_TYPES,
+                *_FILE_SERIES_TYPES,
+                *_FILE_SET_TYPES,
+            ),
+            file_worker,
+        ):
+            if not data:
+                continue
             try:
-                result = future.result()
-                if result is not None:
-                    yield result
+                converted_df = self._convert_files_to_schema(data, project_id)
+                if converted_df is not None:
+                    yield pa.RecordBatch.from_pandas(converted_df, schema=model.SCHEMA)
             except Exception as e:
                 self._handle_run_exception(project_id, run_id, e)
-
-    def _process_run_files(
-        self,
-        project_id: ProjectId,
-        run_id: SourceRunId,
-        attributes: None | str | Sequence[str],
-        destination: Path,
-    ) -> Optional[pa.RecordBatch]:
-        """Process files for a single run."""
-        all_data_dfs: list[dict[str, Any]] = []
-
-        with neptune.init_run(
-            api_token=self._api_token,
-            project=project_id,
-            with_id=run_id,
-            mode="read-only",
-        ) as run:
-            structure = run.get_structure()
-
-            attribute_path, attribute_type = None, None
-            for attribute in self._iterate_attributes(structure):
-                attribute_path, attribute_type = None, None
-                try:
-                    attribute_path = "/".join(attribute._path)
-
-                    # Filter by attribute path if attributes filter is provided
-                    if not self._should_include_attribute(attribute_path, attributes):
-                        continue
-
-                    attribute_type = self._get_attribute_type(attribute)
-                    if attribute_type in _FILE_TYPES:
-                        file_attribute = cast(na.File, attribute)
-
-                        file_path = destination / project_id / run_id / attribute_path
-                        file_path.parent.mkdir(parents=True, exist_ok=True)
-                        file_attribute.download(
-                            str(file_path),
-                            progress_bar=None if self._show_client_logs else False,
-                        )
-
-                        all_data_dfs.append(
-                            {
-                                "run_id": run_id,
-                                "step": None,
-                                "attribute_path": attribute_path,
-                                "attribute_type": attribute_type,
-                                "file_value": {
-                                    "path": str(file_path.relative_to(destination))
-                                },
-                            }
-                        )
-                    elif attribute_type in _ARTIFACT_TYPES:
-                        artifact_attribute = cast(na.Artifact, attribute)
-
-                        artifact_path = (
-                            destination / project_id / run_id / attribute_path
-                        )
-                        artifact_path.mkdir(parents=True, exist_ok=True)
-                        artifact_files_list = artifact_attribute.fetch_files_list()
-
-                        # Serialize the artifact file list to JSON
-                        files_list_data_path = artifact_path / "files_list.json"
-                        serialized_data = [
-                            file_data.to_dto() for file_data in artifact_files_list
-                        ]
-                        with open(files_list_data_path, "w") as opened:
-                            json.dump(serialized_data, opened)
-
-                        all_data_dfs.append(
-                            {
-                                "run_id": run_id,
-                                "step": None,
-                                "attribute_path": attribute_path,
-                                "attribute_type": attribute_type,
-                                "file_value": {
-                                    "path": str(
-                                        files_list_data_path.relative_to(destination)
-                                    )
-                                },
-                            }
-                        )
-                    elif attribute_type in _FILE_SERIES_TYPES:
-                        file_series_attribute = cast(na.FileSeries, attribute)
-
-                        file_series_path = (
-                            destination / project_id / run_id / attribute_path
-                        )
-                        file_series_attribute.download(
-                            str(file_series_path),
-                            progress_bar=None if self._show_client_logs else False,
-                        )
-                        file_paths = [
-                            p for p in file_series_path.iterdir() if p.is_file()
-                        ]
-
-                        all_data_dfs.extend(
-                            [
-                                {
-                                    "run_id": run_id,
-                                    "step": Decimal(file_path.stem).quantize(
-                                        self._quantize_base
-                                    ),
-                                    "attribute_path": attribute_path,
-                                    "attribute_type": attribute_type,
-                                    "file_value": {
-                                        "path": str(file_path.relative_to(destination))
-                                    },
-                                }
-                                for file_path in file_paths
-                            ]
-                        )
-                    elif attribute_type in _FILE_SET_TYPES:
-                        file_set_attribute = cast(na.FileSet, attribute)
-
-                        file_set_path = (
-                            destination / project_id / run_id / attribute_path
-                        )
-                        file_set_path.mkdir(parents=True, exist_ok=True)
-                        file_set_attribute.download(
-                            str(file_set_path),
-                            progress_bar=None if self._show_client_logs else False,
-                        )
-
-                        all_data_dfs.append(
-                            {
-                                "run_id": run_id,
-                                "step": None,
-                                "attribute_path": attribute_path,
-                                "attribute_type": attribute_type,
-                                "file_value": {
-                                    "path": str(file_set_path.relative_to(destination))
-                                },
-                            }
-                        )
-                except Exception as e:
-                    self._handle_attribute_exception(
-                        project_id, run_id, attribute_path, attribute_type, e
-                    )
-
-        if not all_data_dfs:
-            return None
-
-        converted_df = self._convert_files_to_schema(all_data_dfs, project_id)
-        if converted_df is None:
-            return None
-
-        return pa.RecordBatch.from_pandas(converted_df, schema=model.SCHEMA)
 
     def _convert_files_to_schema(
         self, all_data_dfs: list[dict[str, Any]], project_id: ProjectId
@@ -693,6 +444,377 @@ class Neptune2Exporter(NeptuneExporter):
             }
         )
         return result_df
+
+    def _run_attribute_workers(
+        self,
+        project_id: ProjectId,
+        run_ids: list[SourceRunId],
+        attributes: None | str | Sequence[str],
+        allowed_types: Sequence[str],
+        worker_fn: Callable[
+            [ProjectId, SourceRunId, "queue.Queue[tuple[str, str]]"],
+            list[Any],
+        ],
+    ) -> Generator[tuple[SourceRunId, list[Any]], None, None]:
+        if not run_ids:
+            return
+
+        run_iter = iter(run_ids)
+        listing_parallelism = min(len(run_ids), max(1, self._max_workers // 2))
+
+        listing_futures: dict = {}
+        worker_futures: dict = {}
+        pending_runs: dict[SourceRunId, tuple["queue.Queue[tuple[str, str]]", int]] = {}
+        run_data: dict[SourceRunId, list[Any]] = {}
+        pending_counts: dict[SourceRunId, int] = {}
+
+        def submit_listing(run_id: SourceRunId) -> None:
+            future = self._executor.submit(
+                self._list_run_attributes,
+                project_id,
+                run_id,
+                attributes,
+                allowed_types,
+            )
+            listing_futures[future] = run_id
+
+        for _ in range(listing_parallelism):
+            try:
+                submit_listing(next(run_iter))
+            except StopIteration:
+                break
+
+        def select_run_for_worker() -> Optional[SourceRunId]:
+            for run_id, (attr_queue, _) in pending_runs.items():
+                if pending_counts[run_id] == 0 and attr_queue.qsize() > 0:
+                    return run_id
+            best_run_id = None
+            best_score = -1.0
+            for run_id, (attr_queue, _) in pending_runs.items():
+                remaining = attr_queue.qsize()
+                if remaining <= 0:
+                    continue
+                assigned = pending_counts[run_id]
+                if assigned == 0:
+                    continue
+                if remaining <= assigned:
+                    continue
+                score = remaining / assigned
+                if score > best_score:
+                    best_score = score
+                    best_run_id = run_id
+            return best_run_id
+
+        while listing_futures or worker_futures or pending_runs:
+            while len(worker_futures) < self._max_workers and pending_runs:
+                run_id = select_run_for_worker()
+                if run_id is None:
+                    break
+                attribute_queue, _ = pending_runs[run_id]
+                if attribute_queue.qsize() <= pending_counts[run_id]:
+                    break
+                future = self._executor.submit(
+                    worker_fn, project_id, run_id, attribute_queue
+                )
+                worker_futures[future] = run_id
+                pending_counts[run_id] += 1
+
+            futures = list(listing_futures.keys()) + list(worker_futures.keys())
+            if not futures:
+                break
+            done, _ = wait(futures, return_when=FIRST_COMPLETED)
+            for future in done:
+                if future in listing_futures:
+                    run_id = listing_futures.pop(future)
+                    try:
+                        attribute_list = future.result()
+                    except Exception as e:
+                        self._handle_run_exception(project_id, run_id, e)
+                        attribute_list = []
+                    if attribute_list:
+                        attribute_queue = queue.Queue()
+                        for item in attribute_list:
+                            attribute_queue.put(item)
+                        pending_runs[run_id] = (
+                            attribute_queue,
+                            len(attribute_list),
+                        )
+                        run_data[run_id] = []
+                        pending_counts[run_id] = 0
+                    try:
+                        next_run_id = next(run_iter)
+                    except StopIteration:
+                        next_run_id = None
+                    if next_run_id is not None:
+                        submit_listing(next_run_id)
+                else:
+                    run_id = worker_futures.pop(future)
+                    try:
+                        result = future.result()
+                        if result:
+                            run_data[run_id].extend(result)
+                    except Exception as e:
+                        self._handle_run_exception(project_id, run_id, e)
+                    pending_counts[run_id] -= 1
+                    if pending_counts[run_id] == 0:
+                        data = run_data.pop(run_id, [])
+                        pending_runs.pop(run_id, None)
+                        pending_counts.pop(run_id, None)
+                        yield run_id, data
+
+    def _metric_worker(
+        self,
+        project_id: ProjectId,
+        run_id: SourceRunId,
+        attribute_queue: "queue.Queue[tuple[str, str]]",
+    ) -> list[pd.DataFrame]:
+        data: list[pd.DataFrame] = []
+        try:
+            with neptune.init_run(
+                api_token=self._api_token,
+                project=project_id,
+                with_id=run_id,
+                mode="read-only",
+            ) as run:
+                while True:
+                    try:
+                        attribute_path, attribute_type = attribute_queue.get_nowait()
+                    except queue.Empty:
+                        break
+                    try:
+                        attribute = run.get_attribute(attribute_path)
+                        if attribute is None:
+                            continue
+                        series_attribute = cast(FetchableSeries, attribute)
+                        series_df = series_attribute.fetch_values(
+                            progress_bar=None if self._show_client_logs else False
+                        )
+                        if series_df.empty:
+                            continue
+                        series_df["run_id"] = run_id
+                        series_df["attribute_path"] = attribute_path
+                        series_df["attribute_type"] = attribute_type
+                        data.append(series_df)
+                    except Exception as e:
+                        self._handle_attribute_exception(
+                            project_id, run_id, attribute_path, attribute_type, e
+                        )
+        except Exception as e:
+            self._handle_run_exception(project_id, run_id, e)
+        return data
+
+    def _series_worker(
+        self,
+        project_id: ProjectId,
+        run_id: SourceRunId,
+        attribute_queue: "queue.Queue[tuple[str, str]]",
+    ) -> list[pd.DataFrame]:
+        data: list[pd.DataFrame] = []
+        try:
+            with neptune.init_run(
+                api_token=self._api_token,
+                project=project_id,
+                with_id=run_id,
+                mode="read-only",
+            ) as run:
+                while True:
+                    try:
+                        attribute_path, attribute_type = attribute_queue.get_nowait()
+                    except queue.Empty:
+                        break
+                    try:
+                        attribute = run.get_attribute(attribute_path)
+                        if attribute is None:
+                            continue
+                        series_attribute = cast(FetchableSeries, attribute)
+                        series_df = series_attribute.fetch_values(
+                            progress_bar=None if self._show_client_logs else False
+                        )
+                        if series_df.empty:
+                            continue
+                        series_df["run_id"] = run_id
+                        series_df["attribute_path"] = attribute_path
+                        series_df["attribute_type"] = attribute_type
+                        data.append(series_df)
+                    except Exception as e:
+                        self._handle_attribute_exception(
+                            project_id, run_id, attribute_path, attribute_type, e
+                        )
+        except Exception as e:
+            self._handle_run_exception(project_id, run_id, e)
+        return data
+
+    def _file_worker(
+        self,
+        project_id: ProjectId,
+        run_id: SourceRunId,
+        attribute_queue: "queue.Queue[tuple[str, str]]",
+        *,
+        destination: Path,
+    ) -> list[dict[str, Any]]:
+        data: list[dict[str, Any]] = []
+        try:
+            with neptune.init_run(
+                api_token=self._api_token,
+                project=project_id,
+                with_id=run_id,
+                mode="read-only",
+            ) as run:
+                while True:
+                    try:
+                        attribute_path, attribute_type = attribute_queue.get_nowait()
+                    except queue.Empty:
+                        break
+                    try:
+                        attribute = run.get_attribute(attribute_path)
+                        if attribute is None:
+                            continue
+
+                        if attribute_type in _FILE_TYPES:
+                            file_attribute = cast(na.File, attribute)
+                            file_path = (
+                                destination / project_id / run_id / attribute_path
+                            )
+                            file_path.parent.mkdir(parents=True, exist_ok=True)
+                            file_attribute.download(
+                                str(file_path),
+                                progress_bar=(
+                                    None if self._show_client_logs else False
+                                ),
+                            )
+                            data.append(
+                                {
+                                    "run_id": run_id,
+                                    "step": None,
+                                    "attribute_path": attribute_path,
+                                    "attribute_type": attribute_type,
+                                    "file_value": {
+                                        "path": str(file_path.relative_to(destination))
+                                    },
+                                }
+                            )
+                        elif attribute_type in _ARTIFACT_TYPES:
+                            artifact_attribute = cast(na.Artifact, attribute)
+                            artifact_path = (
+                                destination / project_id / run_id / attribute_path
+                            )
+                            artifact_path.mkdir(parents=True, exist_ok=True)
+                            artifact_files_list = artifact_attribute.fetch_files_list()
+                            files_list_data_path = artifact_path / "files_list.json"
+                            serialized_data = [
+                                file_data.to_dto() for file_data in artifact_files_list
+                            ]
+                            with open(files_list_data_path, "w") as opened:
+                                json.dump(serialized_data, opened)
+                            data.append(
+                                {
+                                    "run_id": run_id,
+                                    "step": None,
+                                    "attribute_path": attribute_path,
+                                    "attribute_type": attribute_type,
+                                    "file_value": {
+                                        "path": str(
+                                            files_list_data_path.relative_to(
+                                                destination
+                                            )
+                                        )
+                                    },
+                                }
+                            )
+                        elif attribute_type in _FILE_SERIES_TYPES:
+                            file_series_attribute = cast(na.FileSeries, attribute)
+                            file_series_path = (
+                                destination / project_id / run_id / attribute_path
+                            )
+                            file_series_attribute.download(
+                                str(file_series_path),
+                                progress_bar=(
+                                    None if self._show_client_logs else False
+                                ),
+                            )
+                            file_paths = [
+                                p for p in file_series_path.iterdir() if p.is_file()
+                            ]
+                            data.extend(
+                                [
+                                    {
+                                        "run_id": run_id,
+                                        "step": Decimal(file_path.stem).quantize(
+                                            self._quantize_base
+                                        ),
+                                        "attribute_path": attribute_path,
+                                        "attribute_type": attribute_type,
+                                        "file_value": {
+                                            "path": str(
+                                                file_path.relative_to(destination)
+                                            )
+                                        },
+                                    }
+                                    for file_path in file_paths
+                                ]
+                            )
+                        elif attribute_type in _FILE_SET_TYPES:
+                            file_set_attribute = cast(na.FileSet, attribute)
+                            file_set_path = (
+                                destination / project_id / run_id / attribute_path
+                            )
+                            file_set_path.mkdir(parents=True, exist_ok=True)
+                            file_set_attribute.download(
+                                str(file_set_path),
+                                progress_bar=(
+                                    None if self._show_client_logs else False
+                                ),
+                            )
+                            data.append(
+                                {
+                                    "run_id": run_id,
+                                    "step": None,
+                                    "attribute_path": attribute_path,
+                                    "attribute_type": attribute_type,
+                                    "file_value": {
+                                        "path": str(
+                                            file_set_path.relative_to(destination)
+                                        )
+                                    },
+                                }
+                            )
+                    except Exception as e:
+                        self._handle_attribute_exception(
+                            project_id, run_id, attribute_path, attribute_type, e
+                        )
+        except Exception as e:
+            self._handle_run_exception(project_id, run_id, e)
+        return data
+
+    def _list_run_attributes(
+        self,
+        project_id: ProjectId,
+        run_id: SourceRunId,
+        attributes: None | str | Sequence[str],
+        allowed_types: Sequence[str],
+    ) -> list[tuple[str, str]]:
+        try:
+            with neptune.init_run(
+                api_token=self._api_token,
+                project=project_id,
+                with_id=run_id,
+                mode="read-only",
+            ) as run:
+                structure = run.get_structure()
+        except Exception as e:
+            self._handle_run_exception(project_id, run_id, e)
+            return []
+
+        attribute_list: list[tuple[str, str]] = []
+        for attribute in self._iterate_attributes(structure):
+            attribute_path = "/".join(attribute._path)
+            if not self._should_include_attribute(attribute_path, attributes):
+                continue
+            attribute_type = self._get_attribute_type(attribute)
+            if attribute_type not in allowed_types:
+                continue
+            attribute_list.append((attribute_path, attribute_type))
+        return attribute_list
 
     def _iterate_attributes(
         self, structure: dict[str, Any]
