@@ -6,9 +6,9 @@ Neptune Exporter is a CLI tool to move Neptune experiments (version `2.x` or `3.
 - Lightning AI
 - Minfx
 - MLflow
+- Pluto
 - Weights & Biases
 - ZenML
-- Pluto
 
 ## What it does
 
@@ -58,9 +58,9 @@ Available optional dependencies:
 - `litlogger` - for Lightning AI LitLogger loader
 - `minfx` - for Minfx loader
 - `mlflow` - for MLflow loader
+- `pluto` - for Pluto loader
 - `wandb` - for Weights & Biases loader
 - `zenml` - for ZenML loader
-- `pluto` - for Pluto loader
 
 Run the CLI:
 
@@ -131,10 +131,40 @@ uv run neptune-exporter export -p "workspace/proj" --exporter neptune2 --runs-qu
 ### 3. (optional) Load into a target:
 
   ```bash
-  # MLflow
+  # Comet
   uv run neptune-exporter load \
-    --loader mlflow \
-    --mlflow-tracking-uri "http://localhost:5000" \
+    --loader comet \
+    --comet-workspace "my-workspace" \
+    --comet-api-key "my-comet-api-key" \
+    --data-path ./exports/data \
+    --files-path ./exports/files
+
+  # LitLogger
+  uv run lightning login && \
+  uv run neptune-exporter load \
+    --loader litlogger \
+    --data-path ./exports/data \
+    --files-path ./exports/files
+
+  # Minfx
+  uv run neptune-exporter load \
+    --loader minfx \
+    --minfx-project "target-workspace/target-project" \
+    --minfx-api-token "$MINFX_API_TOKEN" \
+    --data-path ./exports/data \
+    --files-path ./exports/files
+
+  # MLflow
+    uv run neptune-exporter load \
+      --loader mlflow \
+      --mlflow-tracking-uri "http://localhost:5000" \
+      --data-path ./exports/data \
+      --files-path ./exports/files
+
+  # Pluto
+  uv run neptune-exporter load \
+    --loader pluto \
+    --pluto-api-key "$PLUTO_API_KEY" \
     --data-path ./exports/data \
     --files-path ./exports/files
 
@@ -149,43 +179,6 @@ uv run neptune-exporter export -p "workspace/proj" --exporter neptune2 --runs-qu
   # ZenML
   uv run neptune-exporter load \
     --loader zenml \
-    --data-path ./exports/data \
-    --files-path ./exports/files
-
-  # Comet
-  uv run neptune-exporter load \
-    --loader comet \
-    --comet-workspace "my-workspace" \
-    --comet-api-key "my-comet-api-key" \
-    --data-path ./exports/data \
-    --files-path ./exports/files
-
-  # LitLogger (creates a teamspace per Neptune project)
-  uv run lightning login && \
-  uv run neptune-exporter load \
-    --loader litlogger \
-    --data-path ./exports/data \
-    --files-path ./exports/files
-
-  # LitLogger with specific owner (organization)
-  uv run neptune-exporter load \
-    --loader litlogger \
-    --litlogger-owner my-org \
-    --data-path ./exports/data \
-    --files-path ./exports/files
-
-  # Minfx
-  uv run neptune-exporter load \
-    --loader minfx \
-    --minfx-project "target-workspace/target-project" \
-    --minfx-api-token "$MINFX_API_TOKEN" \
-    --data-path ./exports/data \
-    --files-path ./exports/files
-
-  # Pluto
-  uv run neptune-exporter load \
-    --loader pluto \
-    --pluto-api-key "$PLUTO_API_KEY" \
     --data-path ./exports/data \
     --files-path ./exports/files
   ```
@@ -261,20 +254,6 @@ All records use `src/neptune_exporter/model.py::SCHEMA`:
 ## Loading flow
 
 - Data is streamed run-by-run from parquet, using the same `--step-multiplier` to turn decimal steps into integers. Keep the multiplier consistent across loads when your Neptune steps are floats.
-- **MLflow loader**:
-  - Experiments are named `<project_id>/<experiment_name>`, prefixed with `--name-prefix` if provided.
-  - Attribute paths are sanitized to MLflow’s key rules (alphanumeric + `_-. /`, max 250 chars).
-  - Metrics/series use the integer step. Files are uploaded as artifacts from `--files-path`.
-  - MLflow saves parentship/fork relationships as tags (no native forks).
-- **W&B loader**:
-  - Requires `--wandb-entity`. Project names derive from `project_id`, plus optional `--name-prefix`, sanitized.
-  - String series become W&B Tables, histograms use `wandb.Histogram`, files/file series become artifacts. Forked runs from Neptune `3.x` are handled best-effort (W&B has limited preview support).
-- **ZenML loader**:
-  - Requires `zenml login` to a ZenML server. Uses ZenML's Model Control Plane to store experiment data.
-  - Neptune projects become ZenML Models named `neptune-export-<project-slug>` (plus optional `--name-prefix`).
-  - Neptune runs become ZenML Model Versions. Scalar attributes are logged as nested metadata for dashboard card organization.
-  - Float series are aggregated into summary statistics (min/max/final/count) since ZenML doesn't have native time-series visualization.
-  - Files and artifacts are uploaded via `save_artifact()` and linked to Model Versions.
 - **Comet loader**:
   - Requires `--comet-workspace`. Project names derive from `project_id`, plus optional `--name-prefix`, sanitized.
   - Attribute names are sanitized to Comet format (alphanumeric + underscore, must start with letter/underscore). Metrics/series use the integer step. Files are uploaded as assets/images from `--files-path`. String series become text assets, histograms use `log_histogram_3d`.
@@ -293,6 +272,11 @@ All records use `src/neptune_exporter/model.py::SCHEMA`:
   - If the source data contains fork relationships, they are stored as metadata in `import/forking/parent` and `import/forking/step`.
   - Recreates artifacts using Neptune's internal artifact registration API. Files are uploaded with auto-detected extensions for proper UI rendering.
   - Skips histogram series (not supported in Neptune v2 API) and auto-generated source code diffs.
+- **MLflow loader**:
+  - Experiments are named `<project_id>/<experiment_name>`, prefixed with `--name-prefix` if provided.
+  - Attribute paths are sanitized to MLflow’s key rules (alphanumeric + `_-. /`, max 250 chars).
+  - Metrics/series use the integer step. Files are uploaded as artifacts from `--files-path`.
+  - MLflow saves parentship/fork relationships as tags (no native forks).
 - **Pluto loader**:
   - Requires `pluto-ml` SDK installed and authentication via `--pluto-api-key` option or `PLUTO_API_KEY` environment variable. Optionally use `--pluto-host` for self-hosted instances.
   - Handles large runs via streaming batches and chunked uploads; knobs are configurable via environment variables (see above).
@@ -306,20 +290,18 @@ All records use `src/neptune_exporter/model.py::SCHEMA`:
     - Delete this file or run from a different directory to re-upload the same runs.
     - The loader does **not** check the Pluto backend for existing runs.
 - If a target run with the same name already exists in the experiment or project, the loader skips uploading that run to avoid duplicates.
+- **W&B loader**:
+  - Requires `--wandb-entity`. Project names derive from `project_id`, plus optional `--name-prefix`, sanitized.
+  - String series become W&B Tables, histograms use `wandb.Histogram`, files/file series become artifacts. Forked runs from Neptune `3.x` are handled best-effort (W&B has limited preview support).
+- **ZenML loader**:
+  - Requires `zenml login` to a ZenML server. Uses ZenML's Model Control Plane to store experiment data.
+  - Neptune projects become ZenML Models named `neptune-export-<project-slug>` (plus optional `--name-prefix`).
+  - Neptune runs become ZenML Model Versions. Scalar attributes are logged as nested metadata for dashboard card organization.
+  - Float series are aggregated into summary statistics (min/max/final/count) since ZenML doesn't have native time-series visualization.
+  - Files and artifacts are uploaded via `save_artifact()` and linked to Model Versions.
 
 ## Experiment/run mapping to targets
 
-- **MLflow:**
-  - Each unique `project_id` + `sys/name` pair becomes an MLflow experiment named `<project_id>/<sys/name>` (prefixed by `--name-prefix` if provided).
-  - Runs are created inside that experiment using Neptune `run_id` (or `custom_run_id` when present) as the run name. Fork relationships are ignored by MLflow.
-- **W&B:**
-  - Neptune `project_id` maps to the W&B project name (sanitized, plus optional `--name-prefix`).
-  - `sys/name` becomes the W&B group, so all runs with the same `sys/name` land in the same group.
-  - Runs are created with their Neptune `run_id` (or `custom_run_id`) as the run name. Forks from Neptune `3.x` are mapped best-effort via `fork_from`; behavior depends on W&B's fork support.
-- **ZenML:**
-  - Neptune `project_id` maps to a ZenML Model named `neptune-export-<org>-<project>` (plus optional `--name-prefix`).
-  - Neptune's `sys/name` (experiment name) is stored as metadata and tags rather than a separate entity, since ZenML's Model Control Plane doesn't have a direct experiment concept.
-  - Neptune runs become ZenML Model Versions, named after the Neptune `run_id` (or `custom_run_id`). Fork relationships are stored as metadata but not modeled natively.
 - **Comet:**
   - Neptune `project_id` maps to the Comet project name (sanitized, plus optional `--name-prefix`).
   - `sys/name` becomes the Comet experiment name.
@@ -333,57 +315,68 @@ All records use `src/neptune_exporter/model.py::SCHEMA`:
   - Neptune's `sys/name` (experiment name) becomes the run's `sys/name` in the target Neptune v2 instance.
   - Original `run_id` is stored in `import/original_run_id` (not `sys/custom_run_id`) to avoid polluting the system namespace.
   - Fork relationships are stored in `import/forking/parent` and `import/forking/step` as metadata (Neptune v2 doesn't support native forking via the API).
+- **MLflow:**
+  - Each unique `project_id` + `sys/name` pair becomes an MLflow experiment named `<project_id>/<sys/name>` (prefixed by `--name-prefix` if provided).
+  - Runs are created inside that experiment using Neptune `run_id` (or `custom_run_id` when present) as the run name. Fork relationships are ignored by MLflow.
 - **Pluto:**
   - Target project is specified via `NEPTUNE_EXPORTER_PLUTO_PROJECT_NAME` env var (e.g., `"workspace/project"`), otherwise uses Neptune `project_id` directly.
   - Neptune runs become Pluto Ops with `sys/name` (experiment name) as the Op name; if missing, falls back to `custom_run_id`/`run_id`.
   - Tags include `import:neptune` and `import_project:<project_id>` and Neptune tags are preserved. Fork relationships are not natively supported.
+- **W&B:**
+  - Neptune `project_id` maps to the W&B project name (sanitized, plus optional `--name-prefix`).
+  - `sys/name` becomes the W&B group, so all runs with the same `sys/name` land in the same group.
+  - Runs are created with their Neptune `run_id` (or `custom_run_id`) as the run name. Forks from Neptune `3.x` are mapped best-effort via `fork_from`; behavior depends on W&B's fork support.
+- **ZenML:**
+  - Neptune `project_id` maps to a ZenML Model named `neptune-export-<org>-<project>` (plus optional `--name-prefix`).
+  - Neptune's `sys/name` (experiment name) is stored as metadata and tags rather than a separate entity, since ZenML's Model Control Plane doesn't have a direct experiment concept.
+  - Neptune runs become ZenML Model Versions, named after the Neptune `run_id` (or `custom_run_id`). Fork relationships are stored as metadata but not modeled natively.
 
 ## Attribute/type mapping (detailed)
 
 - **Parameters** (`float`, `int`, `string`, `bool`, `datetime`, `string_set`):
-  - MLflow: logged as params (values stringified by the client).
-  - W&B: logged as config with native types (string_set → list).
-  - ZenML: logged as nested metadata with native types (datetime → ISO string, string_set → list); paths are split for dashboard cards.
   - Comet: logged as parameters with native types (string_set → list).
   - LitLogger: logged as experiment metadata (string key-value pairs, searchable/filterable in the UI).
   - Minfx: logged with native types (datetime → timestamp, string_set → StringSet). Preserves `sys/hostname`, `sys/tags`, and `sys/group_tags` from original data; other `sys/*` attributes are skipped as they're managed by Neptune.
+  - MLflow: logged as params (values stringified by the client).
   - Pluto: logged with native types (datetime → ISO string, string_set → list).
+  - W&B: logged as config with native types (string_set → list).
+  - ZenML: logged as nested metadata with native types (datetime → ISO string, string_set → list); paths are split for dashboard cards.
 - **Float series** (`float_series`):
   - MLflow/W&B/Comet/LitLogger: logged as metrics using the integer step (`--step-multiplier` applied). Timestamps are forwarded when present.
-  - ZenML: aggregated into summary statistics (min/max/final/count) stored as metadata, since the Model Control Plane doesn't have native time-series visualization.
   - Pluto: logged with decimal steps preserved. Large step datasets are handled efficiently to avoid memory issues.
+  - ZenML: aggregated into summary statistics (min/max/final/count) stored as metadata, since the Model Control Plane doesn't have native time-series visualization.
 - **String series** (`string_series`):
-  - MLflow: saved as artifacts (one text file per series).
-  - W&B: logged as a Table with columns `step`, `value`, `timestamp`.
-  - ZenML: not uploaded (skipped).
   - Comet: uploaded as text assets.
   - LitLogger: uploaded as text assets.
+  - MLflow: saved as artifacts (one text file per series).
   - Minfx: logged as StringSeries with steps preserved.
   - Pluto: collected and uploaded as Text artifacts.
-- **Histogram series** (`histogram_series`):
-  - MLflow: uploaded as artifacts containing the histogram payload.
-  - W&B: logged as `wandb.Histogram`.
+  - W&B: logged as a Table with columns `step`, `value`, `timestamp`.
   - ZenML: not uploaded (skipped).
+- **Histogram series** (`histogram_series`):
   - Comet: logged as `histogram_3d`.
   - LitLogger: uploaded as image containing a histogram plot and as artifacts containing the histogram payload.
   - Minfx: not uploaded (skipped - not supported in Neptune v2 API).
+  - MLflow: uploaded as artifacts containing the histogram payload.
   - Pluto: logged as histogram objects organized by step.
+  - W&B: logged as `wandb.Histogram`.
+  - ZenML: not uploaded (skipped).
 - **Files** (`file`) and **file series** (`file_series`):
   - Downloaded to `--files-path/<sanitized_project_id>/...` with relative paths stored in `file_value.path`.
-  - MLflow/W&B: uploaded as artifacts. File series include the step in the artifact name/path so steps remain distinguishable.
-  - ZenML: uploaded via `save_artifact()` and linked to Model Versions.
   - Comet: uploaded as assets. Comet detects images and uploads them as images.
   - LitLogger: uploaded as artifacts.
   - Minfx: uploaded with auto-detected file extensions (via magic bytes) for proper UI rendering.
+  - MLflow/W&B: uploaded as artifacts. File series include the step in the artifact name/path so steps remain distinguishable.
   - Pluto: uploaded with type-aware previews (images via `Image`, text via `Text`, others via `Artifact`). File series include `/step_{n}` suffix for `n>0`.
+  - ZenML: uploaded via `save_artifact()` and linked to Model Versions.
 - **Attribute names**:
-  - MLflow: sanitized to allowed chars (alphanumeric + `_-. /`), truncated at 250 chars.
-  - W&B: sanitized to allowed pattern (`^[_a-zA-Z][_a-zA-Z0-9]*$`); invalid chars become `_`, and names are forced to start with a letter or underscore.
-  - ZenML: sanitized to allowed chars (alphanumeric + `_-. /` and spaces), max 250 chars; paths are split into nested metadata for dashboard card organization.
   - Comet: sanitized to allowed pattern (`^[_a-zA-Z][_a-zA-Z0-9]*$`); invalid chars become `_`, and names are forced to start with a letter or underscore.
   - LitLogger: sanitized to allowed pattern (`^[a-zA-Z0-9_-]+$`); invalid chars become `_`. Experiment and teamspace names are truncated to 64 chars.
   - Minfx: Skips `sys/*` attributes except allowed ones (`sys/hostname`, `sys/tags`, `sys/group_tags`).
+  - MLflow: sanitized to allowed chars (alphanumeric + `_-. /`), truncated at 250 chars.
   - Pluto: attribute paths are preserved (invalid chars → `_`, max length 250 chars).
+  - W&B: sanitized to allowed pattern (`^[_a-zA-Z][_a-zA-Z0-9]*$`); invalid chars become `_`, and names are forced to start with a letter or underscore.
+  - ZenML: sanitized to allowed chars (alphanumeric + `_-. /` and spaces), max 250 chars; paths are split into nested metadata for dashboard card organization.
 
 For details on Neptune attribute types, see the [documentation](https://docs.neptune.ai/attribute_types).
 
