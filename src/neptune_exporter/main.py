@@ -339,6 +339,8 @@ def export(
                 logger,
                 "   Try adjusting your run filter or check if the project contains any runs.",
             )
+        else:
+            info_always(logger, "Export completed successfully!")
     except Exception:
         export_failed = True
         logger.error("Export failed", exc_info=True)
@@ -802,6 +804,7 @@ def load(
             ),
             runs=[SourceRunId(run_id) for run_id in runs_list] if runs_list else None,
         )
+        info_always(logger, f"{loader_name} loading completed successfully!")
     except Exception:
         load_failed = True
         logger.error(f"{loader_name} loading failed", exc_info=True)
