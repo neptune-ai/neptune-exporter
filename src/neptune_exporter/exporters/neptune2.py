@@ -213,7 +213,7 @@ class Neptune2Exporter(NeptuneExporter):
 
         if all_data:
             converted_df = self._convert_parameters_to_schema(all_data, project_id)
-            return pa.RecordBatch.from_pandas(converted_df, schema=model.SCHEMA)
+            return self._record_batch_from_pandas(converted_df)
         return None
 
     def _convert_parameters_to_schema(
@@ -265,6 +265,18 @@ class Neptune2Exporter(NeptuneExporter):
 
         return result_df
 
+    @staticmethod
+    def _record_batch_from_pandas(data: pd.DataFrame) -> pa.RecordBatch:
+        table = pa.Table.from_pandas(
+            data, schema=model.SCHEMA, preserve_index=False
+        ).combine_chunks()
+        if table.num_rows == 0:
+            return pa.RecordBatch.from_arrays(
+                [pa.array([], type=field.type) for field in model.SCHEMA],
+                schema=model.SCHEMA,
+            )
+        return table.to_batches()[0]
+
     def download_metrics(
         self,
         project_id: ProjectId,
@@ -284,7 +296,7 @@ class Neptune2Exporter(NeptuneExporter):
             try:
                 converted_df = self._convert_metrics_to_schema(data, project_id)
                 if converted_df is not None:
-                    yield pa.RecordBatch.from_pandas(converted_df, schema=model.SCHEMA)
+                    yield self._record_batch_from_pandas(converted_df)
             except Exception as e:
                 self._handle_run_exception(project_id, run_id, e)
 
@@ -340,7 +352,7 @@ class Neptune2Exporter(NeptuneExporter):
             try:
                 converted_df = self._convert_series_to_schema(data, project_id)
                 if converted_df is not None:
-                    yield pa.RecordBatch.from_pandas(converted_df, schema=model.SCHEMA)
+                    yield self._record_batch_from_pandas(converted_df)
             except Exception as e:
                 self._handle_run_exception(project_id, run_id, e)
 
@@ -413,7 +425,7 @@ class Neptune2Exporter(NeptuneExporter):
             try:
                 converted_df = self._convert_files_to_schema(data, project_id)
                 if converted_df is not None:
-                    yield pa.RecordBatch.from_pandas(converted_df, schema=model.SCHEMA)
+                    yield self._record_batch_from_pandas(converted_df)
             except Exception as e:
                 self._handle_run_exception(project_id, run_id, e)
 
