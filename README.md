@@ -82,17 +82,20 @@ uv run neptune-exporter --help
 
 Options:
 
-| Option                                   | Description                                                                                                                                                                                                                                                                                   |
-|-------------------------------------------|-----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------|
-| `--exporter` (required)                   | `neptune3` or `neptune2`. Use the version corresponding to your workspace. For help, see the [migration overview](https://docs.neptune.ai/neptune_exporter).                                                                                                                                                                                                                  |
-| `-r`/`--runs`                              | Neptune run ID filter, regex supported.<ul><li>In Neptune `3.x` the run ID is user-chosen or auto-generated, stored in `sys/custom_run_id`.</li><li>In Neptune `2.x` it's the auto-generated `sys/id` (e.g. `SAN-1`).</li></ul>                                                                                                     |
-| `-a`/`--attributes`                        | One value is treated as a regex. Multiple values are treated as exact attribute names.                                                                                                                                                                                                                                   |
-| `-c`/`--classes` and `--exclude`           | Include or exclude certain data types. Arguments: `parameters`, `metrics`, `series`, or `files`.                                                                                                                                                                                                                                   |
-| `--include-archived-runs`                | Include archived/trashed runs.                                                                                                                                                                                                                                                                |
-| `--api-token`                            | Pass the token explicitly instead of using the `NEPTUNE_API_TOKEN` environment variable.                                                                                                                                                                                                      |
-| `--no-progress`, `-v`/`--verbose`, `--log-file` | Progress and logging controls for the CLI.                                                                                                                                                                                                                                                    |
-| `--runs-query` | `neptune2` only: Specify [Neptune Query Language](https://docs-legacy.neptune.ai/usage/nql/) syntax to filter runs to export.|
-| `--include-metric-previews`| `neptune3` only: Include [Metric Previews](https://docs.neptune.ai/metric_previews) in the export. Preview metrics will be exported as "normal" metrics and `preview_completion` information will be discarded.|
+|Option|Description|
+|-|-|
+|`--exporter` (required)| `neptune3` or `neptune2`. Use the version corresponding to your workspace. For help, see the [migration overview](https://docs.neptune.ai/neptune_exporter).|
+|`-p`/`--project-ids`|Neptune project IDs to export. Can be specified multiple times. If not provided, reads from `NEPTUNE_PROJECT` environment variable.|
+|`-r`/`--runs`| Neptune run ID filter, regex supported.<ul><li>In Neptune `3.x` the run ID is user-chosen or auto-generated, stored in `sys/custom_run_id`.</li><li>In Neptune `2.x` it's the auto-generated `sys/id` (e.g. `SAN-1`).</li></ul>|
+|`-a`/`--attributes`| One value is treated as a regex. Multiple values are treated as exact attribute names.|
+|`-c`/`--classes` and `--exclude`| Include or exclude certain data types. Arguments: `parameters`, `metrics`, `series`, or `files`.|
+|`--include-archived-runs`| Include archived/trashed runs.|
+|`--api-token`| Pass the token explicitly instead of using the `NEPTUNE_API_TOKEN` environment variable.|
+|`--no-progress`, `-v`/`--verbose`, `--log-file`| Progress and logging controls for the CLI.|
+|`--runs-query`| `neptune2` only: Specify [Neptune Query Language](https://docs-legacy.neptune.ai/usage/nql/) syntax to filter runs to export.|
+|`--include-metric-previews`| `neptune3` only: Include [Metric Previews](https://docs.neptune.ai/metric_previews) in the export. Preview metrics will be exported as "normal" metrics and `preview_completion` information will be discarded.|
+|`-d`/`--data-path`|Path for exported parquet data. Default: `./exports/data`|
+|`-f`/`--files-path`|Path for downloaded files. Default: `./exports/files`|
 
 #### Export examples
 
