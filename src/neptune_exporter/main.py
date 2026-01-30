@@ -28,6 +28,11 @@ from neptune_exporter.exporters.neptune2 import Neptune2Exporter
 from neptune_exporter.exporters.neptune3 import Neptune3Exporter
 from neptune_exporter.loader_manager import LoaderManager
 from neptune_exporter.loaders.loader import DataLoader
+from neptune_exporter.logging_utils import (
+    ConsoleLevelFilter,
+    TqdmLoggingHandler,
+    info_always,
+)
 from neptune_exporter.storage.parquet_reader import ParquetReader
 from neptune_exporter.storage.parquet_writer import ParquetWriter
 from neptune_exporter.summary_manager import SummaryManager
@@ -260,16 +265,17 @@ def export(
     )
 
     logger = logging.getLogger(__name__)
-    logger.info(f"Exporting from {exporter} exporter using arguments:")
-    logger.info(f"  Project IDs: {', '.join(project_ids_list)}")
-    logger.info(f"  Runs: {runs}")
-    logger.info(f"  Runs query: {runs_query}")
-    logger.info(
-        f"  Attributes: {', '.join(attributes_list) if isinstance(attributes_list, list) else attributes_list}"
+    info_always(logger, f"Exporting from {exporter} exporter using arguments:")
+    info_always(logger, f"  Project IDs: {', '.join(project_ids_list)}")
+    info_always(logger, f"  Runs: {runs}")
+    info_always(logger, f"  Runs query: {runs_query}")
+    info_always(
+        logger,
+        f"  Attributes: {', '.join(attributes_list) if isinstance(attributes_list, list) else attributes_list}",
     )
-    logger.info(f"  Export classes: {', '.join(export_classes_list)}")
-    logger.info(f"  Exclude: {', '.join(exclude_set)}")
-    logger.info(f"  Include archived runs: {include_archived_runs}")
+    info_always(logger, f"  Export classes: {', '.join(export_classes_list)}")
+    info_always(logger, f"  Exclude: {', '.join(exclude_set)}")
+    info_always(logger, f"  Include archived runs: {include_archived_runs}")
 
     # Create error reporter instance
     error_reporter = ErrorReporter(path=error_report_file)
@@ -305,10 +311,10 @@ def export(
         progress_bar=not no_progress,
     )
 
-    logger.info(f"Starting export of {len(project_ids_list)} project(s)...")
-    logger.info(f"Export classes: {', '.join(export_classes_list)}")
-    logger.info(f"Data path: {data_path.absolute()}")
-    logger.info(f"Files path: {files_path.absolute()}")
+    info_always(logger, f"Starting export of {len(project_ids_list)} project(s)...")
+    info_always(logger, f"Export classes: {', '.join(export_classes_list)}")
+    info_always(logger, f"Data path: {data_path.absolute()}")
+    info_always(logger, f"Files path: {files_path.absolute()}")
 
     try:
         runs_exported = export_manager.run(
@@ -320,16 +326,17 @@ def export(
         )
 
         if runs_exported == 0:
-            logger.info("No runs found matching the specified criteria.")
+            info_always(logger, "No runs found matching the specified criteria.")
             if runs:
-                logger.info(f"   Filter: {runs}")
+                info_always(logger, f"   Filter: {runs}")
             if runs_query:
-                logger.info(f"   Runs query: {runs_query}")
-            logger.info(
-                "   Try adjusting your run filter or check if the project contains any runs."
+                info_always(logger, f"   Runs query: {runs_query}")
+            info_always(
+                logger,
+                "   Try adjusting your run filter or check if the project contains any runs.",
             )
         else:
-            logger.info("Export completed successfully!")
+            info_always(logger, "Export completed successfully!")
     except Exception:
         logger.error("Export failed", exc_info=True)
         raise click.Abort()
@@ -547,25 +554,27 @@ def load(
 
     logger = logging.getLogger(__name__)
 
-    logger.info(
-        f"Starting {loader} loading from {data_path.absolute()} using arguments:"
+    info_always(
+        logger,
+        f"Starting {loader} loading from {data_path.absolute()} using arguments:",
     )
-    logger.info(
-        f"  Project IDs: {', '.join(project_ids_list) if project_ids_list else 'all'}"
+    info_always(
+        logger,
+        f"  Project IDs: {', '.join(project_ids_list) if project_ids_list else 'all'}",
     )
-    logger.info(f"  Runs: {', '.join(runs_list) if runs_list else 'all'}")
-    logger.info(f"  Step multiplier: {step_multiplier}")
-    logger.info(f"  Files directory: {files_path.absolute()}")
+    info_always(logger, f"  Runs: {', '.join(runs_list) if runs_list else 'all'}")
+    info_always(logger, f"  Step multiplier: {step_multiplier}")
+    info_always(logger, f"  Files directory: {files_path.absolute()}")
     if mlflow_tracking_uri:
-        logger.info(f"  MLflow tracking URI: {mlflow_tracking_uri}")
+        info_always(logger, f"  MLflow tracking URI: {mlflow_tracking_uri}")
     if wandb_entity:
-        logger.info(f"  W&B entity: {wandb_entity}")
+        info_always(logger, f"  W&B entity: {wandb_entity}")
     if comet_workspace:
-        logger.info(f"  Comet workspace: {comet_workspace}")
+        info_always(logger, f"  Comet workspace: {comet_workspace}")
     if litlogger_owner:
-        logger.info(f"  LitLogger owner: {litlogger_owner}")
+        info_always(logger, f"  LitLogger owner: {litlogger_owner}")
     if name_prefix:
-        logger.info(f"  Name prefix: {name_prefix}")
+        info_always(logger, f"  Name prefix: {name_prefix}")
 
     # Create appropriate loader based on --loader flag
     data_loader: DataLoader
@@ -748,7 +757,7 @@ def load(
             show_client_logs=verbose,
         )
         loader_name = "Minfx"
-        logger.info(f"  Minfx project: {minfx_project}")
+        info_always(logger, f"  Minfx project: {minfx_project}")
     else:
         raise click.BadParameter(f"Unknown loader: {loader}")
 
@@ -770,7 +779,7 @@ def load(
             ),
             runs=[SourceRunId(run_id) for run_id in runs_list] if runs_list else None,
         )
-        logger.info(f"{loader_name} loading completed successfully!")
+        info_always(logger, f"{loader_name} loading completed successfully!")
     except Exception:
         logger.error(f"{loader_name} loading failed", exc_info=True)
         raise click.Abort()
@@ -848,15 +857,24 @@ def configure_logging(stderr_level: Optional[int], log_file: Optional[Path]) -> 
         stderr_level: Logging level for stderr stream handler (None to disable).
         log_file: Path for log file. Timestamp suffix will be added automatically.
     """
-    logger = logging.getLogger("neptune_exporter")
-    logger.setLevel(logging.INFO)
+    root_logger = logging.getLogger()
+    root_logger.setLevel(logging.INFO)
+    package_logger = logging.getLogger("neptune_exporter")
+    package_logger.setLevel(logging.INFO)
+    package_logger.propagate = True
+    package_logger.handlers.clear()
     FORMAT = "%(asctime)s %(name)s:%(levelname)s: %(message)s"
 
+    # Reset handlers for deterministic CLI output.
+    for handler in list(root_logger.handlers):
+        root_logger.removeHandler(handler)
+
     if stderr_level:
-        stream_handler = logging.StreamHandler()
+        stream_handler = TqdmLoggingHandler()
         stream_handler.setFormatter(logging.Formatter(FORMAT))
-        stream_handler.setLevel(stderr_level)
-        logger.addHandler(stream_handler)
+        stream_handler.setLevel(logging.INFO)
+        stream_handler.addFilter(ConsoleLevelFilter(stderr_level))
+        root_logger.addHandler(stream_handler)
 
     if log_file:
         # Add timestamp suffix to log file name
@@ -876,4 +894,4 @@ def configure_logging(stderr_level: Optional[int], log_file: Optional[Path]) -> 
         file_handler = logging.FileHandler(log_file_with_timestamp, mode="w")
         file_handler.setFormatter(logging.Formatter(FORMAT))
         file_handler.setLevel(logging.INFO)
-        logger.addHandler(file_handler)
+        root_logger.addHandler(file_handler)
