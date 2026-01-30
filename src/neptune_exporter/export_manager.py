@@ -15,6 +15,7 @@
 
 
 import logging
+from dataclasses import dataclass
 from typing import Iterable, Literal
 from pathlib import Path
 from tqdm import tqdm
@@ -26,6 +27,12 @@ from neptune_exporter.storage.parquet_writer import ParquetWriter, RunWriterCont
 from neptune_exporter.storage.parquet_reader import ParquetReader
 from neptune_exporter.types import ProjectId, SourceRunId
 from neptune_exporter.utils import sanitize_path_part
+
+
+@dataclass(frozen=True)
+class ExportResult:
+    total_runs: int
+    skipped_runs: int
 
 
 class ExportManager:
@@ -57,8 +64,9 @@ class ExportManager:
         export_classes: Iterable[
             Literal["parameters", "metrics", "series", "files"]
         ] = {"parameters", "metrics", "series", "files"},
-    ) -> int:
+    ) -> ExportResult:
         # Step 1: List all runs for all projects
+        skipped_runs = 0
         project_runs = {}
         for project_id in tqdm(
             project_ids,
@@ -74,7 +82,7 @@ class ExportManager:
         # Check if any runs were found
         total_runs = sum(len(run_ids) for run_ids in project_runs.values())
         if total_runs == 0:
-            return 0
+            return ExportResult(total_runs=0, skipped_runs=0)
 
         # Step 2: Process each project's runs
         for project_id, run_ids in tqdm(
@@ -92,6 +100,7 @@ class ExportManager:
             ]
             skipped = original_count - len(run_ids)
             if skipped > 0:
+                skipped_runs += skipped
                 self._logger.info(
                     f"Skipping {skipped} already exported run(s) in {project_id}"
                 )
@@ -197,7 +206,7 @@ class ExportManager:
                 f"{exception_summary.exception_count} exceptions occurred during export. See the logs for details."
             )
 
-        return total_runs
+        return ExportResult(total_runs=total_runs, skipped_runs=skipped_runs)
 
     def _route_batch_to_writers(
         self,

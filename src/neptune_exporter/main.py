@@ -317,18 +317,19 @@ def export(
     info_always(logger, f"Files path: {files_path.absolute()}")
 
     runs_matched: int | None = None
+    export_result = None
     export_failed = False
     try:
-        runs_exported = export_manager.run(
+        export_result = export_manager.run(
             project_ids=[ProjectId(project_id) for project_id in project_ids_list],
             runs=runs,
             runs_query=runs_query,
             attributes=attributes_list,
             export_classes=export_classes_set,  # type: ignore
         )
-        runs_matched = runs_exported
+        runs_matched = export_result.total_runs
 
-        if runs_exported == 0:
+        if export_result.total_runs == 0:
             info_always(logger, "No runs found matching the specified criteria.")
             if runs:
                 info_always(logger, f"   Filter: {runs}")
@@ -346,6 +347,7 @@ def export(
         exporter_instance.close()
         writer.close_all()
         exception_summary = error_reporter.get_summary()
+        skipped_runs = export_result.skipped_runs if export_result is not None else 0
         summary_lines = ["Export summary:"]
         if export_failed:
             summary_lines.append("  Status: failed.")
@@ -353,6 +355,8 @@ def export(
             summary_lines.append("  Status: finished.")
         if runs_matched is not None:
             summary_lines.append(f"  Runs matched: {runs_matched}.")
+        if skipped_runs > 0:
+            summary_lines.append(f"  Runs skipped: {skipped_runs}.")
         if exception_summary.exception_count > 0:
             summary_lines.append(
                 f"  Errors recorded: {exception_summary.exception_count}."

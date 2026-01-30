@@ -25,6 +25,7 @@ from neptune_exporter.exporters.error_reporter import ErrorReporter, ErrorSummar
 from neptune_exporter.storage.parquet_writer import ParquetWriter
 from neptune_exporter.storage.parquet_reader import ParquetReader
 from neptune_exporter import model
+from neptune_exporter.utils import sanitize_path_part
 
 
 def test_export_manager_skips_existing_runs():
@@ -83,7 +84,8 @@ def test_export_manager_skips_existing_runs():
     assert mock_reader.check_run_exists.call_count == 3
 
     # Should return 3 since it returns total runs found, not processed
-    assert result == 3
+    assert result.total_runs == 3
+    assert result.skipped_runs == 2
 
 
 def test_export_manager_with_no_existing_data():
@@ -135,7 +137,8 @@ def test_export_manager_with_no_existing_data():
     )
 
     # Should return 2 since both runs were processed
-    assert result == 2
+    assert result.total_runs == 2
+    assert result.skipped_runs == 0
 
 
 def test_export_manager_with_partial_existing_data():
@@ -190,7 +193,8 @@ def test_export_manager_with_partial_existing_data():
     )
 
     # Should return 3 since it returns total runs found, not processed
-    assert result == 3
+    assert result.total_runs == 3
+    assert result.skipped_runs == 1
 
 
 def test_export_manager_integration_with_real_files():
@@ -227,18 +231,18 @@ def test_export_manager_integration_with_real_files():
         )
 
         # Write existing data (complete runs with part_0)
-        project_dir = temp_path / "test-project"
+        project_dir = temp_path / sanitize_path_part("test-project")
         project_dir.mkdir()
         # Create complete runs (with part_0)
         run_123_mask = pc.equal(existing_data["run_id"], "RUN-123")
         run_456_mask = pc.equal(existing_data["run_id"], "RUN-456")
         pq.write_table(
             existing_data.filter(run_123_mask),
-            project_dir / "RUN-123_part_0.parquet",
+            project_dir / f"{sanitize_path_part('RUN-123')}_part_0.parquet",
         )
         pq.write_table(
             existing_data.filter(run_456_mask),
-            project_dir / "RUN-456_part_0.parquet",
+            project_dir / f"{sanitize_path_part('RUN-456')}_part_0.parquet",
         )
 
         # Create mock exporter
@@ -267,8 +271,13 @@ def test_export_manager_integration_with_real_files():
         )
 
         # Verify existing data is still there
-        assert (project_dir / "RUN-123_part_0.parquet").exists()
-        assert (project_dir / "RUN-456_part_0.parquet").exists()
+        assert (
+            project_dir / f"{sanitize_path_part('RUN-123')}_part_0.parquet"
+        ).exists()
+        assert (
+            project_dir / f"{sanitize_path_part('RUN-456')}_part_0.parquet"
+        ).exists()
 
         # Should return 3 since it returns total runs found, not processed
-        assert result == 3
+        assert result.total_runs == 3
+        assert result.skipped_runs == 2
