@@ -259,7 +259,7 @@ def export(
         raise click.BadParameter(f"Invalid export classes: {', '.join(invalid)}")
 
     # Configure logging
-    configure_logging(
+    log_file_path = configure_logging(
         stderr_level=logging.INFO if verbose else logging.ERROR,
         log_file=log_file if log_file else None,
     )
@@ -316,6 +316,8 @@ def export(
     info_always(logger, f"Data path: {data_path.absolute()}")
     info_always(logger, f"Files path: {files_path.absolute()}")
 
+    runs_matched: int | None = None
+    export_failed = False
     try:
         runs_exported = export_manager.run(
             project_ids=[ProjectId(project_id) for project_id in project_ids_list],
@@ -324,6 +326,7 @@ def export(
             attributes=attributes_list,
             export_classes=export_classes_set,  # type: ignore
         )
+        runs_matched = runs_exported
 
         if runs_exported == 0:
             info_always(logger, "No runs found matching the specified criteria.")
@@ -335,15 +338,30 @@ def export(
                 logger,
                 "   Try adjusting your run filter or check if the project contains any runs.",
             )
-        else:
-            info_always(logger, "Export completed successfully!")
     except Exception:
+        export_failed = True
         logger.error("Export failed", exc_info=True)
         raise click.Abort()
-
     finally:
         exporter_instance.close()
         writer.close_all()
+        exception_summary = error_reporter.get_summary()
+        summary_lines = ["Export summary:"]
+        if export_failed:
+            summary_lines.append("  Status: failed.")
+        else:
+            summary_lines.append("  Status: finished.")
+        if runs_matched is not None:
+            summary_lines.append(f"  Runs matched: {runs_matched}.")
+        if exception_summary.exception_count > 0:
+            summary_lines.append(
+                f"  Errors recorded: {exception_summary.exception_count}."
+            )
+        summary_lines.append(f"  Error report: {error_report_file.absolute()}.")
+        if log_file_path:
+            summary_lines.append(f"  Log file: {log_file_path.absolute()}.")
+        for line in summary_lines:
+            info_always(logger, line)
 
 
 @cli.command()
@@ -547,7 +565,7 @@ def load(
     parquet_reader = ParquetReader(base_path=data_path)
 
     # Configure logging
-    configure_logging(
+    log_file_path = configure_logging(
         stderr_level=logging.INFO if verbose else logging.ERROR,
         log_file=log_file if log_file else None,
     )
@@ -770,6 +788,7 @@ def load(
         progress_bar=not no_progress,
     )
 
+    load_failed = False
     try:
         loader_manager.load(
             project_ids=(
@@ -779,10 +798,20 @@ def load(
             ),
             runs=[SourceRunId(run_id) for run_id in runs_list] if runs_list else None,
         )
-        info_always(logger, f"{loader_name} loading completed successfully!")
     except Exception:
+        load_failed = True
         logger.error(f"{loader_name} loading failed", exc_info=True)
         raise click.Abort()
+    finally:
+        summary_lines = [f"{loader_name} load summary:"]
+        if load_failed:
+            summary_lines.append("  Status: failed.")
+        else:
+            summary_lines.append("  Status: finished.")
+        if log_file_path:
+            summary_lines.append(f"  Log file: {log_file_path.absolute()}.")
+        for line in summary_lines:
+            info_always(logger, line)
 
 
 @cli.command()
@@ -846,7 +875,9 @@ def main():
     cli()
 
 
-def configure_logging(stderr_level: Optional[int], log_file: Optional[Path]) -> None:
+def configure_logging(
+    stderr_level: Optional[int], log_file: Optional[Path]
+) -> Optional[Path]:
     """Configure logging with optional file handler.
 
     If a log_file path is provided, a timestamp suffix is automatically added
@@ -856,6 +887,10 @@ def configure_logging(stderr_level: Optional[int], log_file: Optional[Path]) -> 
     Args:
         stderr_level: Logging level for stderr stream handler (None to disable).
         log_file: Path for log file. Timestamp suffix will be added automatically.
+
+    Returns:
+        Path to the log file with timestamp applied, or None if file logging is
+        disabled.
     """
     root_logger = logging.getLogger()
     root_logger.setLevel(logging.INFO)
@@ -876,6 +911,7 @@ def configure_logging(stderr_level: Optional[int], log_file: Optional[Path]) -> 
         stream_handler.addFilter(ConsoleLevelFilter(stderr_level))
         root_logger.addHandler(stream_handler)
 
+    log_file_with_timestamp: Optional[Path] = None
     if log_file:
         # Add timestamp suffix to log file name
         timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
@@ -895,3 +931,5 @@ def configure_logging(stderr_level: Optional[int], log_file: Optional[Path]) -> 
         file_handler.setFormatter(logging.Formatter(FORMAT))
         file_handler.setLevel(logging.INFO)
         root_logger.addHandler(file_handler)
+
+    return log_file_with_timestamp
