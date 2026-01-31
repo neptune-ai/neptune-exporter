@@ -23,12 +23,16 @@ from pathlib import Path
 import neptune_query as nq
 from neptune_query import filters, runs as nq_runs
 from neptune_query.filters import Attribute, AttributeFilter
-from concurrent.futures import ThreadPoolExecutor, as_completed
+from concurrent.futures import Future, ThreadPoolExecutor, as_completed
 import logging
 
 from neptune_exporter import model
 from neptune_exporter.exporters.exporter import NeptuneExporter
 from neptune_exporter.exporters.error_reporter import ErrorReporter
+from neptune_exporter.progress.listeners import (
+    NoopProgressListener,
+    ProgressListener,
+)
 from neptune_exporter.types import ProjectId, SourceRunId
 
 
@@ -126,6 +130,7 @@ class Neptune3Exporter(NeptuneExporter):
         project_id: ProjectId,
         run_ids: list[SourceRunId],
         attributes: None | str | Sequence[str],
+        progress: ProgressListener | None = None,
     ) -> Generator[pa.RecordBatch, None, None]:
         try:
             parameters_df = (
@@ -233,13 +238,16 @@ class Neptune3Exporter(NeptuneExporter):
         project_id: ProjectId,
         run_ids: list[SourceRunId],
         attributes: None | str | Sequence[str],
+        progress: ProgressListener | None = None,
     ) -> Generator[pa.RecordBatch, None, None]:
+        listener = progress or NoopProgressListener()
         try:
             attributes_list = nq_runs.list_attributes(
                 project=project_id,
                 runs=run_ids,
                 attributes=AttributeFilter(name=attributes, type=_METRIC_TYPES),
             )
+            listener.on_batch_total("metrics", run_ids, len(attributes_list))
 
             def fetch_and_convert_batch(
                 attribute_batch: list[str],
@@ -276,15 +284,17 @@ class Neptune3Exporter(NeptuneExporter):
             ]
 
             # Submit all batches to the executor
-            futures = [
-                self._executor.submit(fetch_and_convert_batch, attribute_batch)
+            futures: dict[Future[Optional[pa.RecordBatch]], int] = {
+                self._executor.submit(fetch_and_convert_batch, attribute_batch): len(
+                    attribute_batch
+                )
                 for attribute_batch in attribute_batches
-            ]
+            }
 
             # Yield results as they complete
-            for i, future in enumerate(as_completed(futures)):
+            for future in as_completed(list(futures)):
                 try:
-                    result = future.result()
+                    result: Optional[pa.RecordBatch] = future.result()
                     if result is not None:
                         yield result
                 except Exception as e:
@@ -294,6 +304,8 @@ class Neptune3Exporter(NeptuneExporter):
                         batch_type="metrics",
                         exception=e,
                     )
+                finally:
+                    listener.on_batch_advance("metrics", run_ids, futures[future])
         except Exception as e:
             self._handle_runs_exception(
                 project_id=project_id,
@@ -343,7 +355,9 @@ class Neptune3Exporter(NeptuneExporter):
         project_id: ProjectId,
         run_ids: list[SourceRunId],
         attributes: None | str | Sequence[str],
+        progress: ProgressListener | None = None,
     ) -> Generator[pa.RecordBatch, None, None]:
+        listener = progress or NoopProgressListener()
         try:
             attributes_df = nq_runs.fetch_runs_table(
                 project=project_id,
@@ -356,6 +370,7 @@ class Neptune3Exporter(NeptuneExporter):
             attribute_path_types = [
                 attr.rsplit(":", maxsplit=1) for attr in attributes_df.columns
             ]
+            listener.on_batch_total("series", run_ids, len(attribute_path_types))
 
             def fetch_and_convert_batch(
                 attributes_batch: list[tuple[str, str]],
@@ -396,15 +411,17 @@ class Neptune3Exporter(NeptuneExporter):
             ]
 
             # Submit all batches to the executor
-            futures = [
-                self._executor.submit(fetch_and_convert_batch, attributes_batch)
+            futures: dict[Future[Optional[pa.RecordBatch]], int] = {
+                self._executor.submit(fetch_and_convert_batch, attributes_batch): len(
+                    attributes_batch
+                )
                 for attributes_batch in attribute_batches
-            ]
+            }
 
             # Yield results as they complete
-            for future in as_completed(futures):
+            for future in as_completed(list(futures)):
                 try:
-                    result = future.result()
+                    result: Optional[pa.RecordBatch] = future.result()
                     if result is not None:
                         yield result
                 except Exception as e:
@@ -414,6 +431,8 @@ class Neptune3Exporter(NeptuneExporter):
                         batch_type="series",
                         exception=e,
                     )
+                finally:
+                    listener.on_batch_advance("series", run_ids, futures[future])
         except Exception as e:
             self._handle_runs_exception(
                 project_id=project_id, run_ids=run_ids, batch_type="series", exception=e
@@ -485,7 +504,9 @@ class Neptune3Exporter(NeptuneExporter):
         run_ids: list[SourceRunId],
         attributes: None | str | Sequence[str],
         destination: Path,
+        progress: ProgressListener | None = None,
     ) -> Generator[pa.RecordBatch, None, None]:
+        listener = progress or NoopProgressListener()
         try:
             destination = destination.resolve()
 
@@ -500,6 +521,9 @@ class Neptune3Exporter(NeptuneExporter):
                 project=project_id,
                 runs=run_ids,
                 attributes=AttributeFilter(name=attributes, type=_FILE_SERIES_TYPES),
+            )
+            listener.on_batch_total(
+                "files", run_ids, len(file_attributes) + len(file_series_attributes)
             )
 
             def fetch_and_convert_file_batch(
@@ -613,26 +637,26 @@ class Neptune3Exporter(NeptuneExporter):
             ]
 
             # Submit all batches to the executor
-            futures = []
+            futures: dict[Future[Optional[pa.RecordBatch]], int] = {}
 
             # Submit file batches
             for attribute_batch in file_attribute_batches:
-                futures.append(
-                    self._executor.submit(fetch_and_convert_file_batch, attribute_batch)
+                future = self._executor.submit(
+                    fetch_and_convert_file_batch, attribute_batch
                 )
+                futures[future] = len(attribute_batch)
 
             # Submit file series batches
             for attribute_batch in file_series_attribute_batches:
-                futures.append(
-                    self._executor.submit(
-                        fetch_and_convert_file_series_batch, attribute_batch
-                    )
+                future = self._executor.submit(
+                    fetch_and_convert_file_series_batch, attribute_batch
                 )
+                futures[future] = len(attribute_batch)
 
             # Yield results as they complete
-            for future in as_completed(futures):
+            for future in as_completed(list(futures)):
                 try:
-                    result = future.result()
+                    result: Optional[pa.RecordBatch] = future.result()
                     if result is not None:
                         yield result
                 except Exception as e:
@@ -642,6 +666,8 @@ class Neptune3Exporter(NeptuneExporter):
                         batch_type="files",
                         exception=e,
                     )
+                finally:
+                    listener.on_batch_advance("files", run_ids, futures[future])
         except Exception as e:
             self._handle_runs_exception(
                 project_id=project_id, run_ids=run_ids, batch_type="files", exception=e

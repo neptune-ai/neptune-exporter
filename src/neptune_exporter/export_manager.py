@@ -18,11 +18,11 @@ import logging
 from dataclasses import dataclass
 from typing import Iterable, Literal
 from pathlib import Path
-from tqdm import tqdm
 import pyarrow as pa
 import pyarrow.compute as pc
 from neptune_exporter.exporters.error_reporter import ErrorReporter
 from neptune_exporter.exporters.exporter import NeptuneExporter
+from neptune_exporter.progress.listeners import ProgressListenerFactory
 from neptune_exporter.storage.parquet_writer import ParquetWriter, RunWriterContext
 from neptune_exporter.storage.parquet_reader import ParquetReader
 from neptune_exporter.types import ProjectId, SourceRunId
@@ -43,16 +43,16 @@ class ExportManager:
         writer: ParquetWriter,
         error_reporter: ErrorReporter,
         files_destination: Path,
+        progress_listener_factory: ProgressListenerFactory,
         batch_size: int = 16,
-        progress_bar: bool = True,
     ):
         self._exporter = exporter
         self._reader = reader
         self._writer = writer
         self._error_reporter = error_reporter
         self._files_destination = files_destination
+        self._progress_listener_factory = progress_listener_factory
         self._batch_size = batch_size
-        self._progress_bar = progress_bar
         self._logger = logging.getLogger(__name__)
 
     def run(
@@ -66,60 +66,51 @@ class ExportManager:
         ] = {"parameters", "metrics", "series", "files"},
     ) -> ExportResult:
         # Step 1: List all runs for all projects
-        skipped_runs = 0
-        project_runs = {}
-        for project_id in tqdm(
-            project_ids,
-            desc="Listing runs in projects",
-            unit="project",
-            disable=not self._progress_bar,
-        ):
-            run_ids = self._exporter.list_runs(
+        project_runs = {
+            project_id: self._exporter.list_runs(
                 project_id=project_id, runs=runs, query=runs_query
             )
-            project_runs[project_id] = run_ids
+            for project_id in project_ids
+        }
+        skipped_runs = 0
 
         # Check if any runs were found
         total_runs = sum(len(run_ids) for run_ids in project_runs.values())
         if total_runs == 0:
             return ExportResult(total_runs=0, skipped_runs=0)
 
-        # Step 2: Process each project's runs
-        for project_id, run_ids in tqdm(
-            project_runs.items(),
-            desc="Exporting projects",
-            unit="project",
-            disable=not self._progress_bar,
-        ):
-            # Filter out already-exported runs
-            original_count = len(run_ids)
-            run_ids = [
-                rid
-                for rid in run_ids
-                if not self._reader.check_run_exists(project_id, rid)
-            ]
-            skipped = original_count - len(run_ids)
-            if skipped > 0:
-                skipped_runs += skipped
-                self._logger.info(
-                    f"Skipping {skipped} already exported run(s) in {project_id}"
-                )
+        live = self._progress_listener_factory.create_live()
 
-            if not run_ids:
-                continue  # All runs already exported or deleted, skip to next project
+        with live:
+            listener = self._progress_listener_factory.create_listener(live)
+            # Step 2: Process each project's runs
+            for project_id, run_ids in project_runs.items():
+                # Filter out already-exported runs
+                original_count = len(run_ids)
+                run_ids = [
+                    rid
+                    for rid in run_ids
+                    if not self._reader.check_run_exists(project_id, rid)
+                ]
+                skipped = original_count - len(run_ids)
+                if skipped > 0:
+                    skipped_runs += skipped
+                    self._logger.info(
+                        f"Skipping {skipped} already exported run(s) in {project_id}"
+                    )
+                listener.on_project_total(project_id, len(run_ids))
 
-            # Process runs in batches for concurrent downloading
-            with tqdm(
-                total=len(run_ids),
-                desc=f"Exporting runs from {project_id}",
-                unit="run",
-                leave=False,
-                disable=not self._progress_bar,
-            ) as runs_pbar:
+                if not run_ids:
+                    continue  # All runs already exported or deleted, skip to next project
+
+                # Process runs in batches for concurrent downloading
                 for batch_start in range(0, len(run_ids), self._batch_size):
                     batch_run_ids = run_ids[
                         batch_start : batch_start + self._batch_size
                     ]
+
+                    for run_id in batch_run_ids:
+                        listener.on_run_started(run_id)
 
                     # Create writers for all runs in this batch
                     writers = {
@@ -129,76 +120,52 @@ class ExportManager:
 
                     try:
                         if "parameters" in export_classes:
-                            with tqdm(
-                                desc=f"  Parameters ({len(batch_run_ids)} runs)",
-                                unit="B",
-                                unit_scale=True,
-                                leave=False,
-                                disable=not self._progress_bar,
-                            ) as pbar:
-                                for batch in self._exporter.download_parameters(
-                                    project_id=project_id,
-                                    run_ids=batch_run_ids,
-                                    attributes=attributes,
-                                ):
-                                    self._route_batch_to_writers(batch, writers)
-                                    pbar.update(batch.nbytes)
+                            for batch in self._exporter.download_parameters(
+                                project_id=project_id,
+                                run_ids=batch_run_ids,
+                                attributes=attributes,
+                                progress=listener,
+                            ):
+                                self._route_batch_to_writers(batch, writers)
 
                         if "metrics" in export_classes:
-                            with tqdm(
-                                desc=f"  Metrics ({len(batch_run_ids)} runs)",
-                                unit="B",
-                                unit_scale=True,
-                                leave=False,
-                                disable=not self._progress_bar,
-                            ) as pbar:
-                                for batch in self._exporter.download_metrics(
-                                    project_id=project_id,
-                                    run_ids=batch_run_ids,
-                                    attributes=attributes,
-                                ):
-                                    self._route_batch_to_writers(batch, writers)
-                                    pbar.update(batch.nbytes)
+                            for batch in self._exporter.download_metrics(
+                                project_id=project_id,
+                                run_ids=batch_run_ids,
+                                attributes=attributes,
+                                progress=listener,
+                            ):
+                                self._route_batch_to_writers(batch, writers)
 
                         if "series" in export_classes:
-                            with tqdm(
-                                desc=f"  Series ({len(batch_run_ids)} runs)",
-                                unit="B",
-                                unit_scale=True,
-                                leave=False,
-                                disable=not self._progress_bar,
-                            ) as pbar:
-                                for batch in self._exporter.download_series(
-                                    project_id=project_id,
-                                    run_ids=batch_run_ids,
-                                    attributes=attributes,
-                                ):
-                                    self._route_batch_to_writers(batch, writers)
-                                    pbar.update(batch.nbytes)
+                            for batch in self._exporter.download_series(
+                                project_id=project_id,
+                                run_ids=batch_run_ids,
+                                attributes=attributes,
+                                progress=listener,
+                            ):
+                                self._route_batch_to_writers(batch, writers)
 
                         if "files" in export_classes:
-                            with tqdm(
-                                desc=f"  Files ({len(batch_run_ids)} runs)",
-                                unit=" files",
-                                leave=False,
-                                disable=not self._progress_bar,
-                            ) as pbar:
-                                for batch in self._exporter.download_files(
-                                    project_id=project_id,
-                                    run_ids=batch_run_ids,
-                                    attributes=attributes,
-                                    destination=self._files_destination
-                                    / sanitize_path_part(project_id),
-                                ):
-                                    self._route_batch_to_writers(batch, writers)
-                                    pbar.update(batch.num_rows)
+                            for batch in self._exporter.download_files(
+                                project_id=project_id,
+                                run_ids=batch_run_ids,
+                                attributes=attributes,
+                                destination=self._files_destination
+                                / sanitize_path_part(project_id),
+                                progress=listener,
+                            ):
+                                self._route_batch_to_writers(batch, writers)
                     finally:
                         # Exit all writer contexts
                         for writer in writers.values():
                             writer.finish_run()
+                        for run_id in batch_run_ids:
+                            listener.on_run_finished(run_id)
 
-                    # Update progress bar for completed batch
-                    runs_pbar.update(len(batch_run_ids))
+                    listener.on_project_advance(project_id, len(batch_run_ids))
+
+                # Keep per-project task visible after completion
 
         exception_summary = self._error_reporter.get_summary()
         if exception_summary.exception_count > 0:

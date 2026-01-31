@@ -22,17 +22,19 @@ from typing import Optional
 import click
 
 from neptune_exporter.export_manager import ExportManager
+from neptune_exporter.progress.listeners import (
+    Neptune2ProgressListenerFactory,
+    Neptune3ProgressListenerFactory,
+    NoopProgressListenerFactory,
+    ProgressListenerFactory,
+)
 from neptune_exporter.exporters.error_reporter import ErrorReporter
 from neptune_exporter.exporters.exporter import NeptuneExporter
 from neptune_exporter.exporters.neptune2 import Neptune2Exporter
 from neptune_exporter.exporters.neptune3 import Neptune3Exporter
 from neptune_exporter.loader_manager import LoaderManager
 from neptune_exporter.loaders.loader import DataLoader
-from neptune_exporter.logging_utils import (
-    ConsoleLevelFilter,
-    TqdmLoggingHandler,
-    info_always,
-)
+from neptune_exporter.logging_utils import create_console_handler, info_always
 from neptune_exporter.storage.parquet_reader import ParquetReader
 from neptune_exporter.storage.parquet_writer import ParquetWriter
 from neptune_exporter.summary_manager import SummaryManager
@@ -281,12 +283,14 @@ def export(
     error_reporter = ErrorReporter(path=error_report_file)
 
     # Create exporter instance
+    progress_listener_factory: ProgressListenerFactory
     if exporter == "neptune2":
         exporter_instance: NeptuneExporter = Neptune2Exporter(
             error_reporter=error_reporter,
             api_token=api_token,
             include_trashed_runs=include_archived_runs,
         )
+        progress_listener_factory = Neptune2ProgressListenerFactory()
     elif exporter == "neptune3":
         exporter_instance = Neptune3Exporter(
             error_reporter=error_reporter,
@@ -294,8 +298,12 @@ def export(
             include_archived_runs=include_archived_runs,
             include_metric_previews=include_metric_previews,
         )
+        progress_listener_factory = Neptune3ProgressListenerFactory()
     else:
         raise click.BadParameter(f"Unknown exporter: {exporter}")
+
+    if no_progress:
+        progress_listener_factory = NoopProgressListenerFactory()
 
     # Create storage and reader instances
     writer = ParquetWriter(base_path=data_path)
@@ -308,7 +316,7 @@ def export(
         writer=writer,
         error_reporter=error_reporter,
         files_destination=files_path,
-        progress_bar=not no_progress,
+        progress_listener_factory=progress_listener_factory,
     )
 
     info_always(logger, f"Starting export of {len(project_ids_list)} project(s)...")
@@ -880,7 +888,8 @@ def main():
 
 
 def configure_logging(
-    stderr_level: Optional[int], log_file: Optional[Path]
+    stderr_level: Optional[int],
+    log_file: Optional[Path],
 ) -> Optional[Path]:
     """Configure logging with optional file handler.
 
@@ -909,10 +918,8 @@ def configure_logging(
         root_logger.removeHandler(handler)
 
     if stderr_level:
-        stream_handler = TqdmLoggingHandler()
-        stream_handler.setFormatter(logging.Formatter(FORMAT))
-        stream_handler.setLevel(logging.INFO)
-        stream_handler.addFilter(ConsoleLevelFilter(stderr_level))
+        stream_handler = create_console_handler(stderr_level)
+        stream_handler.setFormatter(logging.Formatter("%(name)s: %(message)s"))
         root_logger.addHandler(stream_handler)
 
     log_file_with_timestamp: Optional[Path] = None
