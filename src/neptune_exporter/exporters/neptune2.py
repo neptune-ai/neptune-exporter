@@ -111,21 +111,36 @@ class Neptune2Exporter(NeptuneExporter):
     ) -> list[SourceRunId]:
         """
         List Neptune runs.
-        The runs parameter is a regex pattern that the sys/custom_run_id must match.
+        The runs parameter can be a comma-separated list of run IDs (e.g., "RUN-1,RUN-2")
+        or a regex pattern (e.g., "RUN-.*").
         """
+        run_id_list: list[str] | None = None
+        if runs is not None and ',' in runs:
+            run_id_list = [r.strip() for r in runs.split(',')]
+
         with neptune.init_project(
             api_token=self._api_token, project=project_id, mode="read-only"
         ) as project:
-            runs_table = project.fetch_runs_table(
-                query=query,
-                columns=["sys/id"],
-                trashed=None if self._include_trashed_runs else False,
-                progress_bar=None if self._show_client_logs else False,
-            ).to_pandas()
+            # Use id parameter for comma-separated IDs (faster than NQL)
+            if run_id_list and not query:
+                runs_table = project.fetch_runs_table(
+                    id=run_id_list,
+                    columns=["sys/id"],
+                    trashed=None if self._include_trashed_runs else False,
+                    progress_bar=None if self._show_client_logs else False,
+                ).to_pandas()
+            else:
+                runs_table = project.fetch_runs_table(
+                    query=query,
+                    columns=["sys/id"],
+                    trashed=None if self._include_trashed_runs else False,
+                    progress_bar=None if self._show_client_logs else False,
+                ).to_pandas()
+
             if not len(runs_table):
                 return []
 
-            if runs is not None:
+            if runs is not None and not run_id_list:
                 runs_table = runs_table[runs_table["sys/id"].str.match(runs)]
             return list(runs_table["sys/id"])
 
