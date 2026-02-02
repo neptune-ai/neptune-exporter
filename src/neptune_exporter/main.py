@@ -369,7 +369,7 @@ def export(
             summary_lines.append(
                 f"  Errors recorded: {exception_summary.exception_count}."
             )
-        summary_lines.append(f"  Error report: {error_report_file.absolute()}.")
+            summary_lines.append(f"  Error report: {error_report_file.absolute()}.")
         if log_file_path:
             summary_lines.append(f"  Log file: {log_file_path.absolute()}.")
         for line in summary_lines:
