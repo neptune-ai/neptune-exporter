@@ -121,6 +121,7 @@ class Neptune2Exporter(NeptuneExporter):
                 columns=["sys/id"],
                 trashed=None if self._include_trashed_runs else False,
                 progress_bar=None if self._show_client_logs else False,
+                ascending=True,
             ).to_pandas()
             if not len(runs_table):
                 return []

@@ -425,6 +425,7 @@ class MinfxLoader(DataLoader):
                 runs_table = project.fetch_runs_table(
                     columns=["sys/id", "import/original_run_id"],
                     progress_bar=False,
+                    ascending=True,
                 ).to_pandas()
 
                 if runs_table.empty:
