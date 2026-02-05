@@ -15,13 +15,23 @@
 
 import datetime
 import heapq
+import logging
 from pathlib import Path
 from typing import Optional
-from tqdm import tqdm
-import logging
+
+from rich.progress import (
+    BarColumn,
+    MofNCompleteColumn,
+    Progress,
+    SpinnerColumn,
+    TaskProgressColumn,
+    TextColumn,
+    TimeElapsedColumn,
+)
 
 from neptune_exporter.storage.parquet_reader import ParquetReader, RunMetadata
 from neptune_exporter.loaders.loader import DataLoader
+from neptune_exporter.logging_utils import get_rich_console
 from neptune_exporter.types import ProjectId, SourceRunId, RunFilePrefix, TargetRunId
 from neptune_exporter.utils import sanitize_path_part
 
@@ -67,20 +77,30 @@ class LoaderManager:
             f"Starting data loading for {len(project_directories)} project(s)"
         )
 
-        # Process each project
-        for project_directory in tqdm(
-            project_directories,
-            desc="Loading projects",
-            unit="project",
+        progress = Progress(
+            SpinnerColumn(),
+            TextColumn("{task.description}", style="progress.description"),
+            MofNCompleteColumn(),
+            BarColumn(),
+            TaskProgressColumn(),
+            TimeElapsedColumn(),
+            console=get_rich_console(),
+            transient=False,
             disable=not self._progress_bar,
-        ):
-            try:
-                self._load_project(project_directory, runs=runs)
-            except Exception:
-                self._logger.error(
-                    f"Error loading project {project_directory}", exc_info=True
-                )
-                continue
+        )
+        with progress:
+            projects_task = progress.add_task(
+                "Loading projects", total=len(project_directories)
+            )
+            for project_directory in project_directories:
+                try:
+                    self._load_project(project_directory, runs=runs, progress=progress)
+                except Exception:
+                    self._logger.error(
+                        f"Error loading project {project_directory}", exc_info=True
+                    )
+                    continue
+                progress.advance(projects_task)
 
         self._logger.info("Data loading completed")
 
@@ -189,7 +209,28 @@ class LoaderManager:
         self,
         project_directory: Path,
         runs: Optional[list[SourceRunId]],
+        *,
+        progress: Progress | None = None,
     ) -> None:
+        if progress is None:
+            progress = Progress(
+                SpinnerColumn(),
+                TextColumn("{task.description}", style="progress.description"),
+                MofNCompleteColumn(),
+                BarColumn(),
+                TaskProgressColumn(),
+                TimeElapsedColumn(),
+                console=get_rich_console(),
+                transient=False,
+                disable=True,
+            )
+            with progress:
+                self._load_project(
+                    project_directory=project_directory,
+                    runs=runs,
+                    progress=progress,
+                )
+            return
         """Load a single project to target platform using topological sorting.
 
         Reads metadata for all runs upfront, builds a dependency graph,
@@ -210,13 +251,10 @@ class LoaderManager:
         run_metadata: list[RunMetadata] = []
         source_run_id_to_file_prefix: dict[SourceRunId, RunFilePrefix] = {}
 
-        for source_run_file_prefix in tqdm(
-            all_run_file_prefixes,
-            desc="Reading run metadata",
-            unit="run",
-            leave=False,
-            disable=not self._progress_bar,
-        ):
+        metadata_task = progress.add_task(
+            "Reading run metadata", total=len(all_run_file_prefixes)
+        )
+        for source_run_file_prefix in all_run_file_prefixes:
             metadata = self._parquet_reader.read_run_metadata(
                 project_directory, source_run_file_prefix
             )
@@ -229,6 +267,8 @@ class LoaderManager:
 
             source_run_id_to_file_prefix[metadata.run_id] = source_run_file_prefix
             run_metadata.append(metadata)
+            progress.advance(metadata_task)
+        progress.remove_task(metadata_task)
 
         if not run_metadata:
             self._logger.warning(f"No valid run metadata found in {project_directory}")
@@ -241,13 +281,11 @@ class LoaderManager:
         run_id_to_target_run_id: dict[SourceRunId, TargetRunId] = {}
 
         # Process runs in topological order
-        for metadata in tqdm(
-            sorted_run_metadata,
-            desc=f"Loading runs from {project_directory}",
-            unit="run",
-            leave=False,
-            disable=not self._progress_bar,
-        ):
+        runs_task = progress.add_task(
+            f"Loading runs from {project_directory.name}",
+            total=len(sorted_run_metadata),
+        )
+        for metadata in sorted_run_metadata:
             try:
                 self._process_run(
                     project_directory=project_directory,
@@ -263,6 +301,8 @@ class LoaderManager:
                     exc_info=True,
                 )
                 continue
+            progress.advance(runs_task)
+        progress.remove_task(runs_task)
 
     def _process_run(
         self,

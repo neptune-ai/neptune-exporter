@@ -35,6 +35,10 @@ from neptune import management
 from neptune_exporter import model
 from neptune_exporter.exporters.exporter import NeptuneExporter
 from neptune_exporter.exporters.error_reporter import ErrorReporter
+from neptune_exporter.progress.listeners import (
+    NoopProgressListener,
+    ProgressListener,
+)
 from neptune_exporter.types import ProjectId, SourceRunId
 
 _ATTRIBUTE_TYPE_MAP = {
@@ -135,6 +139,7 @@ class Neptune2Exporter(NeptuneExporter):
         project_id: ProjectId,
         run_ids: list[SourceRunId],
         attributes: None | str | Sequence[str],
+        progress: ProgressListener | None = None,
     ) -> Generator[pa.RecordBatch, None, None]:
         """Download parameters from Neptune runs."""
         future_to_run_id = {
@@ -283,14 +288,20 @@ class Neptune2Exporter(NeptuneExporter):
         project_id: ProjectId,
         run_ids: list[SourceRunId],
         attributes: None | str | Sequence[str],
+        progress: ProgressListener | None = None,
     ) -> Generator[pa.RecordBatch, None, None]:
         """Download metrics from Neptune runs."""
+        listener = progress or NoopProgressListener()
         for run_id, data in self._run_attribute_workers(
             project_id,
             run_ids,
             attributes,
             _METRIC_TYPES,
             self._metric_worker,
+            on_attribute_total=lambda rid, total: listener.on_run_total(
+                "metrics", rid, total
+            ),
+            on_attribute_done=lambda rid: listener.on_run_advance("metrics", rid, 1),
         ):
             if not data:
                 continue
@@ -339,14 +350,20 @@ class Neptune2Exporter(NeptuneExporter):
         project_id: ProjectId,
         run_ids: list[SourceRunId],
         attributes: None | str | Sequence[str],
+        progress: ProgressListener | None = None,
     ) -> Generator[pa.RecordBatch, None, None]:
         """Download series data from Neptune runs."""
+        listener = progress or NoopProgressListener()
         for run_id, data in self._run_attribute_workers(
             project_id,
             run_ids,
             attributes,
             _SERIES_TYPES,
             self._series_worker,
+            on_attribute_total=lambda rid, total: listener.on_run_total(
+                "series", rid, total
+            ),
+            on_attribute_done=lambda rid: listener.on_run_advance("series", rid, 1),
         ):
             if not data:
                 continue
@@ -396,17 +413,25 @@ class Neptune2Exporter(NeptuneExporter):
         run_ids: list[SourceRunId],
         attributes: None | str | Sequence[str],
         destination: Path,
+        progress: ProgressListener | None = None,
     ) -> Generator[pa.RecordBatch, None, None]:
         """Download files from Neptune runs."""
+        listener = progress or NoopProgressListener()
         destination = destination.resolve()
         destination.mkdir(parents=True, exist_ok=True)
 
-        def file_worker(project_id, run_id, attribute_queue):
+        def file_worker(
+            project_id,
+            run_id,
+            attribute_queue,
+            on_attribute_done,
+        ):
             return self._file_worker(
                 project_id,
                 run_id,
                 attribute_queue,
                 destination=destination,
+                on_attribute_done=on_attribute_done,
             )
 
         for run_id, data in self._run_attribute_workers(
@@ -420,6 +445,10 @@ class Neptune2Exporter(NeptuneExporter):
                 *_FILE_SET_TYPES,
             ),
             file_worker,
+            on_attribute_total=lambda rid, total: listener.on_run_total(
+                "files", rid, total
+            ),
+            on_attribute_done=lambda rid: listener.on_run_advance("files", rid, 1),
         ):
             if not data:
                 continue
@@ -465,9 +494,16 @@ class Neptune2Exporter(NeptuneExporter):
         attributes: None | str | Sequence[str],
         allowed_types: Sequence[str],
         worker_fn: Callable[
-            [ProjectId, SourceRunId, "queue.Queue[tuple[str, str]]"],
+            [
+                ProjectId,
+                SourceRunId,
+                "queue.Queue[tuple[str, str]]",
+                Optional[Callable[[SourceRunId], None]],
+            ],
             list[Any],
         ],
+        on_attribute_total: Optional[Callable[[SourceRunId, int], None]] = None,
+        on_attribute_done: Optional[Callable[[SourceRunId], None]] = None,
     ) -> Generator[tuple[SourceRunId, list[Any]], None, None]:
         if not run_ids:
             return
@@ -527,7 +563,11 @@ class Neptune2Exporter(NeptuneExporter):
                 if attribute_queue.qsize() <= pending_counts[run_id]:
                     break
                 future = self._executor.submit(
-                    worker_fn, project_id, run_id, attribute_queue
+                    worker_fn,
+                    project_id,
+                    run_id,
+                    attribute_queue,
+                    on_attribute_done,
                 )
                 worker_futures[future] = run_id
                 pending_counts[run_id] += 1
@@ -554,6 +594,8 @@ class Neptune2Exporter(NeptuneExporter):
                         )
                         run_data[run_id] = []
                         pending_counts[run_id] = 0
+                    if on_attribute_total is not None:
+                        on_attribute_total(run_id, len(attribute_list))
                     try:
                         next_run_id = next(run_iter)
                     except StopIteration:
@@ -580,6 +622,7 @@ class Neptune2Exporter(NeptuneExporter):
         project_id: ProjectId,
         run_id: SourceRunId,
         attribute_queue: "queue.Queue[tuple[str, str]]",
+        on_attribute_done: Optional[Callable[[SourceRunId], None]] = None,
     ) -> list[pd.DataFrame]:
         data: list[pd.DataFrame] = []
         try:
@@ -612,6 +655,9 @@ class Neptune2Exporter(NeptuneExporter):
                         self._handle_attribute_exception(
                             project_id, run_id, attribute_path, attribute_type, e
                         )
+                    finally:
+                        if on_attribute_done is not None:
+                            on_attribute_done(run_id)
         except Exception as e:
             self._handle_run_exception(project_id, run_id, e)
         return data
@@ -621,6 +667,7 @@ class Neptune2Exporter(NeptuneExporter):
         project_id: ProjectId,
         run_id: SourceRunId,
         attribute_queue: "queue.Queue[tuple[str, str]]",
+        on_attribute_done: Optional[Callable[[SourceRunId], None]] = None,
     ) -> list[pd.DataFrame]:
         data: list[pd.DataFrame] = []
         try:
@@ -653,6 +700,9 @@ class Neptune2Exporter(NeptuneExporter):
                         self._handle_attribute_exception(
                             project_id, run_id, attribute_path, attribute_type, e
                         )
+                    finally:
+                        if on_attribute_done is not None:
+                            on_attribute_done(run_id)
         except Exception as e:
             self._handle_run_exception(project_id, run_id, e)
         return data
@@ -664,6 +714,7 @@ class Neptune2Exporter(NeptuneExporter):
         attribute_queue: "queue.Queue[tuple[str, str]]",
         *,
         destination: Path,
+        on_attribute_done: Optional[Callable[[SourceRunId], None]] = None,
     ) -> list[dict[str, Any]]:
         data: list[dict[str, Any]] = []
         try:
@@ -795,6 +846,9 @@ class Neptune2Exporter(NeptuneExporter):
                         self._handle_attribute_exception(
                             project_id, run_id, attribute_path, attribute_type, e
                         )
+                    finally:
+                        if on_attribute_done is not None:
+                            on_attribute_done(run_id)
         except Exception as e:
             self._handle_run_exception(project_id, run_id, e)
         return data

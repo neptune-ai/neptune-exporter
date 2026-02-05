@@ -20,6 +20,7 @@ from typing import Generator, Optional, Sequence
 from pathlib import Path
 import pyarrow as pa
 
+from neptune_exporter.progress.listeners import ProgressListener
 from neptune_exporter.types import ProjectId, SourceRunId
 
 
@@ -47,6 +48,7 @@ class NeptuneExporter(ABC):
         project_id: ProjectId,
         run_ids: list[SourceRunId],
         attributes: None | str | Sequence[str],
+        progress: ProgressListener | None = None,
     ) -> Generator[pa.RecordBatch, None, None]:
         """Download parameters from Neptune runs."""
         pass
@@ -57,6 +59,7 @@ class NeptuneExporter(ABC):
         project_id: ProjectId,
         run_ids: list[SourceRunId],
         attributes: None | str | Sequence[str],
+        progress: ProgressListener | None = None,
     ) -> Generator[pa.RecordBatch, None, None]:
         """Download metrics from Neptune runs."""
         pass
@@ -67,6 +70,7 @@ class NeptuneExporter(ABC):
         project_id: ProjectId,
         run_ids: list[SourceRunId],
         attributes: None | str | Sequence[str],
+        progress: ProgressListener | None = None,
     ) -> Generator[pa.RecordBatch, None, None]:
         """Download series data from Neptune runs."""
         pass
@@ -78,6 +82,7 @@ class NeptuneExporter(ABC):
         run_ids: list[SourceRunId],
         attributes: None | str | Sequence[str],
         destination: Path,
+        progress: ProgressListener | None = None,
     ) -> Generator[pa.RecordBatch, None, None]:
         """Download files from Neptune runs."""
         pass

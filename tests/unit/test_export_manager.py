@@ -22,6 +22,7 @@ import tempfile
 
 from neptune_exporter.export_manager import ExportManager
 from neptune_exporter.exporters.error_reporter import ErrorReporter, ErrorSummary
+from neptune_exporter.progress.listeners import NoopProgressListenerFactory
 from neptune_exporter.storage.parquet_writer import ParquetWriter
 from neptune_exporter.storage.parquet_reader import ParquetReader
 from neptune_exporter import model
@@ -56,6 +57,7 @@ def test_export_manager_skips_existing_runs():
         writer=mock_writer,
         error_reporter=mock_error_reporter,
         files_destination=Path("/fake/files"),
+        progress_listener_factory=NoopProgressListenerFactory(),
     )
 
     # Mock the run writer context
@@ -113,6 +115,7 @@ def test_export_manager_with_no_existing_data():
         writer=mock_writer,
         error_reporter=mock_error_reporter,
         files_destination=Path("/fake/files"),
+        progress_listener_factory=NoopProgressListenerFactory(),
     )
 
     # Mock the run writer context
@@ -169,6 +172,7 @@ def test_export_manager_with_partial_existing_data():
         writer=mock_writer,
         error_reporter=mock_error_reporter,
         files_destination=Path("/fake/files"),
+        progress_listener_factory=NoopProgressListenerFactory(),
     )
 
     # Mock the run writer context
@@ -260,6 +264,7 @@ def test_export_manager_integration_with_real_files():
             writer=storage,
             error_reporter=error_reporter,
             files_destination=Path("/fake/files"),
+            progress_listener_factory=NoopProgressListenerFactory(),
         )
 
         # Run export
