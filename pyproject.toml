@@ -18,6 +18,7 @@ dev = [
     "neptune-scale==0.27.0",
     "pre-commit>=4.3.0,<5.0.0",
     "pytest>=8.4.2,<9.0.0",
+    "pytest-dotenv>=0.5.2,<1.0.0",
     "ruff>=0.13.2,<1.0.0",
 ]
 
@@ -46,4 +47,8 @@ packages = 'neptune_exporter'
 ignore_missing_imports = true
 
 [tool.pytest.ini_options]
-addopts = "-s"
+filterwarnings = [
+    "ignore:A newer version of lightning-sdk is available.*:UserWarning",
+    "ignore:jsonschema.RefResolver is deprecated.*:DeprecationWarning",
+    "ignore:The filesystem tracking backend.*:FutureWarning",
+]
