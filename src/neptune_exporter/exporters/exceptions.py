@@ -40,10 +40,16 @@ class NeptuneExporterAuthError(Exception):
 
     def __init__(self, original: Exception | None = None) -> None:
         super().__init__(
-            "The Neptune server rejected the request (X-Neptune-Api-Token missing or invalid). "
-            "Please check: (1) you are using the correct exporter — use 'neptune2' for Neptune 2 "
-            "and 'neptune3' for Neptune 3; (2) the API token you are using is for the same Neptune "
-            "version as the exporter (e.g. a Neptune 3 API token when using the neptune3 exporter)."
+            "The Neptune server rejected the request: missing or invalid `X-Neptune-Api-Token`.\n\n"
+            "How to fix this:\n"
+            "1. Verify you are using the correct exporter:\n"
+            "   - `neptune2` for Neptune 2\n"
+            "   - `neptune3` for Neptune 3\n"
+            "2. Make sure the API token matches the exporter version\n"
+            "   (e.g. a Neptune 3 token when using the `neptune3` exporter).\n\n"
+            "Technical details:\n"
+            "- HTTP status: 400\n"
+            "- Server message: \"Parameter 'X-Neptune-Api-Token' missing or invalid\""
         )
         if original is not None:
             self.__cause__ = original
