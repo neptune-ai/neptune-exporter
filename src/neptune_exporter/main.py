@@ -29,6 +29,7 @@ from neptune_exporter.progress.listeners import (
     ProgressListenerFactory,
 )
 from neptune_exporter.exporters.error_reporter import ErrorReporter
+from neptune_exporter.exporters.exceptions import NeptuneExporterAuthError
 from neptune_exporter.exporters.exporter import NeptuneExporter
 from neptune_exporter.exporters.neptune2 import Neptune2Exporter
 from neptune_exporter.exporters.neptune3 import Neptune3Exporter
@@ -347,6 +348,10 @@ def export(
                 logger,
                 "   Try adjusting your run filter or check if the project contains any runs.",
             )
+    except NeptuneExporterAuthError as e:
+        export_failed = True
+        logger.error("%s", e)
+        raise click.Abort()
     except Exception:
         export_failed = True
         logger.error("Export failed", exc_info=True)

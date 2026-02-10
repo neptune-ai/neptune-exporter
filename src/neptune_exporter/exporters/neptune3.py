@@ -29,6 +29,9 @@ import logging
 from neptune_exporter import model
 from neptune_exporter.exporters.exporter import NeptuneExporter
 from neptune_exporter.exporters.error_reporter import ErrorReporter
+from neptune_exporter.exporters.exceptions import (
+    raise_if_neptune_api_token_error,
+)
 from neptune_exporter.progress.listeners import (
     NoopProgressListener,
     ProgressListener,
@@ -123,7 +126,11 @@ class Neptune3Exporter(NeptuneExporter):
                 filters.Attribute("sys/archived", type="bool"), True
             )
 
-        return nq_runs.list_runs(project=project_id, runs=runs_filter)
+        try:
+            return nq_runs.list_runs(project=project_id, runs=runs_filter)
+        except Exception as e:
+            raise_if_neptune_api_token_error(e)
+            raise
 
     def download_parameters(
         self,
@@ -748,6 +755,7 @@ class Neptune3Exporter(NeptuneExporter):
         exception: Exception,
     ) -> None:
         """Handle exceptions that occur during batch processing."""
+        raise_if_neptune_api_token_error(exception)
         if isinstance(exception, NeptuneError):
             # Neptune-related errors
             self._logger.warning(
@@ -782,6 +790,7 @@ class Neptune3Exporter(NeptuneExporter):
         exception: Exception,
     ) -> None:
         """Handle exceptions that occur during batch processing."""
+        raise_if_neptune_api_token_error(exception)
         if isinstance(exception, NeptuneError):
             # Neptune-related errors
             self._logger.warning(

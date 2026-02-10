@@ -35,6 +35,9 @@ from neptune import management
 from neptune_exporter import model
 from neptune_exporter.exporters.exporter import NeptuneExporter
 from neptune_exporter.exporters.error_reporter import ErrorReporter
+from neptune_exporter.exporters.exceptions import (
+    raise_if_neptune_api_token_error,
+)
 from neptune_exporter.progress.listeners import (
     NoopProgressListener,
     ProgressListener,
@@ -105,7 +108,11 @@ class Neptune2Exporter(NeptuneExporter):
 
     def list_projects(self) -> list[ProjectId]:
         """List Neptune projects."""
-        return cast(list[ProjectId], management.get_project_list())
+        try:
+            return cast(list[ProjectId], management.get_project_list())
+        except Exception as e:
+            raise_if_neptune_api_token_error(e)
+            raise
 
     def list_runs(
         self,
@@ -117,22 +124,26 @@ class Neptune2Exporter(NeptuneExporter):
         List Neptune runs.
         The runs parameter is a regex pattern that the sys/custom_run_id must match.
         """
-        with neptune.init_project(
-            api_token=self._api_token, project=project_id, mode="read-only"
-        ) as project:
-            runs_table = project.fetch_runs_table(
-                query=query,
-                columns=["sys/id"],
-                trashed=None if self._include_trashed_runs else False,
-                progress_bar=None if self._show_client_logs else False,
-                ascending=True,
-            ).to_pandas()
-            if not len(runs_table):
-                return []
+        try:
+            with neptune.init_project(
+                api_token=self._api_token, project=project_id, mode="read-only"
+            ) as project:
+                runs_table = project.fetch_runs_table(
+                    query=query,
+                    columns=["sys/id"],
+                    trashed=None if self._include_trashed_runs else False,
+                    progress_bar=None if self._show_client_logs else False,
+                    ascending=True,
+                ).to_pandas()
+                if not len(runs_table):
+                    return []
 
-            if runs is not None:
-                runs_table = runs_table[runs_table["sys/id"].str.match(runs)]
-            return list(runs_table["sys/id"])
+                if runs is not None:
+                    runs_table = runs_table[runs_table["sys/id"].str.match(runs)]
+                return list(runs_table["sys/id"])
+        except Exception as e:
+            raise_if_neptune_api_token_error(e)
+            raise
 
     def download_parameters(
         self,
@@ -917,6 +928,7 @@ class Neptune2Exporter(NeptuneExporter):
         self, project_id: ProjectId, run_id: SourceRunId, exception: Exception
     ) -> None:
         """Handle exceptions that occur during run processing."""
+        raise_if_neptune_api_token_error(exception)
         if isinstance(exception, neptune.exceptions.NeptuneException):
             # Other Neptune-specific errors
             self._logger.warning(
@@ -952,6 +964,7 @@ class Neptune2Exporter(NeptuneExporter):
         exception: Exception,
     ) -> None:
         """Handle exceptions that occur during attribute processing."""
+        raise_if_neptune_api_token_error(exception)
         if attribute_path is None:
             self._handle_run_exception(project_id, run_id, exception)
             return
