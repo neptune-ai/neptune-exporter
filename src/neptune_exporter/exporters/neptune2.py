@@ -956,19 +956,16 @@ class Neptune2Exporter(NeptuneExporter):
             self._handle_run_exception(project_id, run_id, exception)
             return
 
+        # Silently ignore all errors for sys/group_tags (no log, no error jsonl)
+        if attribute_path == "sys/group_tags":
+            return
+
         if isinstance(exception, neptune.exceptions.NeptuneException):
-            # an expected problem, skipping this attribute is acceptable
-            if attribute_path == "sys/group_tags":
-                self._logger.info(
-                    f"Skipping project {project_id}, run {run_id}, attribute {attribute_path} ({attribute_type}) because of neptune client error. This is expected and can be ignored.",
-                    exc_info=True,
-                )
-            else:
-                # Other Neptune-specific errors
-                self._logger.warning(
-                    f"Skipping project {project_id}, run {run_id}, attribute {attribute_path} ({attribute_type}) because of neptune client error.",
-                    exc_info=True,
-                )
+            # Other Neptune-specific errors
+            self._logger.warning(
+                f"Skipping project {project_id}, run {run_id}, attribute {attribute_path} ({attribute_type}) because of neptune client error.",
+                exc_info=True,
+            )
         elif isinstance(exception, OSError):
             # Other I/O errors - could be temporary or permanent
             self._logger.warning(
