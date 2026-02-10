@@ -956,8 +956,10 @@ class Neptune2Exporter(NeptuneExporter):
             self._handle_run_exception(project_id, run_id, exception)
             return
 
-        # Silently ignore all errors for sys/group_tags (no log, no error jsonl)
-        if attribute_path == "sys/group_tags":
+        # Silently ignore only FetchAttributeNotFoundException for sys/group_tags (no log, no error jsonl)
+        if attribute_path == "sys/group_tags" and isinstance(
+            exception, neptune.exceptions.FetchAttributeNotFoundException
+        ):
             return
 
         if isinstance(exception, neptune.exceptions.NeptuneException):
