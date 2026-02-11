@@ -33,3 +33,16 @@ def test_project_progress_set_total_resets_completed_on_reuse():
     task = progress.tasks[0]
     assert task.total == 3
     assert task.completed == 0
+
+
+def test_project_progress_start_sets_indeterminate_task():
+    """Project progress should show an indeterminate spinner while listing."""
+    progress = Progress()
+    project_progress = ProjectProgress(progress)
+
+    project_id = "workspace/project"
+    project_progress.start(project_id, phase="listing runs")
+
+    task = progress.tasks[0]
+    assert task.total is None
+    assert task.description == "Project workspace/project (listing runs)"

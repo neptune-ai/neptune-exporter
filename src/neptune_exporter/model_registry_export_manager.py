@@ -23,7 +23,10 @@ import pyarrow.compute as pc
 
 from neptune_exporter.exporters.error_reporter import ErrorReporter
 from neptune_exporter.exporters.neptune2 import Neptune2Exporter
-from neptune_exporter.progress.listeners import ProgressListenerFactory
+from neptune_exporter.progress.listeners import (
+    ProgressListener,
+    ProgressListenerFactory,
+)
 from neptune_exporter.storage.parquet_reader import ParquetReader
 from neptune_exporter.storage.parquet_writer import ParquetWriter, RunWriterContext
 from neptune_exporter.types import ProjectId, SourceRunId
@@ -75,16 +78,7 @@ class ModelRegistryExportManager:
             "files",
         },
     ) -> ModelRegistryExportResult:
-        project_models = {
-            project_id: self._exporter.list_models(
-                project_id=project_id,
-                query=models_query,
-                include_trashed=include_archived_models,
-            )
-            for project_id in project_ids
-        }
-
-        total_models = sum(len(model_ids) for model_ids in project_models.values())
+        total_models = 0
         skipped_models = 0
         total_model_versions = 0
         skipped_model_versions = 0
@@ -93,7 +87,15 @@ class ModelRegistryExportManager:
 
         with live:
             listener = self._progress_listener_factory.create_listener(live)
-            for project_id, all_model_ids in project_models.items():
+            for project_id in project_ids:
+                listener.on_project_started(project_id, phase="listing models")
+                all_model_ids = self._exporter.list_models(
+                    project_id=project_id,
+                    query=models_query,
+                    include_trashed=include_archived_models,
+                )
+                total_models += len(all_model_ids)
+
                 # Export models
                 model_ids = [
                     model_id
@@ -115,6 +117,7 @@ class ModelRegistryExportManager:
                 )
 
                 # Export model versions for all selected models
+                listener.on_project_started(project_id, phase="listing model versions")
                 all_model_version_ids: list[SourceRunId] = []
                 for model_id in all_model_ids:
                     try:
@@ -173,7 +176,7 @@ class ModelRegistryExportManager:
         entity_scope: _ENTITY_SCOPE,
         attributes: None | str | list[str],
         export_classes: Iterable[_EXPORT_CLASS],
-        listener,
+        listener: ProgressListener,
     ) -> None:
         if not entity_ids:
             return
