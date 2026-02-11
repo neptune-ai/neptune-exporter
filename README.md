@@ -86,7 +86,10 @@ Options:
 |Option|Description|
 |-|-|
 |`--exporter` (required)| `neptune3` or `neptune2`. Use the version corresponding to your workspace. For help, see the [migration overview](https://docs.neptune.ai/neptune_exporter).|
-|`-p`/`--project-ids`|Neptune project IDs to export. Can be specified multiple times. If not provided, reads from `NEPTUNE_PROJECT` environment variable.|
+|`-p`/`--project-ids`|Neptune project IDs to export (explicit mode). Can be specified multiple times. If not provided, reads from `NEPTUNE_PROJECT` environment variable.|
+|`--workspace`|Workspace name for project discovery mode. Mutually exclusive with `--project-ids`.|
+|`--project-pattern`|Include regex filter for discovered projects. Matches project names only (the `project` part of `workspace/project`). Can be specified multiple times. Requires `--workspace`.|
+|`--project-exclude-pattern`|Exclude regex filter for discovered projects. Matches project names only (the `project` part of `workspace/project`). Can be specified multiple times. Requires `--workspace`.|
 |`-r`/`--runs`| Neptune run ID filter, regex supported.<ul><li>In Neptune `3.x` the run ID is user-chosen or auto-generated, stored in `sys/custom_run_id`.</li><li>In Neptune `2.x` it's the auto-generated `sys/id` (e.g. `SAN-1`).</li></ul>|
 |`-a`/`--attributes`| One value is treated as a regex. Multiple values are treated as exact attribute names.|
 |`-c`/`--classes` and `--exclude`| Include or exclude certain data types. Arguments: `parameters`, `metrics`, `series`, or `files`.|
@@ -98,11 +101,31 @@ Options:
 |`-d`/`--data-path`|Path for exported parquet data. Default: `./exports/data`|
 |`-f`/`--files-path`|Path for downloaded files. Default: `./exports/files`|
 
+Project selection modes:
+- Explicit mode: pass one or more `--project-ids` (or `NEPTUNE_PROJECT`).
+- Discovery mode: pass `--workspace`, optionally with `--project-pattern` and `--project-exclude-pattern` (matched against project names).
+- You cannot mix explicit and discovery flags in one command.
+
 #### Export examples
 
 Export everything from a project:  
 ```bash
 uv run neptune-exporter export -p "workspace/proj" --exporter neptune3
+```
+
+Export all projects from a workspace:
+```bash
+uv run neptune-exporter export --workspace "workspace" --exporter neptune3
+```
+
+Export workspace projects matching include regex:
+```bash
+uv run neptune-exporter export --workspace "workspace" --project-pattern ".*prod.*" --exporter neptune3
+```
+
+Export workspace projects with include and exclude regex:
+```bash
+uv run neptune-exporter export --workspace "workspace" --project-pattern ".*prod.*" --project-exclude-pattern ".*archive.*" --exporter neptune3
 ```
 
 Export only parameters and metrics from runs matching a pattern:
@@ -138,13 +161,30 @@ Options:
 
 |Option|Description|
 |-|-|
-|`-p`/`--project-ids`|Neptune project IDs to export model registry data from. Can be specified multiple times. If not provided, reads from `NEPTUNE_PROJECT`.|
+|`-p`/`--project-ids`|Neptune project IDs to export model registry data from (explicit mode). Can be specified multiple times. If not provided, reads from `NEPTUNE_PROJECT`.|
+|`--workspace`|Workspace name for project discovery mode. Mutually exclusive with `--project-ids`.|
+|`--project-pattern`|Include regex filter for discovered projects. Matches project names only (the `project` part of `workspace/project`). Can be specified multiple times. Requires `--workspace`.|
+|`--project-exclude-pattern`|Exclude regex filter for discovered projects. Matches project names only (the `project` part of `workspace/project`). Can be specified multiple times. Requires `--workspace`.|
 |`-q`/`--models-query`|Neptune Query Language (NQL) filter applied when selecting models.|
 |`-a`/`--attributes`|One value is treated as a regex. Multiple values are treated as exact attribute names.|
 |`-c`/`--classes` and `--exclude`|Include or exclude data classes: `parameters`, `metrics`, `series`, `files`.|
 |`--include-archived-models`|Include trashed models when listing models.|
 |`-d`/`--data-path`|Path for exported model parquet data. Default: `./exports/model_data`.|
 |`-f`/`--files-path`|Path for downloaded model files. Default: `./exports/model_files`.|
+
+Project selection modes for `export-models`:
+- Explicit mode: pass one or more `--project-ids` (or `NEPTUNE_PROJECT`).
+- Discovery mode: pass `--workspace`, optionally with `--project-pattern` and `--project-exclude-pattern` (matched against project names).
+- You cannot mix explicit and discovery flags in one command.
+
+Examples:
+```bash
+uv run neptune-exporter export-models --workspace "workspace" --models-query '`sys/id`:string =~ "MODEL-.*"'
+```
+
+```bash
+uv run neptune-exporter export-models --workspace "workspace" --project-pattern ".*prod.*" --project-exclude-pattern ".*archive.*"
+```
 
 `export-models` stores:
 - model objects under `<data-path>/<project>/models/...`
