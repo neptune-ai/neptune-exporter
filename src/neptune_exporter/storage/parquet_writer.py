@@ -27,6 +27,7 @@ class RunWriter:
 
     project_id: str
     run_id: str
+    entity_scope: str | None
     writer: pq.ParquetWriter
     current_file_path: Path
     current_part: int = 0
@@ -48,24 +49,37 @@ class RunWriter:
 class RunWriterContext:
     """Context manager for writing to a specific run."""
 
-    def __init__(self, storage: "ParquetWriter", project_id: str, run_id: str):
+    def __init__(
+        self,
+        storage: "ParquetWriter",
+        project_id: str,
+        run_id: str,
+        entity_scope: str | None = None,
+    ):
         self.storage = storage
         self.project_id = project_id
         self.run_id = run_id
+        self.entity_scope = entity_scope
 
     def __enter__(self) -> "RunWriterContext":
         return self
 
     def __exit__(self, exc_type, exc_val, exc_tb) -> None:
-        self.storage.finish_run(self.project_id, self.run_id)
+        self.storage.finish_run(
+            self.project_id, self.run_id, entity_scope=self.entity_scope
+        )
 
     def save(self, data: pa.RecordBatch) -> None:
         """Save a RecordBatch to this run."""
-        self.storage.save(self.project_id, self.run_id, data)
+        self.storage.save(
+            self.project_id, self.run_id, data, entity_scope=self.entity_scope
+        )
 
     def finish_run(self) -> None:
         """Signal that the current run is complete."""
-        self.storage.finish_run(self.project_id, self.run_id)
+        self.storage.finish_run(
+            self.project_id, self.run_id, entity_scope=self.entity_scope
+        )
 
 
 class ParquetWriter:
@@ -80,21 +94,29 @@ class ParquetWriter:
         self._initialize_directory()
 
         # Track current part state per run (keyed by (project_id, run_id))
-        self._run_writers: dict[tuple[str, str], RunWriter] = {}
+        self._run_writers: dict[tuple[str, str, str | None], RunWriter] = {}
 
     def _initialize_directory(self) -> None:
         self.base_path.mkdir(parents=True, exist_ok=True)
 
-    def run_writer(self, project_id: str, run_id: str) -> RunWriterContext:
+    def run_writer(
+        self, project_id: str, run_id: str, entity_scope: str | None = None
+    ) -> RunWriterContext:
         """Get a context manager for writing to a specific run.
 
         Cleans up any leftover .tmp files from previous interrupted writes for this run.
         """
         # Clean up any leftover .tmp files from previous interrupted writes
-        self._cleanup_existing_parts(project_id, run_id)
-        return RunWriterContext(self, project_id, run_id)
+        self._cleanup_existing_parts(project_id, run_id, entity_scope=entity_scope)
+        return RunWriterContext(self, project_id, run_id, entity_scope=entity_scope)
 
-    def save(self, project_id: str, run_id: str, data: pa.RecordBatch) -> None:
+    def save(
+        self,
+        project_id: str,
+        run_id: str,
+        data: pa.RecordBatch,
+        entity_scope: str | None = None,
+    ) -> None:
         """Stream data to current part, creating new part when needed.
 
         Enforces one run per file - validates that run_id in data matches current run.
@@ -105,25 +127,29 @@ class ParquetWriter:
             run_id: The run ID
             data: The RecordBatch to save
         """
-        run_key = (project_id, run_id)
+        run_key = (project_id, run_id, entity_scope)
 
         # Check if we need to create a new part
         if run_key not in self._run_writers:
             # Create first part for new run
-            self._create_new_part(project_id, run_id, data)
+            self._create_new_part(project_id, run_id, data, entity_scope=entity_scope)
         else:
             writer_state = self._run_writers[run_key]
             # Check if current part exceeds size limit
             if writer_state.get_compressed_size() > self._target_part_size_bytes:
                 # Close current part and create new part
                 writer_state.close()
-                self._create_new_part(project_id, run_id, data)
+                self._create_new_part(
+                    project_id, run_id, data, entity_scope=entity_scope
+                )
 
         # Write batch to current part
         writer_state = self._run_writers[run_key]
         writer_state.writer.write_batch(data)
 
-    def _cleanup_existing_parts(self, project_id: str, run_id: str) -> None:
+    def _cleanup_existing_parts(
+        self, project_id: str, run_id: str, entity_scope: str | None = None
+    ) -> None:
         """Clean up any leftover files from a previous interrupted write for this run.
 
         Removes both .tmp files and existing .parquet files for this run, since
@@ -135,8 +161,9 @@ class ParquetWriter:
         """
         sanitized_project_id = sanitize_path_part(project_id)
         sanitized_run_id = sanitize_path_part(run_id)
-
-        project_dir = self.base_path / sanitized_project_id
+        project_dir = self._get_project_directory(
+            sanitized_project_id, entity_scope=entity_scope
+        )
         if not project_dir.exists():
             return
 
@@ -159,10 +186,14 @@ class ParquetWriter:
                 )
 
     def _create_new_part(
-        self, project_id: str, run_id: str, data: pa.RecordBatch
+        self,
+        project_id: str,
+        run_id: str,
+        data: pa.RecordBatch,
+        entity_scope: str | None = None,
     ) -> None:
         """Create a new part for the given run."""
-        run_key = (project_id, run_id)
+        run_key = (project_id, run_id, entity_scope)
 
         # Determine next part number from existing parts
         if run_key in self._run_writers:
@@ -177,11 +208,10 @@ class ParquetWriter:
         sanitized_run_id = sanitize_path_part(run_id)
 
         # Create temporary file path: run_id_part_N.parquet.tmp
-        table_path = (
-            self.base_path
-            / sanitized_project_id
-            / f"{sanitized_run_id}_part_{current_part}.parquet.tmp"
+        table_path = self._get_project_directory(
+            sanitized_project_id, entity_scope=entity_scope
         )
+        table_path = table_path / f"{sanitized_run_id}_part_{current_part}.parquet.tmp"
         table_path.parent.mkdir(parents=True, exist_ok=True)
 
         writer = pq.ParquetWriter(table_path, data.schema, compression="snappy")
@@ -199,13 +229,16 @@ class ParquetWriter:
             self._run_writers[run_key] = RunWriter(
                 project_id=project_id,
                 run_id=run_id,
+                entity_scope=entity_scope,
                 writer=writer,
                 current_file_path=table_path,
                 current_part=current_part,
                 part_paths={current_part: table_path},
             )
 
-    def finish_run(self, project_id: str, run_id: str) -> None:
+    def finish_run(
+        self, project_id: str, run_id: str, entity_scope: str | None = None
+    ) -> None:
         """Signal that a run is complete.
 
         Closes the current part and renames all .tmp files to final location,
@@ -215,7 +248,7 @@ class ParquetWriter:
             project_id: The project ID
             run_id: The run ID
         """
-        run_key = (project_id, run_id)
+        run_key = (project_id, run_id, entity_scope)
         if run_key not in self._run_writers:
             return  # No active writer
 
@@ -254,3 +287,11 @@ class ParquetWriter:
         for writer_state in self._run_writers.values():
             writer_state.close()
         self._run_writers.clear()
+
+    def _get_project_directory(
+        self, sanitized_project_id: str, entity_scope: str | None = None
+    ) -> Path:
+        project_dir = self.base_path / sanitized_project_id
+        if entity_scope is not None:
+            project_dir = project_dir / entity_scope
+        return project_dir

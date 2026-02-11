@@ -144,3 +144,53 @@ def test_print_data_summary(mock_echo):
     mock_echo.assert_called_once()
     call_args = mock_echo.call_args[0][0]
     assert "📊 Data Summary from /test/exports" in call_args
+
+
+def test_format_model_registry_summary():
+    """Test formatting model registry summary."""
+    summary = {
+        "total_projects": 1,
+        "total_models": 2,
+        "total_model_versions": 3,
+        "projects": {
+            Path("/test/model_exports/project1"): {
+                "project_id": "project1",
+                "models": {
+                    "total_entities": 2,
+                    "total_records": 12,
+                    "attribute_types": ["string", "float"],
+                },
+                "model_versions": {
+                    "total_entities": 3,
+                    "total_records": 30,
+                    "attribute_types": ["string", "float_series"],
+                },
+            }
+        },
+    }
+
+    input_path = Path("/test/model_exports")
+    formatted = ReportFormatter.format_model_registry_summary(summary, input_path)
+
+    assert "🧠 Model Registry Summary from /test/model_exports" in formatted
+    assert "📈 Total projects: 1" in formatted
+    assert "📦 Total models: 2" in formatted
+    assert "🏷️  Total model versions: 3" in formatted
+    assert "🏗️  Project: project1" in formatted
+    assert "📦 Models: 2 (12 records)" in formatted
+    assert "🏷️  Model versions: 3 (30 records)" in formatted
+
+
+def test_format_model_registry_summary_empty():
+    """Test formatting model registry summary when no model data exists."""
+    summary = {
+        "total_projects": 0,
+        "total_models": 0,
+        "total_model_versions": 0,
+        "projects": {},
+    }
+
+    input_path = Path("/test/model_exports")
+    formatted = ReportFormatter.format_model_registry_summary(summary, input_path)
+
+    assert "ℹ️  No exported model registry data found." in formatted

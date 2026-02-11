@@ -46,7 +46,12 @@ class ParquetReader:
         self.base_path = base_path
         self._logger = logging.getLogger(__name__)
 
-    def check_run_exists(self, project_id: str, run_id: SourceRunId) -> bool:
+    def check_run_exists(
+        self,
+        project_id: str,
+        run_id: SourceRunId,
+        entity_scope: str | None = None,
+    ) -> bool:
         """Check if a run exists and is complete (has part_0.parquet).
 
         Args:
@@ -59,7 +64,9 @@ class ParquetReader:
         sanitized_project_id = sanitize_path_part(project_id)
         sanitized_run_id = sanitize_path_part(run_id)
 
-        project_directory = self.base_path / sanitized_project_id
+        project_directory = self._get_project_directory(
+            self.base_path / sanitized_project_id, entity_scope=entity_scope
+        )
         if not project_directory.exists():
             return False
 
@@ -68,7 +75,9 @@ class ParquetReader:
         return part_0_file.exists()
 
     def list_project_directories(
-        self, project_ids: Optional[list[ProjectId]] = None
+        self,
+        project_ids: Optional[list[ProjectId]] = None,
+        entity_scope: str | None = None,
     ) -> list[Path]:
         """List all available projects in the exported data."""
         if not self.base_path.exists():
@@ -89,10 +98,18 @@ class ParquetReader:
                 if item.is_dir() and not item.name.startswith(".")
             ]
 
+        if entity_scope is not None:
+            project_directories = [
+                item for item in project_directories if (item / entity_scope).is_dir()
+            ]
+
         return sorted(project_directories)
 
     def list_run_files(
-        self, project_directory: Path, run_ids: Optional[list[SourceRunId]] = None
+        self,
+        project_directory: Path,
+        run_ids: Optional[list[SourceRunId]] = None,
+        entity_scope: str | None = None,
     ) -> list[RunFilePrefix]:
         """List all complete runs (those with part_0) in a project.
 
@@ -104,6 +121,9 @@ class ParquetReader:
         Returns:
             List of actual run IDs that have part_0.parquet (complete runs)
         """
+        project_directory = self._get_project_directory(
+            project_directory, entity_scope=entity_scope
+        )
         if not project_directory.exists():
             return []
 
@@ -130,13 +150,16 @@ class ParquetReader:
         project_directory: Path,
         runs: Optional[list[SourceRunId]] = None,
         attribute_types: Optional[list[str]] = None,
+        entity_scope: str | None = None,
     ) -> Generator[pa.Table, None, None]:
         """Read all data for a project, optionally filtered by project ids, runs and attribute types.
 
         Reads run-by-run, yielding parts separately (max 1 part in memory at once).
         Only reads complete runs (those with part_0.parquet).
         """
-        all_run_file_prefixes = self.list_run_files(project_directory, runs)
+        all_run_file_prefixes = self.list_run_files(
+            project_directory, runs, entity_scope=entity_scope
+        )
 
         if not all_run_file_prefixes:
             self._logger.warning(f"No runs found in {project_directory}")
@@ -144,7 +167,10 @@ class ParquetReader:
 
         for run_file_prefix in all_run_file_prefixes:
             for part_table in self.read_run_data(
-                project_directory, run_file_prefix, attribute_types
+                project_directory,
+                run_file_prefix,
+                attribute_types,
+                entity_scope=entity_scope,
             ):
                 yield part_table
 
@@ -154,6 +180,7 @@ class ParquetReader:
         run_file_prefix: RunFilePrefix,
         attribute_types: Optional[list[str]] = None,
         attribute_paths: Optional[list[str]] = None,
+        entity_scope: str | None = None,
     ) -> Generator[pa.Table, None, None]:
         """Read all parts for a specific run sequentially, yielding one part at a time.
 
@@ -164,6 +191,9 @@ class ParquetReader:
         Yields:
             PyArrow Table for each part (part_0, part_1, part_2, ...)
         """
+        project_directory = self._get_project_directory(
+            project_directory, entity_scope=entity_scope
+        )
         run_part_files = self._get_run_files(project_directory, run_file_prefix)
 
         if not run_part_files:
@@ -236,7 +266,10 @@ class ParquetReader:
         return table
 
     def read_run_metadata(
-        self, project_directory: Path, run_file_prefix: RunFilePrefix
+        self,
+        project_directory: Path,
+        run_file_prefix: RunFilePrefix,
+        entity_scope: str | None = None,
     ) -> Optional[RunMetadata]:
         """Read metadata from a run by reading all parts sequentially.
 
@@ -273,6 +306,7 @@ class ParquetReader:
                 "sys/forking/step",
                 "sys/creation_time",
             ],
+            entity_scope=entity_scope,
         ):
             # Extract metadata fields
             if metadata["project_id"] is None:
@@ -353,6 +387,14 @@ class ParquetReader:
             )
         else:
             return None
+
+    @staticmethod
+    def _get_project_directory(
+        project_directory: Path, entity_scope: str | None = None
+    ) -> Path:
+        if entity_scope is None:
+            return project_directory
+        return project_directory / entity_scope
 
     @staticmethod
     def _get_attribute_value(

@@ -358,3 +358,41 @@ def test_parquet_writer_cleanup_incomplete_run(temp_dir):
     # Verify new file was created
     final_file = project_dir / f"{sanitize_path_part('test-run')}_part_0.parquet"
     assert final_file.exists(), "New file should be created"
+
+
+def test_parquet_writer_writes_scoped_entities(temp_dir):
+    """Test that ParquetWriter writes scoped data under a dedicated scope directory."""
+    base_path = temp_dir
+    storage = ParquetWriter(base_path)
+
+    data = pa.record_batch(
+        {
+            "project_id": ["test-project"],
+            "run_id": ["MODEL-123"],
+            "attribute_path": ["sys/name"],
+            "attribute_type": ["string"],
+            "string_value": ["baseline-model"],
+        }
+    )
+
+    with storage.run_writer(
+        "test-project", "MODEL-123", entity_scope="models"
+    ) as writer:
+        writer.save(data)
+
+    scoped_file = (
+        base_path
+        / sanitize_path_part("test-project")
+        / "models"
+        / f"{sanitize_path_part('MODEL-123')}_part_0.parquet"
+    )
+    unscoped_file = (
+        base_path
+        / sanitize_path_part("test-project")
+        / f"{sanitize_path_part('MODEL-123')}_part_0.parquet"
+    )
+
+    assert scoped_file.exists(), "Scoped parquet file should exist"
+    assert not unscoped_file.exists(), (
+        "Unscoped path should not be used for scoped data"
+    )

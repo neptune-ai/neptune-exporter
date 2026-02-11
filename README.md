@@ -13,6 +13,7 @@ Neptune Exporter is a CLI tool to move Neptune experiments (version `2.x` or `3.
 ## What it does
 
 - Streams runs from Neptune to local storage. Artifacts are downloaded alongside the parquet.
+- Optionally exports Neptune 2.x model registry objects (models and model versions) to separate parquet/files roots.
 - Skips runs that were already exported (presence of `part_0.parquet`), making exports resumable.
 - Loads parquet data into alternative tools while preserving run structure (forks, steps, attributes) as closely as possible.
 - Prints a human-readable summary of what is on disk.
@@ -124,14 +125,47 @@ Export with Neptune `2.x` client, filtering runs using Neptune Query Language (N
 uv run neptune-exporter export -p "workspace/proj" --exporter neptune2 --runs-query '`sys/creation_time`:datetime > "2024-02-06T05:00:00Z"'
 ```
 
+### 2. Export model registry data (Neptune 2.x, optional):
 
-### 2. Inspect what was exported:
+```bash
+uv run neptune-exporter export-models \
+  -p "workspace/proj" \
+  --data-path ./exports/model_data \
+  --files-path ./exports/model_files
+```
+
+Options:
+
+|Option|Description|
+|-|-|
+|`-p`/`--project-ids`|Neptune project IDs to export model registry data from. Can be specified multiple times. If not provided, reads from `NEPTUNE_PROJECT`.|
+|`-q`/`--models-query`|Neptune Query Language (NQL) filter applied when selecting models.|
+|`-a`/`--attributes`|One value is treated as a regex. Multiple values are treated as exact attribute names.|
+|`-c`/`--classes` and `--exclude`|Include or exclude data classes: `parameters`, `metrics`, `series`, `files`.|
+|`--include-archived-models`|Include trashed models when listing models.|
+|`-d`/`--data-path`|Path for exported model parquet data. Default: `./exports/model_data`.|
+|`-f`/`--files-path`|Path for downloaded model files. Default: `./exports/model_files`.|
+
+`export-models` stores:
+- model objects under `<data-path>/<project>/models/...`
+- model version objects under `<data-path>/<project>/model_versions/...`
+
+It reuses the same parquet schema as run export (`src/neptune_exporter/model.py::SCHEMA`), with:
+- `project_id` = original Neptune project ID
+- `run_id` = model ID or model version ID
+
+Model version export is derived from selected models (all versions for selected models).
+
+
+### 3. Inspect what was exported:
 
   ```bash
-  uv run neptune-exporter summary --data-path ./exports/data
+  uv run neptune-exporter summary \
+    --data-path ./exports/data \
+    --model-data-path ./exports/model_data
   ```
 
-### 3. (optional) Load into a target:
+### 4. (optional) Load into a target:
 
   ```bash
   # Comet
@@ -224,6 +258,17 @@ uv run neptune-exporter export -p "workspace/proj" --exporter neptune2 --runs-qu
   - Default: `./exports/files`
   - Mirrors the sanitized project directory. File artifacts and file series are saved relative to that root.
   - Kept separate from the parquet path so you can place potentially large artifacts on different storage.
+
+- Model registry parquet path (from `export-models`)
+  - Default: `./exports/model_data`
+  - One directory per project, sanitized for filesystem safety.
+  - Models: `<project>/models/<model_id>_part_<n>.parquet`
+  - Model versions: `<project>/model_versions/<model_version_id>_part_<n>.parquet`
+- Model registry files path (from `export-models`)
+  - Default: `./exports/model_files`
+  - Mirrors the sanitized project directory and entity type (`models` / `model_versions`).
+  - `file_value.path` is stored relative to the per-project files root, with scope
+    prefixes: `models/<model_id>/...` and `model_versions/<model_version_id>/...`.
 
 ### Parquet schema
 
@@ -385,7 +430,11 @@ For details on Neptune attribute types, see the [documentation](https://docs.nep
 
 ## Summary command
 
-The `uv run neptune-exporter summary` command reads parquet files and prints counts of projects and runs, attribute type breakdowns, and basic step stats to help you verify the export before loading.
+The `uv run neptune-exporter summary` command reads parquet files and prints:
+- run export summary from `--data-path` (default `./exports/data`)
+- model registry summary from `--model-data-path` (default `./exports/model_data`)
+
+This helps verify both run exports and model registry exports before loading.
 
 ---
 

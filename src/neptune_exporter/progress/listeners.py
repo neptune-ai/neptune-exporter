@@ -96,7 +96,12 @@ class ProjectProgress:
             task_id = self._progress.add_task(description, total=total)
             self._tasks[project_id] = task_id
             return
-        self._progress.update(task_id, total=total, description=description)
+        self._progress.update(
+            task_id,
+            total=total,
+            completed=0,
+            description=description,
+        )
 
     def advance(self, project_id: ProjectId, advance: int) -> None:
         task_id = self._tasks.get(project_id)

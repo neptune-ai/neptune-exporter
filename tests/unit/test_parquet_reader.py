@@ -449,3 +449,42 @@ def test_read_run_metadata():
         assert metadata.experiment_name == "my-experiment"
         assert metadata.parent_source_run_id == "RUN-456"
         assert metadata.fork_step == 10.5
+
+
+def test_check_run_exists_with_scope():
+    """Test checking if a scoped entity exists."""
+    with TemporaryDirectory() as temp_dir:
+        temp_path = Path(temp_dir)
+        scoped_project_dir = temp_path / sanitize_path_part("test-project") / "models"
+        scoped_project_dir.mkdir(parents=True)
+
+        test_data = pd.DataFrame(
+            {
+                "project_id": ["test-project"],
+                "run_id": ["MODEL-123"],
+                "attribute_path": ["sys/name"],
+                "attribute_type": ["string"],
+                "step": [None],
+                "timestamp": [None],
+                "int_value": [None],
+                "float_value": [None],
+                "string_value": ["baseline-model"],
+                "bool_value": [None],
+                "datetime_value": [None],
+                "string_set_value": [None],
+                "file_value": [None],
+                "histogram_value": [None],
+            }
+        )
+
+        parquet_file = (
+            scoped_project_dir / f"{sanitize_path_part('MODEL-123')}_part_0.parquet"
+        )
+        table = pa.Table.from_pandas(test_data, schema=model.SCHEMA)
+        pq.write_table(table, parquet_file)
+
+        reader = ParquetReader(temp_path)
+        assert reader.check_run_exists(
+            "test-project", "MODEL-123", entity_scope="models"
+        )
+        assert not reader.check_run_exists("test-project", "MODEL-123")

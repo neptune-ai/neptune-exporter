@@ -112,3 +112,66 @@ class ReportFormatter:
         """Print a formatted data summary to the console."""
         report = ReportFormatter.format_data_summary(summary, input_path)
         click.echo(report)
+
+    @staticmethod
+    def format_model_registry_summary(summary: Dict[str, Any], input_path: Path) -> str:
+        """Format a detailed model registry summary report."""
+        lines = []
+        lines.append(f"🧠 Model Registry Summary from {input_path.absolute()}")
+        lines.append(f"📈 Total projects: {summary['total_projects']}")
+        lines.append(f"📦 Total models: {summary.get('total_models', 0)}")
+        lines.append(
+            f"🏷️  Total model versions: {summary.get('total_model_versions', 0)}"
+        )
+        lines.append("")
+
+        if summary["total_projects"] == 0:
+            lines.append("ℹ️  No exported model registry data found.")
+            return "\n".join(lines)
+
+        for project_directory, project_info in summary["projects"].items():
+            if project_info is None:
+                lines.append(
+                    f"❌ Project directory: {project_directory} (ERROR: Failed to read model registry data)"
+                )
+                lines.append("")
+                continue
+
+            project_id = project_info.get("project_id", "Unknown")
+            if project_id is None:
+                project_id = "Unknown"
+
+            models = project_info.get("models", {})
+            model_versions = project_info.get("model_versions", {})
+
+            lines.append(f"🏗️  Project: {project_id}")
+            lines.append(f"   📁 Directory: {project_directory}")
+            lines.append(
+                f"   📦 Models: {models.get('total_entities', 0)} ({models.get('total_records', 0):,} records)"
+            )
+            lines.append(
+                f"   🏷️  Model versions: {model_versions.get('total_entities', 0)} ({model_versions.get('total_records', 0):,} records)"
+            )
+
+            model_attr_types = models.get("attribute_types", [])
+            if model_attr_types:
+                lines.append(
+                    f"   📊 Model attribute types: {', '.join(model_attr_types)}"
+                )
+
+            model_version_attr_types = model_versions.get("attribute_types", [])
+            if model_version_attr_types:
+                lines.append(
+                    "   📊 Model version attribute types: "
+                    + ", ".join(model_version_attr_types)
+                )
+
+            lines.append("")
+
+        return "\n".join(lines)
+
+    @staticmethod
+    def print_model_registry_summary(summary: Dict[str, Any], input_path: Path) -> None:
+        """Print a formatted model registry summary to the console."""
+        report = ReportFormatter.format_model_registry_summary(summary, input_path)
+        click.echo(report)

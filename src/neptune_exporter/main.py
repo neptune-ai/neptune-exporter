@@ -22,6 +22,12 @@ from typing import Optional
 import click
 
 from neptune_exporter.export_manager import ExportManager
+from neptune_exporter.model_registry_export_manager import (
+    ModelRegistryExportManager,
+)
+from neptune_exporter.model_registry_summary_manager import (
+    ModelRegistrySummaryManager,
+)
 from neptune_exporter.progress.listeners import (
     Neptune2ProgressListenerFactory,
     Neptune3ProgressListenerFactory,
@@ -370,6 +376,264 @@ def export(
             summary_lines.append(f"  Runs matched: {runs_matched}.")
         if skipped_runs > 0:
             summary_lines.append(f"  Runs skipped: {skipped_runs}.")
+        if exception_summary.exception_count > 0:
+            summary_lines.append(
+                f"  Errors recorded: {exception_summary.exception_count}."
+            )
+            summary_lines.append(f"  Error report: {error_report_file.absolute()}.")
+        if log_file_path:
+            summary_lines.append(f"  Log file: {log_file_path.absolute()}.")
+        for line in summary_lines:
+            info_always(logger, line)
+
+
+@cli.command(name="export-models")
+@click.option(
+    "--project-ids",
+    "-p",
+    multiple=True,
+    help="Neptune project IDs to export models from. Can be specified multiple times. If not provided, reads from NEPTUNE_PROJECT environment variable.",
+)
+@click.option(
+    "--models-query",
+    "-q",
+    help="Filter models by a custom nql query. Applies to model selection in Neptune 2 exporter.",
+)
+@click.option(
+    "--attributes",
+    "-a",
+    multiple=True,
+    help="Filter attributes by name. Can be specified multiple times. "
+    "If a single string is provided, it's treated as a regex pattern. "
+    "If multiple strings are provided, they're treated as exact attribute names to match.",
+)
+@click.option(
+    "--classes",
+    "-c",
+    type=click.Choice(
+        ["parameters", "metrics", "series", "files"], case_sensitive=False
+    ),
+    multiple=True,
+    help="Types of data to include in export. Can be specified multiple times.",
+)
+@click.option(
+    "--exclude",
+    type=click.Choice(
+        ["parameters", "metrics", "series", "files"], case_sensitive=False
+    ),
+    multiple=True,
+    help="Types of data to exclude from export. Can be specified multiple times.",
+)
+@click.option(
+    "--include-archived-models",
+    is_flag=True,
+    help="Include archived/trashed models in export.",
+)
+@click.option(
+    "--data-path",
+    "-d",
+    type=click.Path(path_type=Path),
+    default="./exports/model_data",
+    help="Path for exported model parquet data. Default: ./exports/model_data",
+)
+@click.option(
+    "--files-path",
+    "-f",
+    type=click.Path(path_type=Path),
+    default="./exports/model_files",
+    help="Path for downloaded model files. Default: ./exports/model_files",
+)
+@click.option(
+    "--api-token",
+    help="Neptune API token. If not provided, will use environment variable NEPTUNE_API_TOKEN.",
+)
+@click.option(
+    "--verbose",
+    "-v",
+    is_flag=True,
+    help="Enable verbose logging including Neptune internal logs.",
+)
+@click.option(
+    "--log-file",
+    type=click.Path(path_type=Path),
+    default="./neptune_exporter.log",
+    help="Path for logging file. A timestamp suffix (YYYYMMDD_HHMMSS) will be automatically added to the filename. Default: ./neptune_exporter.log",
+)
+@click.option(
+    "--error-report-file",
+    type=click.Path(path_type=Path),
+    default="./neptune_exporter_errors.jsonl",
+    help="Path for error report file. Default: ./neptune_exporter_errors.jsonl",
+)
+@click.option(
+    "--no-progress",
+    is_flag=True,
+    help="Disable progress bar.",
+)
+def export_models(
+    project_ids: tuple[str, ...],
+    models_query: str | None,
+    attributes: tuple[str, ...],
+    classes: tuple[str, ...],
+    exclude: tuple[str, ...],
+    include_archived_models: bool,
+    data_path: Path,
+    files_path: Path,
+    api_token: str | None,
+    verbose: bool,
+    log_file: Path,
+    error_report_file: Path,
+    no_progress: bool,
+) -> None:
+    """Export Neptune2 model registry data to parquet files."""
+    project_ids_list = list(project_ids)
+    if not project_ids_list:
+        env_project = os.getenv("NEPTUNE_PROJECT")
+        if env_project:
+            project_ids_list = [env_project]
+        else:
+            raise click.BadParameter(
+                "No project IDs provided. Either use --project-ids/-p option or set NEPTUNE_PROJECT environment variable."
+            )
+
+    if not attributes:
+        attributes_list: list[str] | str | None = None
+    elif len(attributes) == 1:
+        attributes_list = attributes[0]
+    else:
+        attributes_list = list(attributes)
+
+    all_classes = {"parameters", "metrics", "series", "files"}
+    classes_set = set(classes) if classes else set()
+    exclude_set = set(exclude) if exclude else set()
+
+    if classes_set and exclude_set:
+        raise click.BadParameter(
+            "Cannot specify both --classes and --exclude. Use --classes to include specific types or --exclude to exclude specific types."
+        )
+
+    if classes_set:
+        export_classes_list = list(classes_set)
+    elif exclude_set:
+        export_classes_list = list(all_classes - exclude_set)
+    else:
+        export_classes_list = list(all_classes)
+
+    for project_id in project_ids_list:
+        if not project_id.strip():
+            raise click.BadParameter(
+                "Project ID cannot be empty. Please provide a valid project ID."
+            )
+
+    valid_export_classes = {"parameters", "metrics", "series", "files"}
+    export_classes_set = set(export_classes_list)
+    if not export_classes_set.issubset(valid_export_classes):
+        invalid = export_classes_set - valid_export_classes
+        raise click.BadParameter(f"Invalid export classes: {', '.join(invalid)}")
+
+    log_file_path = configure_logging(
+        stderr_level=logging.INFO if verbose else logging.ERROR,
+        log_file=log_file if log_file else None,
+    )
+
+    logger = logging.getLogger(__name__)
+    info_always(logger, "Exporting model registry data using arguments:")
+    info_always(logger, f"  Project IDs: {', '.join(project_ids_list)}")
+    info_always(logger, f"  Models query: {models_query}")
+    info_always(
+        logger,
+        f"  Attributes: {', '.join(attributes_list) if isinstance(attributes_list, list) else attributes_list}",
+    )
+    info_always(logger, f"  Export classes: {', '.join(export_classes_list)}")
+    info_always(logger, f"  Exclude: {', '.join(exclude_set)}")
+    info_always(logger, f"  Include archived models: {include_archived_models}")
+
+    error_reporter = ErrorReporter(path=error_report_file)
+    exporter_instance = Neptune2Exporter(
+        error_reporter=error_reporter,
+        api_token=api_token,
+    )
+    progress_listener_factory: ProgressListenerFactory = (
+        Neptune2ProgressListenerFactory()
+    )
+
+    if no_progress:
+        progress_listener_factory = NoopProgressListenerFactory()
+
+    writer = ParquetWriter(base_path=data_path)
+    reader = ParquetReader(base_path=data_path)
+
+    export_manager = ModelRegistryExportManager(
+        exporter=exporter_instance,
+        reader=reader,
+        writer=writer,
+        error_reporter=error_reporter,
+        files_destination=files_path,
+        progress_listener_factory=progress_listener_factory,
+    )
+
+    info_always(
+        logger,
+        f"Starting model registry export of {len(project_ids_list)} project(s)...",
+    )
+    info_always(logger, f"Export classes: {', '.join(export_classes_list)}")
+    info_always(logger, f"Data path: {data_path.absolute()}")
+    info_always(logger, f"Files path: {files_path.absolute()}")
+
+    model_export_result = None
+    export_failed = False
+    try:
+        model_export_result = export_manager.run(
+            project_ids=[ProjectId(project_id) for project_id in project_ids_list],
+            models_query=models_query,
+            attributes=attributes_list,
+            include_archived_models=include_archived_models,
+            export_classes=export_classes_set,  # type: ignore[arg-type]
+        )
+        if (
+            model_export_result.total_models == 0
+            and model_export_result.total_model_versions == 0
+        ):
+            info_always(logger, "No models found matching the specified criteria.")
+            if models_query:
+                info_always(logger, f"   Models query: {models_query}")
+            info_always(
+                logger,
+                "   Try adjusting your model query or check if the project contains any models.",
+            )
+    except NeptuneExporterAuthError as e:
+        export_failed = True
+        logger.error("%s", e)
+        raise click.Abort()
+    except Exception:
+        export_failed = True
+        logger.error("Model registry export failed", exc_info=True)
+        raise click.Abort()
+    finally:
+        exporter_instance.close()
+        writer.close_all()
+        exception_summary = error_reporter.get_summary()
+        summary_lines = ["Model registry export summary:"]
+        if export_failed:
+            summary_lines.append("  Status: failed.")
+        else:
+            summary_lines.append("  Status: finished.")
+        if model_export_result is not None:
+            summary_lines.append(
+                f"  Models matched: {model_export_result.total_models}."
+            )
+            summary_lines.append(
+                f"  Model versions matched: {model_export_result.total_model_versions}."
+            )
+            if model_export_result.skipped_models > 0:
+                summary_lines.append(
+                    f"  Models skipped: {model_export_result.skipped_models}."
+                )
+            if model_export_result.skipped_model_versions > 0:
+                summary_lines.append(
+                    "  Model versions skipped: "
+                    f"{model_export_result.skipped_model_versions}."
+                )
         if exception_summary.exception_count > 0:
             summary_lines.append(
                 f"  Errors recorded: {exception_summary.exception_count}."
@@ -840,6 +1104,12 @@ def load(
     help="Path for exported parquet data. Default: ./exports/data",
 )
 @click.option(
+    "--model-data-path",
+    type=click.Path(path_type=Path),
+    default="./exports/model_data",
+    help="Path for exported model registry parquet data. Default: ./exports/model_data",
+)
+@click.option(
     "--verbose",
     "-v",
     is_flag=True,
@@ -851,7 +1121,12 @@ def load(
     default="./neptune_exporter.log",
     help="Path for logging file. A timestamp suffix (YYYYMMDD_HHMMSS) will be automatically added to the filename. Default: ./neptune_exporter.log",
 )
-def summary(data_path: Path, verbose: bool, log_file: Path) -> None:
+def summary(
+    data_path: Path,
+    model_data_path: Path,
+    verbose: bool,
+    log_file: Path,
+) -> None:
     """Show summary of exported Neptune data.
 
     This command shows a summary of available data in the exported parquet files,
@@ -861,10 +1136,6 @@ def summary(data_path: Path, verbose: bool, log_file: Path) -> None:
     automatically added (e.g., neptune_exporter_20250115_143022.log) to ensure
     unique log files for each summary run.
     """
-    # Validate data path exists
-    if not data_path.exists():
-        raise click.BadParameter(f"Data path does not exist: {data_path}")
-
     # Configure logging
     configure_logging(
         stderr_level=logging.INFO if verbose else logging.ERROR,
@@ -873,14 +1144,22 @@ def summary(data_path: Path, verbose: bool, log_file: Path) -> None:
 
     logger = logging.getLogger(__name__)
 
-    # Create parquet reader and summary manager
     parquet_reader = ParquetReader(base_path=data_path)
     summary_manager = SummaryManager(parquet_reader=parquet_reader)
+    model_parquet_reader = ParquetReader(base_path=model_data_path)
+    model_summary_manager = ModelRegistrySummaryManager(
+        parquet_reader=model_parquet_reader
+    )
 
     try:
         # Show general data summary
         summary_data = summary_manager.get_data_summary()
         ReportFormatter.print_data_summary(summary_data, data_path)
+        click.echo("")
+        model_summary_data = model_summary_manager.get_data_summary()
+        ReportFormatter.print_model_registry_summary(
+            model_summary_data, model_data_path
+        )
 
     except Exception:
         logger.error("Failed to generate summary", exc_info=True)
