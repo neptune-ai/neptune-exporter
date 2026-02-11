@@ -28,6 +28,7 @@ from neptune_exporter.model_registry_export_manager import (
 from neptune_exporter.model_registry_summary_manager import (
     ModelRegistrySummaryManager,
 )
+from neptune_exporter.project_selection import resolve_export_project_ids
 from neptune_exporter.progress.listeners import (
     Neptune2ProgressListenerFactory,
     Neptune3ProgressListenerFactory,
@@ -47,6 +48,7 @@ from neptune_exporter.storage.parquet_writer import ParquetWriter
 from neptune_exporter.summary_manager import SummaryManager
 from neptune_exporter.types import ProjectId, SourceRunId
 from neptune_exporter.validation import ReportFormatter
+from neptune_exporter.workspace_projects import list_workspace_projects
 
 
 @click.group()
@@ -55,12 +57,39 @@ def cli():
     pass
 
 
+def _log_selected_project_ids(
+    logger: logging.Logger, project_ids: list[str], max_to_show: int = 10
+) -> None:
+    info_always(logger, f"  Project IDs resolved: {len(project_ids)}")
+    shown_ids = project_ids[:max_to_show]
+    for project_id in shown_ids:
+        info_always(logger, f"    - {project_id}")
+
+    remaining = len(project_ids) - len(shown_ids)
+    if remaining > 0:
+        info_always(logger, f"    ... and {remaining} more")
+
+
 @cli.command()
 @click.option(
     "--project-ids",
     "-p",
     multiple=True,
-    help="Neptune project IDs to export. Can be specified multiple times. If not provided, reads from NEPTUNE_PROJECT environment variable.",
+    help="Neptune project IDs to export (explicit mode). Can be specified multiple times. If not provided, reads from NEPTUNE_PROJECT environment variable.",
+)
+@click.option(
+    "--workspace",
+    help="Workspace name for discovery mode. Mutually exclusive with --project-ids/-p.",
+)
+@click.option(
+    "--project-pattern",
+    multiple=True,
+    help="Include filter regex on discovered project names. Requires --workspace. Can be specified multiple times.",
+)
+@click.option(
+    "--project-exclude-pattern",
+    multiple=True,
+    help="Exclude filter regex on discovered project names. Requires --workspace. Can be specified multiple times.",
 )
 @click.option(
     "--runs",
@@ -155,6 +184,9 @@ def cli():
 )
 def export(
     project_ids: tuple[str, ...],
+    workspace: str | None,
+    project_pattern: tuple[str, ...],
+    project_exclude_pattern: tuple[str, ...],
     runs: str | None,
     runs_query: str | None,
     attributes: tuple[str, ...],
@@ -210,19 +242,6 @@ def export(
     # Use environment variable for project ID
     NEPTUNE_PROJECT="my-org/my-project" neptune-exporter export --exporter neptune3
     """
-    # Convert tuples to lists and handle None values
-    project_ids_list = list(project_ids)
-
-    # If no project IDs provided, try to read from environment variable
-    if not project_ids_list:
-        env_project = os.getenv("NEPTUNE_PROJECT")
-        if env_project:
-            project_ids_list = [env_project]
-        else:
-            raise click.BadParameter(
-                "No project IDs provided. Either use --project-ids/-p option or set NEPTUNE_PROJECT environment variable."
-            )
-
     # Handle attributes: single string = regex, multiple strings = exact matches
     if not attributes:
         attributes_list: list[str] | str | None = None
@@ -253,13 +272,6 @@ def export(
         # Default to all classes if neither is specified
         export_classes_list = list(all_classes)
 
-    # Validate project IDs are not empty
-    for project_id in project_ids_list:
-        if not project_id.strip():
-            raise click.BadParameter(
-                "Project ID cannot be empty. Please provide a valid project ID."
-            )
-
     # Validate export classes
     valid_export_classes = {"parameters", "metrics", "series", "files"}
     export_classes_set = set(export_classes_list)
@@ -274,8 +286,37 @@ def export(
     )
 
     logger = logging.getLogger(__name__)
+
+    try:
+        project_ids_list = resolve_export_project_ids(
+            project_ids=project_ids,
+            workspace=workspace,
+            project_patterns=project_pattern,
+            project_exclude_patterns=project_exclude_pattern,
+            env_project=os.getenv("NEPTUNE_PROJECT"),
+            discover_workspace_projects=lambda workspace_name: list_workspace_projects(
+                workspace=workspace_name,
+                api_token=api_token,
+            ),
+        )
+    except NeptuneExporterAuthError as e:
+        logger.error("%s", e)
+        raise click.Abort()
+
+    selection_mode = "workspace discovery" if workspace else "explicit"
     info_always(logger, f"Exporting from {exporter} exporter using arguments:")
-    info_always(logger, f"  Project IDs: {', '.join(project_ids_list)}")
+    info_always(logger, f"  Project selection mode: {selection_mode}")
+    if workspace:
+        info_always(logger, f"  Workspace: {workspace}")
+        info_always(
+            logger,
+            f"  Project include patterns: {', '.join(project_pattern) if project_pattern else 'none'}",
+        )
+        info_always(
+            logger,
+            f"  Project exclude patterns: {', '.join(project_exclude_pattern) if project_exclude_pattern else 'none'}",
+        )
+    _log_selected_project_ids(logger, project_ids_list)
     info_always(logger, f"  Runs: {runs}")
     info_always(logger, f"  Runs query: {runs_query}")
     info_always(
@@ -392,7 +433,21 @@ def export(
     "--project-ids",
     "-p",
     multiple=True,
-    help="Neptune project IDs to export models from. Can be specified multiple times. If not provided, reads from NEPTUNE_PROJECT environment variable.",
+    help="Neptune project IDs to export models from (explicit mode). Can be specified multiple times. If not provided, reads from NEPTUNE_PROJECT environment variable.",
+)
+@click.option(
+    "--workspace",
+    help="Workspace name for discovery mode. Mutually exclusive with --project-ids/-p.",
+)
+@click.option(
+    "--project-pattern",
+    multiple=True,
+    help="Include filter regex on discovered project names. Requires --workspace. Can be specified multiple times.",
+)
+@click.option(
+    "--project-exclude-pattern",
+    multiple=True,
+    help="Exclude filter regex on discovered project names. Requires --workspace. Can be specified multiple times.",
 )
 @click.option(
     "--models-query",
@@ -472,6 +527,9 @@ def export(
 )
 def export_models(
     project_ids: tuple[str, ...],
+    workspace: str | None,
+    project_pattern: tuple[str, ...],
+    project_exclude_pattern: tuple[str, ...],
     models_query: str | None,
     attributes: tuple[str, ...],
     classes: tuple[str, ...],
@@ -486,16 +544,6 @@ def export_models(
     no_progress: bool,
 ) -> None:
     """Export Neptune2 model registry data to parquet files."""
-    project_ids_list = list(project_ids)
-    if not project_ids_list:
-        env_project = os.getenv("NEPTUNE_PROJECT")
-        if env_project:
-            project_ids_list = [env_project]
-        else:
-            raise click.BadParameter(
-                "No project IDs provided. Either use --project-ids/-p option or set NEPTUNE_PROJECT environment variable."
-            )
-
     if not attributes:
         attributes_list: list[str] | str | None = None
     elif len(attributes) == 1:
@@ -519,12 +567,6 @@ def export_models(
     else:
         export_classes_list = list(all_classes)
 
-    for project_id in project_ids_list:
-        if not project_id.strip():
-            raise click.BadParameter(
-                "Project ID cannot be empty. Please provide a valid project ID."
-            )
-
     valid_export_classes = {"parameters", "metrics", "series", "files"}
     export_classes_set = set(export_classes_list)
     if not export_classes_set.issubset(valid_export_classes):
@@ -537,8 +579,37 @@ def export_models(
     )
 
     logger = logging.getLogger(__name__)
+
+    try:
+        project_ids_list = resolve_export_project_ids(
+            project_ids=project_ids,
+            workspace=workspace,
+            project_patterns=project_pattern,
+            project_exclude_patterns=project_exclude_pattern,
+            env_project=os.getenv("NEPTUNE_PROJECT"),
+            discover_workspace_projects=lambda workspace_name: list_workspace_projects(
+                workspace=workspace_name,
+                api_token=api_token,
+            ),
+        )
+    except NeptuneExporterAuthError as e:
+        logger.error("%s", e)
+        raise click.Abort()
+
+    selection_mode = "workspace discovery" if workspace else "explicit"
     info_always(logger, "Exporting model registry data using arguments:")
-    info_always(logger, f"  Project IDs: {', '.join(project_ids_list)}")
+    info_always(logger, f"  Project selection mode: {selection_mode}")
+    if workspace:
+        info_always(logger, f"  Workspace: {workspace}")
+        info_always(
+            logger,
+            f"  Project include patterns: {', '.join(project_pattern) if project_pattern else 'none'}",
+        )
+        info_always(
+            logger,
+            f"  Project exclude patterns: {', '.join(project_exclude_pattern) if project_exclude_pattern else 'none'}",
+        )
+    _log_selected_project_ids(logger, project_ids_list)
     info_always(logger, f"  Models query: {models_query}")
     info_always(
         logger,

@@ -39,6 +39,11 @@ ProgressKind = Literal["parameters", "metrics", "series", "files"]
 
 
 class ProgressListener:
+    def on_project_started(
+        self, project_id: ProjectId, phase: str | None = None
+    ) -> None:
+        return
+
     def on_project_total(self, project_id: ProjectId, total: int) -> None:
         return
 
@@ -88,6 +93,22 @@ class ProjectProgress:
     def __init__(self, progress: Progress) -> None:
         self._progress = progress
         self._tasks: dict[ProjectId, TaskID] = {}
+
+    def start(self, project_id: ProjectId, phase: str | None = None) -> None:
+        description = f"Project {project_id}"
+        if phase:
+            description = f"{description} ({phase})"
+        task_id = self._tasks.get(project_id)
+        if task_id is None:
+            task_id = self._progress.add_task(description, total=None)
+            self._tasks[project_id] = task_id
+            return
+        self._progress.update(
+            task_id,
+            total=None,
+            completed=0,
+            description=description,
+        )
 
     def set_total(self, project_id: ProjectId, total: int) -> None:
         description = f"Project {project_id}"
@@ -262,6 +283,11 @@ class Neptune2ProgressListener(ProgressListener):
         self._project_progress = ProjectProgress(progress)
         self._kind_progress: dict[ProgressKind, RunAttributeProgress] = {}
 
+    def on_project_started(
+        self, project_id: ProjectId, phase: str | None = None
+    ) -> None:
+        self._project_progress.start(project_id, phase=phase)
+
     def on_project_total(self, project_id: ProjectId, total: int) -> None:
         self._project_progress.set_total(project_id, total)
 
@@ -297,6 +323,11 @@ class Neptune3ProgressListener(ProgressListener):
         self._run_list = RunListProgress(run_progress, max_lines=max_run_lines)
         self._aggregate = AggregateAttributeProgress(attribute_progress)
         self._project_progress = ProjectProgress(project_progress)
+
+    def on_project_started(
+        self, project_id: ProjectId, phase: str | None = None
+    ) -> None:
+        self._project_progress.start(project_id, phase=phase)
 
     def on_project_total(self, project_id: ProjectId, total: int) -> None:
         self._project_progress.set_total(project_id, total)

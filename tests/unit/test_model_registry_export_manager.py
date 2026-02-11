@@ -154,3 +154,58 @@ def test_model_registry_export_manager_routes_parameter_batches():
     )
     writer_context.save.assert_called_once()
     writer_context.finish_run.assert_called_once()
+
+
+def test_model_registry_export_manager_lists_models_per_project_lazily():
+    """Projects should be listed one-by-one, right before export for each project."""
+    mock_exporter = Mock()
+    first_project_download_started = {"value": False}
+
+    def list_models_side_effect(project_id, query=None, include_trashed=False):
+        if project_id == "workspace/project-2":
+            assert first_project_download_started["value"] is True
+        if project_id == "workspace/project-1":
+            return ["MODEL-1"]
+        return ["MODEL-2"]
+
+    def download_model_parameters_side_effect(
+        project_id, model_ids, attributes, progress
+    ):
+        if project_id == "workspace/project-1":
+            first_project_download_started["value"] = True
+        return []
+
+    mock_exporter.list_models.side_effect = list_models_side_effect
+    mock_exporter.list_model_versions.return_value = []
+    mock_exporter.download_model_parameters.side_effect = (
+        download_model_parameters_side_effect
+    )
+    mock_exporter.download_model_metrics.return_value = []
+    mock_exporter.download_model_series.return_value = []
+    mock_exporter.download_model_files.return_value = []
+    mock_exporter.download_model_version_parameters.return_value = []
+    mock_exporter.download_model_version_metrics.return_value = []
+    mock_exporter.download_model_version_series.return_value = []
+    mock_exporter.download_model_version_files.return_value = []
+
+    mock_reader = Mock(spec=ParquetReader)
+    mock_reader.check_run_exists.return_value = False
+    mock_writer = Mock(spec=ParquetWriter)
+    mock_writer.run_writer.side_effect = lambda *args, **kwargs: Mock()
+    mock_error_reporter = Mock(spec=ErrorReporter)
+
+    manager = ModelRegistryExportManager(
+        exporter=mock_exporter,
+        reader=mock_reader,
+        writer=mock_writer,
+        error_reporter=mock_error_reporter,
+        files_destination=Path("/tmp/files"),
+        progress_listener_factory=NoopProgressListenerFactory(),
+    )
+
+    result = manager.run(
+        project_ids=["workspace/project-1", "workspace/project-2"],
+        export_classes={"parameters"},
+    )
+
+    assert result.total_models == 2

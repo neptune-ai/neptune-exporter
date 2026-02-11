@@ -286,3 +286,57 @@ def test_export_manager_integration_with_real_files():
         # Should return 3 since it returns total runs found, not processed
         assert result.total_runs == 3
         assert result.skipped_runs == 2
+
+
+def test_export_manager_lists_runs_just_before_project_processing():
+    """Runs should be listed lazily, right before a given project is processed."""
+    mock_exporter = Mock()
+    mock_reader = Mock(spec=ParquetReader)
+    mock_writer = Mock(spec=ParquetWriter)
+    mock_error_reporter = Mock(spec=ErrorReporter)
+    mock_error_reporter.get_summary.return_value = ErrorSummary(exception_count=0)
+
+    mock_writer.base_path = Path("/fake/path")
+    mock_reader.check_run_exists.return_value = False
+
+    first_project_download_started = {"value": False}
+
+    def list_runs_side_effect(project_id, runs=None, query=None):
+        if project_id == "project-2":
+            assert first_project_download_started["value"] is True
+        if project_id == "project-1":
+            return ["RUN-1"]
+        return ["RUN-2"]
+
+    def download_parameters_side_effect(project_id, run_ids, attributes, progress):
+        if project_id == "project-1":
+            first_project_download_started["value"] = True
+        return []
+
+    mock_exporter.list_runs.side_effect = list_runs_side_effect
+    mock_exporter.download_parameters.side_effect = download_parameters_side_effect
+    mock_exporter.download_metrics.return_value = []
+    mock_exporter.download_series.return_value = []
+    mock_exporter.download_files.return_value = []
+    mock_exporter.get_exception_infos.return_value = []
+
+    mock_writer_context = Mock()
+    mock_writer.run_writer.return_value = mock_writer_context
+
+    export_manager = ExportManager(
+        exporter=mock_exporter,
+        reader=mock_reader,
+        writer=mock_writer,
+        error_reporter=mock_error_reporter,
+        files_destination=Path("/fake/files"),
+        progress_listener_factory=NoopProgressListenerFactory(),
+    )
+
+    result = export_manager.run(
+        project_ids=["project-1", "project-2"],
+        runs=None,
+        attributes=None,
+        export_classes={"parameters"},
+    )
+
+    assert result.total_runs == 2

@@ -1,6 +1,7 @@
 import re
 import uuid
 from datetime import datetime, timezone
+from time import monotonic, sleep
 from typing import Generator
 
 import neptune
@@ -8,6 +9,71 @@ import pyarrow as pa
 import pytest
 
 from neptune_exporter import model
+
+
+def _wait_for_model_registry_visibility(
+    *,
+    project: str,
+    api_token: str,
+    model_id: str,
+    model_version_id: str,
+    timeout_seconds: int = 10,
+    poll_interval_seconds: float = 1.0,
+) -> None:
+    """Wait until model and model version are visible in read APIs.
+
+    Neptune model registry APIs are eventually consistent. Without waiting,
+    freshly created entities can be missing for a short time and cause flaky
+    assertions in integration tests.
+    """
+    deadline = monotonic() + timeout_seconds
+    last_error: Exception | None = None
+
+    while monotonic() < deadline:
+        try:
+            with neptune.init_project(
+                api_token=api_token,
+                project=project,
+                mode="read-only",
+            ) as project_obj:
+                models_table = project_obj.fetch_models_table(
+                    query=f'`sys/id`:string = "{model_id}"',
+                    columns=["sys/id"],
+                    trashed=False,
+                    progress_bar=False,
+                ).to_pandas()
+            if models_table.empty:
+                sleep(poll_interval_seconds)
+                continue
+
+            with neptune.init_model(
+                api_token=api_token,
+                project=project,
+                with_id=model_id,
+                mode="read-only",
+            ) as model_obj:
+                versions_table = model_obj.fetch_model_versions_table(
+                    columns=["sys/id"],
+                    progress_bar=False,
+                    ascending=True,
+                ).to_pandas()
+
+            if model_version_id in set(versions_table["sys/id"]):
+                return
+        except Exception as exc:
+            last_error = exc
+
+        sleep(poll_interval_seconds)
+
+    if last_error is not None:
+        pytest.skip(
+            "Model registry entities were not visible before timeout due to "
+            f"eventual consistency. Last error: {last_error}"
+        )
+    pytest.skip(
+        "Model registry entities were not visible before timeout due to eventual "
+        "consistency."
+    )
 
 
 @pytest.fixture(scope="session")
@@ -42,6 +108,13 @@ def test_model_registry_entities(project, api_token):
         model_version_obj.stop()
     except Exception as e:
         pytest.skip(f"Model registry is unavailable in this Neptune workspace: {e}")
+
+    _wait_for_model_registry_visibility(
+        project=project,
+        api_token=api_token,
+        model_id=model_id,
+        model_version_id=model_version_id,
+    )
 
     return {
         "model_id": model_id,

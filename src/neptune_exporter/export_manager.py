@@ -65,26 +65,22 @@ class ExportManager:
             Literal["parameters", "metrics", "series", "files"]
         ] = {"parameters", "metrics", "series", "files"},
     ) -> ExportResult:
-        # Step 1: List all runs for all projects
-        project_runs = {
-            project_id: self._exporter.list_runs(
-                project_id=project_id, runs=runs, query=runs_query
-            )
-            for project_id in project_ids
-        }
         skipped_runs = 0
-
-        # Check if any runs were found
-        total_runs = sum(len(run_ids) for run_ids in project_runs.values())
-        if total_runs == 0:
-            return ExportResult(total_runs=0, skipped_runs=0)
+        total_runs = 0
 
         live = self._progress_listener_factory.create_live()
 
         with live:
             listener = self._progress_listener_factory.create_listener(live)
-            # Step 2: Process each project's runs
-            for project_id, run_ids in project_runs.items():
+            # Process each project one by one. We list runs lazily to avoid a long
+            # "all projects listing" phase before any visible progress.
+            for project_id in project_ids:
+                listener.on_project_started(project_id, phase="listing runs")
+                run_ids = self._exporter.list_runs(
+                    project_id=project_id, runs=runs, query=runs_query
+                )
+                total_runs += len(run_ids)
+
                 # Filter out already-exported runs
                 original_count = len(run_ids)
                 run_ids = [
@@ -166,6 +162,9 @@ class ExportManager:
                     listener.on_project_advance(project_id, len(batch_run_ids))
 
                 # Keep per-project task visible after completion
+
+        if total_runs == 0:
+            return ExportResult(total_runs=0, skipped_runs=0)
 
         exception_summary = self._error_reporter.get_summary()
         if exception_summary.exception_count > 0:
