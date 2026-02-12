@@ -104,9 +104,6 @@ def list_workspace_projects(
             response = (
                 backend_client.api.listProjects(
                     organizationIdentifier=workspace,
-                    userRelation="viewerOrHigher",
-                    sortBy=["lastViewed"],
-                    sortDirection=["descending"],
                     offset=offset,
                     limit=page_size,
                     **DEFAULT_REQUEST_KWARGS,
