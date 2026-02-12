@@ -87,80 +87,85 @@ class ModelRegistryExportManager:
 
         with live:
             listener = self._progress_listener_factory.create_listener(live)
-            for project_id in project_ids:
-                listener.on_project_started(project_id, phase="listing models")
-                all_model_ids = self._exporter.list_models(
-                    project_id=project_id,
-                    query=models_query,
-                    include_trashed=include_archived_models,
-                )
-                total_models += len(all_model_ids)
-
-                # Export models
-                model_ids = [
-                    model_id
-                    for model_id in all_model_ids
-                    if not self._reader.check_run_exists(
-                        project_id, model_id, entity_scope="models"
+            try:
+                for project_id in project_ids:
+                    listener.on_project_started(project_id, phase="listing models")
+                    all_model_ids = self._exporter.list_models(
+                        project_id=project_id,
+                        query=models_query,
+                        include_trashed=include_archived_models,
                     )
-                ]
-                skipped_models += len(all_model_ids) - len(model_ids)
-                listener.on_project_total(project_id, len(model_ids))
+                    total_models += len(all_model_ids)
 
-                self._export_entities(
-                    project_id=project_id,
-                    entity_ids=model_ids,
-                    entity_scope="models",
-                    attributes=attributes,
-                    export_classes=export_classes,
-                    listener=listener,
-                )
+                    # Export models
+                    model_ids = [
+                        model_id
+                        for model_id in all_model_ids
+                        if not self._reader.check_run_exists(
+                            project_id, model_id, entity_scope="models"
+                        )
+                    ]
+                    skipped_models += len(all_model_ids) - len(model_ids)
+                    listener.on_project_total(project_id, len(model_ids))
 
-                # Export model versions for all selected models
-                listener.on_project_started(project_id, phase="listing model versions")
-                all_model_version_ids: list[SourceRunId] = []
-                for model_id in all_model_ids:
-                    try:
-                        all_model_version_ids.extend(
-                            self._exporter.list_model_versions(
-                                project_id=project_id, model_id=model_id
+                    self._export_entities(
+                        project_id=project_id,
+                        entity_ids=model_ids,
+                        entity_scope="models",
+                        attributes=attributes,
+                        export_classes=export_classes,
+                        listener=listener,
+                    )
+
+                    # Export model versions for all selected models
+                    listener.on_project_started(
+                        project_id, phase="listing model versions"
+                    )
+                    all_model_version_ids: list[SourceRunId] = []
+                    for model_id in all_model_ids:
+                        try:
+                            all_model_version_ids.extend(
+                                self._exporter.list_model_versions(
+                                    project_id=project_id, model_id=model_id
+                                )
                             )
-                        )
-                    except Exception as e:
-                        self._logger.warning(
-                            f"Failed to list model versions for {project_id}/{model_id}",
-                            exc_info=True,
-                        )
-                        self._error_reporter.record_exception(
-                            project_id=project_id,
-                            run_id=model_id,
-                            attribute_path=None,
-                            attribute_type=None,
-                            exception=e,
-                        )
+                        except Exception as e:
+                            self._logger.warning(
+                                f"Failed to list model versions for {project_id}/{model_id}",
+                                exc_info=True,
+                            )
+                            self._error_reporter.record_exception(
+                                project_id=project_id,
+                                run_id=model_id,
+                                attribute_path=None,
+                                attribute_type=None,
+                                exception=e,
+                            )
 
-                total_model_versions += len(all_model_version_ids)
-                model_version_ids = [
-                    model_version_id
-                    for model_version_id in all_model_version_ids
-                    if not self._reader.check_run_exists(
-                        project_id,
-                        model_version_id,
-                        entity_scope="model_versions",
+                    total_model_versions += len(all_model_version_ids)
+                    model_version_ids = [
+                        model_version_id
+                        for model_version_id in all_model_version_ids
+                        if not self._reader.check_run_exists(
+                            project_id,
+                            model_version_id,
+                            entity_scope="model_versions",
+                        )
+                    ]
+                    skipped_model_versions += len(all_model_version_ids) - len(
+                        model_version_ids
                     )
-                ]
-                skipped_model_versions += len(all_model_version_ids) - len(
-                    model_version_ids
-                )
-                listener.on_project_total(project_id, len(model_version_ids))
-                self._export_entities(
-                    project_id=project_id,
-                    entity_ids=model_version_ids,
-                    entity_scope="model_versions",
-                    attributes=attributes,
-                    export_classes=export_classes,
-                    listener=listener,
-                )
+                    listener.on_project_total(project_id, len(model_version_ids))
+                    self._export_entities(
+                        project_id=project_id,
+                        entity_ids=model_version_ids,
+                        entity_scope="model_versions",
+                        attributes=attributes,
+                        export_classes=export_classes,
+                        listener=listener,
+                    )
+            finally:
+                listener.on_export_finished()
 
         return ModelRegistryExportResult(
             total_models=total_models,

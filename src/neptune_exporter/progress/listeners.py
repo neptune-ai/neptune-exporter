@@ -74,6 +74,9 @@ class ProgressListener:
     ) -> None:
         return
 
+    def on_export_finished(self) -> None:
+        return
+
 
 class NoopProgressListener(ProgressListener):
     pass
@@ -90,19 +93,55 @@ class ProgressListenerFactory(ABC):
 
 
 class ProjectProgress:
-    def __init__(self, progress: Progress) -> None:
+    def __init__(self, progress: Progress, max_lines: int = 16) -> None:
         self._progress = progress
+        self._max_lines = max_lines if max_lines > 0 else None
         self._tasks: dict[ProjectId, TaskID] = {}
+        self._totals: dict[ProjectId, int | None] = {}
+        self._completed: dict[ProjectId, int] = {}
+        self._descriptions: dict[ProjectId, str] = {}
+        self._all_order: list[ProjectId] = []
+        self._visible_order: list[ProjectId] = []
+        self._hidden: set[ProjectId] = set()
+
+    def _ensure_registered(self, project_id: ProjectId, description: str) -> None:
+        if project_id not in self._descriptions:
+            self._all_order.append(project_id)
+        self._descriptions[project_id] = description
+
+    def _ensure_visible(self, project_id: ProjectId) -> TaskID:
+        task_id = self._tasks.get(project_id)
+        if task_id is not None:
+            return task_id
+
+        if (
+            self._max_lines is not None
+            and len(self._visible_order) >= self._max_lines
+            and self._visible_order
+        ):
+            oldest_project_id = self._visible_order.pop(0)
+            oldest_task_id = self._tasks.pop(oldest_project_id)
+            self._progress.remove_task(oldest_task_id)
+            self._hidden.add(oldest_project_id)
+
+        task_id = self._progress.add_task(
+            self._descriptions[project_id],
+            total=self._totals.get(project_id),
+            completed=self._completed.get(project_id, 0),
+        )
+        self._tasks[project_id] = task_id
+        self._visible_order.append(project_id)
+        self._hidden.discard(project_id)
+        return task_id
 
     def start(self, project_id: ProjectId, phase: str | None = None) -> None:
         description = f"Project {project_id}"
         if phase:
             description = f"{description} ({phase})"
-        task_id = self._tasks.get(project_id)
-        if task_id is None:
-            task_id = self._progress.add_task(description, total=None)
-            self._tasks[project_id] = task_id
-            return
+        self._ensure_registered(project_id, description)
+        self._totals[project_id] = None
+        self._completed[project_id] = 0
+        task_id = self._ensure_visible(project_id)
         self._progress.update(
             task_id,
             total=None,
@@ -112,11 +151,10 @@ class ProjectProgress:
 
     def set_total(self, project_id: ProjectId, total: int) -> None:
         description = f"Project {project_id}"
-        task_id = self._tasks.get(project_id)
-        if task_id is None:
-            task_id = self._progress.add_task(description, total=total)
-            self._tasks[project_id] = task_id
-            return
+        self._ensure_registered(project_id, description)
+        self._totals[project_id] = total
+        self._completed[project_id] = 0
+        task_id = self._ensure_visible(project_id)
         self._progress.update(
             task_id,
             total=total,
@@ -125,10 +163,31 @@ class ProjectProgress:
         )
 
     def advance(self, project_id: ProjectId, advance: int) -> None:
-        task_id = self._tasks.get(project_id)
-        if task_id is None:
+        if project_id not in self._descriptions:
             return
+        task_id = self._ensure_visible(project_id)
         self._progress.update(task_id, advance=advance)
+        self._completed[project_id] = self._completed.get(project_id, 0) + advance
+
+    def show_all(self) -> None:
+        if not self._hidden:
+            return
+
+        for project_id in list(self._visible_order):
+            task_id = self._tasks.pop(project_id, None)
+            if task_id is not None:
+                self._progress.remove_task(task_id)
+        self._visible_order.clear()
+
+        for project_id in self._all_order:
+            task_id = self._progress.add_task(
+                self._descriptions[project_id],
+                total=self._totals.get(project_id),
+                completed=self._completed.get(project_id, 0),
+            )
+            self._tasks[project_id] = task_id
+            self._visible_order.append(project_id)
+        self._hidden.clear()
 
 
 class RunAttributeProgress:
@@ -311,6 +370,9 @@ class Neptune2ProgressListener(ProgressListener):
         for progress in self._kind_progress.values():
             progress.remove(run_id)
 
+    def on_export_finished(self) -> None:
+        self._project_progress.show_all()
+
 
 class Neptune3ProgressListener(ProgressListener):
     def __init__(
@@ -350,6 +412,9 @@ class Neptune3ProgressListener(ProgressListener):
         self, kind: ProgressKind, run_ids: Sequence[SourceRunId], advance: int
     ) -> None:
         self._aggregate.advance(kind, advance)
+
+    def on_export_finished(self) -> None:
+        self._project_progress.show_all()
 
 
 class NoopProgressListenerFactory(ProgressListenerFactory):
