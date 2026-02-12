@@ -46,3 +46,33 @@ def test_project_progress_start_sets_indeterminate_task():
     task = progress.tasks[0]
     assert task.total is None
     assert task.description == "Project workspace/project (listing runs)"
+
+
+def test_project_progress_shows_newest_projects_in_live_window():
+    """Live view should keep the newest project rows when project count grows."""
+    progress = Progress()
+    project_progress = ProjectProgress(progress, max_lines=2)
+
+    project_progress.set_total("workspace/project-1", 1)
+    project_progress.set_total("workspace/project-2", 1)
+    project_progress.set_total("workspace/project-3", 1)
+
+    assert len(progress.tasks) == 2
+    assert progress.tasks[0].description == "Project workspace/project-2"
+    assert progress.tasks[1].description == "Project workspace/project-3"
+
+
+def test_project_progress_show_all_restores_hidden_projects():
+    """Final render should include hidden projects from the live window."""
+    progress = Progress()
+    project_progress = ProjectProgress(progress, max_lines=2)
+
+    project_progress.set_total("workspace/project-1", 1)
+    project_progress.set_total("workspace/project-2", 1)
+    project_progress.set_total("workspace/project-3", 1)
+    project_progress.show_all()
+
+    assert len(progress.tasks) == 3
+    assert progress.tasks[0].description == "Project workspace/project-1"
+    assert progress.tasks[1].description == "Project workspace/project-2"
+    assert progress.tasks[2].description == "Project workspace/project-3"

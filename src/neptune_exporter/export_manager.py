@@ -72,96 +72,99 @@ class ExportManager:
 
         with live:
             listener = self._progress_listener_factory.create_listener(live)
-            # Process each project one by one. We list runs lazily to avoid a long
-            # "all projects listing" phase before any visible progress.
-            for project_id in project_ids:
-                listener.on_project_started(project_id, phase="listing runs")
-                run_ids = self._exporter.list_runs(
-                    project_id=project_id, runs=runs, query=runs_query
-                )
-                total_runs += len(run_ids)
-
-                # Filter out already-exported runs
-                original_count = len(run_ids)
-                run_ids = [
-                    rid
-                    for rid in run_ids
-                    if not self._reader.check_run_exists(project_id, rid)
-                ]
-                skipped = original_count - len(run_ids)
-                if skipped > 0:
-                    skipped_runs += skipped
-                    self._logger.info(
-                        f"Skipping {skipped} already exported run(s) in {project_id}"
+            try:
+                # Process each project one by one. We list runs lazily to avoid a long
+                # "all projects listing" phase before any visible progress.
+                for project_id in project_ids:
+                    listener.on_project_started(project_id, phase="listing runs")
+                    run_ids = self._exporter.list_runs(
+                        project_id=project_id, runs=runs, query=runs_query
                     )
-                listener.on_project_total(project_id, len(run_ids))
+                    total_runs += len(run_ids)
 
-                if not run_ids:
-                    continue  # All runs already exported or deleted, skip to next project
-
-                # Process runs in batches for concurrent downloading
-                for batch_start in range(0, len(run_ids), self._batch_size):
-                    batch_run_ids = run_ids[
-                        batch_start : batch_start + self._batch_size
+                    # Filter out already-exported runs
+                    original_count = len(run_ids)
+                    run_ids = [
+                        rid
+                        for rid in run_ids
+                        if not self._reader.check_run_exists(project_id, rid)
                     ]
+                    skipped = original_count - len(run_ids)
+                    if skipped > 0:
+                        skipped_runs += skipped
+                        self._logger.info(
+                            f"Skipping {skipped} already exported run(s) in {project_id}"
+                        )
+                    listener.on_project_total(project_id, len(run_ids))
 
-                    for run_id in batch_run_ids:
-                        listener.on_run_started(run_id)
+                    if (
+                        not run_ids
+                    ):  # All runs already exported or deleted, skip to next project
+                        continue
 
-                    # Create writers for all runs in this batch
-                    writers = {
-                        run_id: self._writer.run_writer(project_id, run_id)
-                        for run_id in batch_run_ids
-                    }
+                    # Process runs in batches for concurrent downloading
+                    for batch_start in range(0, len(run_ids), self._batch_size):
+                        batch_run_ids = run_ids[
+                            batch_start : batch_start + self._batch_size
+                        ]
 
-                    try:
-                        if "parameters" in export_classes:
-                            for batch in self._exporter.download_parameters(
-                                project_id=project_id,
-                                run_ids=batch_run_ids,
-                                attributes=attributes,
-                                progress=listener,
-                            ):
-                                self._route_batch_to_writers(batch, writers)
-
-                        if "metrics" in export_classes:
-                            for batch in self._exporter.download_metrics(
-                                project_id=project_id,
-                                run_ids=batch_run_ids,
-                                attributes=attributes,
-                                progress=listener,
-                            ):
-                                self._route_batch_to_writers(batch, writers)
-
-                        if "series" in export_classes:
-                            for batch in self._exporter.download_series(
-                                project_id=project_id,
-                                run_ids=batch_run_ids,
-                                attributes=attributes,
-                                progress=listener,
-                            ):
-                                self._route_batch_to_writers(batch, writers)
-
-                        if "files" in export_classes:
-                            for batch in self._exporter.download_files(
-                                project_id=project_id,
-                                run_ids=batch_run_ids,
-                                attributes=attributes,
-                                destination=self._files_destination
-                                / sanitize_path_part(project_id),
-                                progress=listener,
-                            ):
-                                self._route_batch_to_writers(batch, writers)
-                    finally:
-                        # Exit all writer contexts
-                        for writer in writers.values():
-                            writer.finish_run()
                         for run_id in batch_run_ids:
-                            listener.on_run_finished(run_id)
+                            listener.on_run_started(run_id)
 
-                    listener.on_project_advance(project_id, len(batch_run_ids))
+                        # Create writers for all runs in this batch
+                        writers = {
+                            run_id: self._writer.run_writer(project_id, run_id)
+                            for run_id in batch_run_ids
+                        }
 
-                # Keep per-project task visible after completion
+                        try:
+                            if "parameters" in export_classes:
+                                for batch in self._exporter.download_parameters(
+                                    project_id=project_id,
+                                    run_ids=batch_run_ids,
+                                    attributes=attributes,
+                                    progress=listener,
+                                ):
+                                    self._route_batch_to_writers(batch, writers)
+
+                            if "metrics" in export_classes:
+                                for batch in self._exporter.download_metrics(
+                                    project_id=project_id,
+                                    run_ids=batch_run_ids,
+                                    attributes=attributes,
+                                    progress=listener,
+                                ):
+                                    self._route_batch_to_writers(batch, writers)
+
+                            if "series" in export_classes:
+                                for batch in self._exporter.download_series(
+                                    project_id=project_id,
+                                    run_ids=batch_run_ids,
+                                    attributes=attributes,
+                                    progress=listener,
+                                ):
+                                    self._route_batch_to_writers(batch, writers)
+
+                            if "files" in export_classes:
+                                for batch in self._exporter.download_files(
+                                    project_id=project_id,
+                                    run_ids=batch_run_ids,
+                                    attributes=attributes,
+                                    destination=self._files_destination
+                                    / sanitize_path_part(project_id),
+                                    progress=listener,
+                                ):
+                                    self._route_batch_to_writers(batch, writers)
+                        finally:
+                            # Exit all writer contexts
+                            for writer in writers.values():
+                                writer.finish_run()
+                            for run_id in batch_run_ids:
+                                listener.on_run_finished(run_id)
+
+                        listener.on_project_advance(project_id, len(batch_run_ids))
+            finally:
+                listener.on_export_finished()
 
         if total_runs == 0:
             return ExportResult(total_runs=0, skipped_runs=0)
