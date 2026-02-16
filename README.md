@@ -445,7 +445,7 @@ All records use `src/neptune_exporter/model.py::SCHEMA`:
 
 - **Parameters** (`float`, `int`, `string`, `bool`, `datetime`, `string_set`):
   - Comet: logged as parameters with native types (string_set → list).
-  - GoodSeed: logged as configs with native types (datetime → ISO string, string_set → comma-separated string). Skips Neptune-internal `sys/` metadata (`sys/id`, `sys/state`, `sys/owner`, `sys/size`, `sys/ping_time`, `sys/running_time`, `sys/monitoring_time`) and `monitoring/*` attributes. `sys/name` is used as the experiment name.
+  - GoodSeed: logged as configs with native types (datetime → ISO string, string_set → comma-separated string). Skips Neptune-internal `sys/` metadata (`sys/id`, `sys/custom_run_id`, `sys/name`, `sys/state`, `sys/owner`, `sys/size`, `sys/ping_time`, `sys/running_time`, `sys/monitoring_time`). `sys/name` is used as the experiment name.
   - LitLogger: logged as experiment metadata (string key-value pairs, searchable/filterable in the UI).
   - Minfx: logged with native types (datetime → timestamp, string_set → StringSet). Preserves `sys/hostname`, `sys/tags`, and `sys/group_tags` from original data; other `sys/*` attributes are skipped as they're managed by Neptune.
   - MLflow: logged as params (values stringified by the client).
@@ -486,7 +486,7 @@ All records use `src/neptune_exporter/model.py::SCHEMA`:
   - ZenML: uploaded via `save_artifact()` and linked to Model Versions.
 - **Attribute names**:
   - Comet: sanitized to allowed pattern (`^[_a-zA-Z][_a-zA-Z0-9]*$`); invalid chars become `_`, and names are forced to start with a letter or underscore.
-  - GoodSeed: attribute paths are preserved as-is (GoodSeed uses `/` as path separator, matching Neptune). Skips Neptune-internal `sys/` attributes (`sys/id`, `sys/state`, `sys/owner`, `sys/size`, heartbeat/monitoring times) and `monitoring/*` attributes. `sys/name` is used for experiment name.
+  - GoodSeed: attribute paths are preserved as-is (GoodSeed uses `/` as path separator, matching Neptune). Skips Neptune-internal `sys/` attributes (`sys/id`, `sys/custom_run_id`, `sys/name`, `sys/state`, `sys/owner`, `sys/size`, heartbeat/monitoring times). `sys/name` is used for experiment name.
   - LitLogger: sanitized to allowed pattern (`^[a-zA-Z0-9_-]+$`); invalid chars become `_`. Experiment and teamspace names are truncated to 64 chars.
   - Minfx: Skips `sys/*` attributes except allowed ones (`sys/hostname`, `sys/tags`, `sys/group_tags`).
   - MLflow: sanitized to allowed chars (alphanumeric + `_-. /`), truncated at 250 chars.

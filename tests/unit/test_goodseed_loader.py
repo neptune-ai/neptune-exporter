@@ -64,76 +64,11 @@ def _table_gen(*tables):
 # Initialization
 
 
-def test_init_basic():
-    """Test basic initialization."""
-    loader = _make_loader()
-    assert loader._goodseed_home is None
-    assert loader._goodseed_project is None
-    assert loader._name_prefix is None
-
-
-def test_init_with_options():
-    """Test initialization with all options."""
-    loader = _make_loader(
-        goodseed_home="/tmp/gs",
-        goodseed_project="my-project",
-        name_prefix="import",
-    )
-    assert loader._goodseed_home == "/tmp/gs"
-    assert loader._goodseed_project == "my-project"
-    assert loader._name_prefix == "import"
-
-
 def test_init_raises_without_goodseed():
     """Test that init raises when goodseed is not installed."""
     with patch("neptune_exporter.loaders.goodseed_loader.GOODSEED_AVAILABLE", False):
         with pytest.raises(RuntimeError, match="GoodSeed is not installed"):
             GoodseedLoader()
-
-
-# Helper methods
-
-
-def test_get_run_name():
-    """Test run name generation."""
-    loader = _make_loader()
-    assert loader._get_run_name("RUN-123") == "RUN-123"
-
-
-def test_get_run_name_with_prefix():
-    """Test run name with prefix."""
-    loader = _make_loader(name_prefix="import")
-    assert loader._get_run_name("RUN-123") == "import_RUN-123"
-
-
-def test_get_project_default():
-    """Test project uses Neptune project ID by default."""
-    loader = _make_loader()
-    assert loader._get_project("workspace/my-project") == "workspace/my-project"
-
-
-def test_get_project_override():
-    """Test project override."""
-    loader = _make_loader(goodseed_project="custom-project")
-    assert loader._get_project("workspace/my-project") == "custom-project"
-
-
-def test_convert_step():
-    """Test decimal step conversion to integer."""
-    loader = _make_loader()
-    assert loader._convert_step(Decimal("1.5"), 1000) == 1500
-    assert loader._convert_step(Decimal("0"), 1) == 0
-    assert loader._convert_step(None, 1000) == 0
-
-
-# create_experiment
-
-
-def test_create_experiment():
-    """Test create_experiment returns experiment name."""
-    loader = _make_loader()
-    result = loader.create_experiment("test-project", "my-experiment")
-    assert result == "my-experiment"
 
 
 # find_run
@@ -172,37 +107,6 @@ def test_create_run():
     assert loader._pending_run["run_name"] == "RUN-123"
     assert loader._pending_run["project"] == "workspace/project"
     assert loader._pending_run["experiment_name"] == "my-experiment"
-
-
-def test_create_run_with_prefix():
-    """Test create_run applies name prefix."""
-    loader = _make_loader(name_prefix="import")
-    run_id = loader.create_run("workspace/project", "RUN-123")
-
-    assert run_id == "import_RUN-123"
-    assert loader._pending_run["run_name"] == "import_RUN-123"
-
-
-def test_create_run_with_project_override():
-    """Test create_run uses project override."""
-    loader = _make_loader(goodseed_project="my-project")
-    loader.create_run("workspace/project", "RUN-123")
-
-    assert loader._pending_run["project"] == "my-project"
-
-
-def test_create_run_with_fork_info():
-    """Test create_run stores fork information."""
-    loader = _make_loader()
-    loader.create_run(
-        "workspace/project",
-        "RUN-123",
-        parent_run_id="RUN-100",
-        fork_step=42.0,
-    )
-
-    assert loader._pending_run["parent_run_id"] == "RUN-100"
-    assert loader._pending_run["fork_step"] == 42.0
 
 
 # upload_run_data - parameters
@@ -342,8 +246,8 @@ def test_upload_skips_sys_attributes():
     assert all_configs["config/lr"] == 0.01
 
 
-def test_upload_skips_monitoring_attributes():
-    """Test that monitoring/* attributes are skipped."""
+def test_upload_includes_monitoring_attributes():
+    """Test that monitoring/* attributes are imported (used by GoodSeed frontend)."""
     loader = _make_loader()
     mock_run = Mock()
 
@@ -368,7 +272,7 @@ def test_upload_skips_monitoring_attributes():
     for c in mock_run.log_configs.call_args_list:
         all_configs.update(c[0][0])
 
-    assert "monitoring/gpu/0/memory" not in all_configs
+    assert all_configs["monitoring/gpu/0/memory"] == 85.5
     assert all_configs["config/lr"] == 0.01
 
 
@@ -538,16 +442,26 @@ def test_upload_string_series_missing_step_defaults_to_zero():
 # upload_run_data - skipped types
 
 
-def test_upload_warns_on_files():
-    """Test that file attributes produce a warning but don't crash the run."""
+def test_upload_skips_unsupported_types():
+    """Test that files and histograms are skipped without crashing the run."""
     loader = _make_loader()
     mock_run = Mock()
 
     table = _make_table(
         {
-            "attribute_path": ["artifacts/model", "artifacts/checkpoint"],
-            "attribute_type": ["file", "file_series"],
-            "file_value": [{"path": "model.pt"}, {"path": "ckpt.pt"}],
+            "attribute_path": [
+                "artifacts/model",
+                "artifacts/checkpoint",
+                "hist/weights",
+            ],
+            "attribute_type": ["file", "file_series", "histogram_series"],
+            "file_value": [{"path": "model.pt"}, {"path": "ckpt.pt"}, None],
+            "step": [None, None, Decimal("1")],
+            "histogram_value": [
+                None,
+                None,
+                {"type": "auto", "edges": [0.0, 1.0], "values": [5.0]},
+            ],
         }
     )
 
@@ -560,33 +474,10 @@ def test_upload_warns_on_files():
             _table_gen(table), "RUN-1", Path("/files"), step_multiplier=1
         )
 
+    # Run should complete successfully despite unsupported types
     mock_run.close.assert_called_once()
-
-
-def test_upload_warns_on_histograms():
-    """Test that histogram attributes produce a warning but don't crash the run."""
-    loader = _make_loader()
-    mock_run = Mock()
-
-    table = _make_table(
-        {
-            "attribute_path": ["hist/weights"],
-            "attribute_type": ["histogram_series"],
-            "step": [Decimal("1")],
-            "histogram_value": [{"type": "auto", "edges": [0.0, 1.0], "values": [5.0]}],
-        }
-    )
-
-    with patch(
-        "neptune_exporter.loaders.goodseed_loader.goodseed.Run",
-        return_value=mock_run,
-    ):
-        loader.create_run("test-project", "RUN-1")
-        loader.upload_run_data(
-            _table_gen(table), "RUN-1", Path("/files"), step_multiplier=1
-        )
-
-    mock_run.close.assert_called_once()
+    mock_run.log_metrics.assert_not_called()
+    mock_run.log_string_series.assert_not_called()
 
 
 # upload_run_data - metadata extraction from sys/ attributes

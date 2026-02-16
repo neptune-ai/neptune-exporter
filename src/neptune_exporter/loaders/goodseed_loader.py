@@ -326,9 +326,6 @@ class GoodseedLoader(DataLoader):
             # Skip most sys/ attributes
             if attr_path in _SKIP_SYS_ATTRIBUTES:
                 continue
-            # Skip monitoring/* attributes
-            if isinstance(attr_path, str) and attr_path.startswith("monitoring/"):
-                continue
 
             value = self._extract_param_value(row)
             if value is not None:
