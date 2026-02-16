@@ -35,11 +35,12 @@ except ImportError:
     goodseed = None  # type: ignore
 
 
-# Neptune sys/ attributes to skip (platform internals: identity, state, ownership, heartbeats).
+# Neptune sys/ attributes to skip (platform internals + attributes extracted separately).
 # Other attributes like sys/creation_time, sys/failed, sys/tags, sys/description pass through.
 _SKIP_SYS_ATTRIBUTES = {
     "sys/id",
     "sys/custom_run_id",
+    "sys/name",
     "sys/state",
     "sys/owner",
     "sys/size",
@@ -267,22 +268,32 @@ class GoodseedLoader(DataLoader):
         if self._pending_run is None:
             raise RuntimeError("No pending run")
 
-        # Try to extract sys/name from data to use as experiment_name
+        # Extract sys/name and sys/creation_time from data
         experiment_name = self._pending_run["experiment_name"]
-        sys_name_rows = run_df[
-            (run_df["attribute_path"] == "sys/name")
-            & (run_df["attribute_type"] == "string")
-        ]
-        if not sys_name_rows.empty:
-            val = sys_name_rows.iloc[0]["string_value"]
-            if pd.notna(val):
-                experiment_name = str(val)
+        created_at = None
+
+        for attr_path, attr_type, col in [
+            ("sys/name", "string", "string_value"),
+            ("sys/creation_time", "datetime", "datetime_value"),
+        ]:
+            rows = run_df[
+                (run_df["attribute_path"] == attr_path)
+                & (run_df["attribute_type"] == attr_type)
+            ]
+            if not rows.empty:
+                val = rows.iloc[0][col]
+                if pd.notna(val):
+                    if attr_path == "sys/name":
+                        experiment_name = str(val)
+                    else:
+                        created_at = pd.Timestamp(val).isoformat()
 
         self._active_run = goodseed.Run(
             experiment_name=experiment_name,
             project=self._pending_run["project"],
             run_name=self._pending_run["run_name"],
             goodseed_home=self._goodseed_home,
+            created_at=created_at,
         )
 
         # Log Neptune origin metadata as configs
@@ -309,8 +320,8 @@ class GoodseedLoader(DataLoader):
             return
 
         configs: Dict[str, Any] = {}
-        for _, row in param_data.iterrows():
-            attr_path = row["attribute_path"]
+        for row in param_data.itertuples(index=False):
+            attr_path = row.attribute_path
 
             # Skip most sys/ attributes
             if attr_path in _SKIP_SYS_ATTRIBUTES:
@@ -326,22 +337,22 @@ class GoodseedLoader(DataLoader):
         if configs:
             self._active_run.log_configs(configs)
 
-    def _extract_param_value(self, row: pd.Series) -> Any:
+    def _extract_param_value(self, row: Any) -> Any:
         """Extract a typed value from a parameter row."""
-        attr_type = row["attribute_type"]
+        attr_type = row.attribute_type
 
-        if attr_type == "float" and pd.notna(row["float_value"]):
-            return float(row["float_value"])
-        elif attr_type == "int" and pd.notna(row["int_value"]):
-            return int(row["int_value"])
-        elif attr_type == "string" and pd.notna(row["string_value"]):
-            return str(row["string_value"])
-        elif attr_type == "bool" and pd.notna(row["bool_value"]):
-            return bool(row["bool_value"])
-        elif attr_type == "datetime" and pd.notna(row["datetime_value"]):
-            return str(row["datetime_value"])
-        elif attr_type == "string_set" and row["string_set_value"] is not None:
-            return ",".join(row["string_set_value"])
+        if attr_type == "float" and pd.notna(row.float_value):
+            return float(row.float_value)
+        elif attr_type == "int" and pd.notna(row.int_value):
+            return int(row.int_value)
+        elif attr_type == "string" and pd.notna(row.string_value):
+            return str(row.string_value)
+        elif attr_type == "bool" and pd.notna(row.bool_value):
+            return bool(row.bool_value)
+        elif attr_type == "datetime" and pd.notna(row.datetime_value):
+            return str(row.datetime_value)
+        elif attr_type == "string_set" and row.string_set_value is not None:
+            return ",".join(row.string_set_value)
         return None
 
     # Metrics upload
@@ -355,13 +366,12 @@ class GoodseedLoader(DataLoader):
         if metrics_data.empty:
             return
 
-        # Group by step to batch metrics at the same step
-        for _, row in metrics_data.iterrows():
-            if pd.notna(row["float_value"]) and pd.notna(row["step"]):
-                attr_path = row["attribute_path"]
-                step = self._convert_step(row["step"], step_multiplier)
-                value = float(row["float_value"])
-                self._active_run.log_metrics({attr_path: value}, step=step)
+        for row in metrics_data.itertuples(index=False):
+            if pd.notna(row.float_value) and pd.notna(row.step):
+                step = self._convert_step(row.step, step_multiplier)
+                self._active_run.log_metrics(
+                    {row.attribute_path: float(row.float_value)}, step=step
+                )
 
     # String series upload
 
@@ -374,16 +384,16 @@ class GoodseedLoader(DataLoader):
         if series_data.empty:
             return
 
-        for _, row in series_data.iterrows():
-            if pd.notna(row["string_value"]):
-                attr_path = row["attribute_path"]
+        for row in series_data.itertuples(index=False):
+            if pd.notna(row.string_value):
                 step = (
-                    self._convert_step(row["step"], step_multiplier)
-                    if pd.notna(row["step"])
+                    self._convert_step(row.step, step_multiplier)
+                    if pd.notna(row.step)
                     else 0
                 )
-                value = str(row["string_value"])
-                self._active_run.log_string_series({attr_path: value}, step=step)
+                self._active_run.log_string_series(
+                    {row.attribute_path: str(row.string_value)}, step=step
+                )
 
     # Warnings for unsupported types
 

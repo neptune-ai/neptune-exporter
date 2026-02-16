@@ -330,9 +330,10 @@ def test_upload_skips_sys_attributes():
     for c in mock_run.log_configs.call_args_list:
         all_configs.update(c[0][0])
 
-    # sys/id and sys/state should be skipped
+    # sys/id, sys/state, sys/name should be skipped
     assert "sys/id" not in all_configs
     assert "sys/state" not in all_configs
+    assert "sys/name" not in all_configs
     # These sys/ attributes should be preserved
     assert "sys/creation_time" in all_configs
     assert "sys/modification_time" in all_configs
@@ -588,7 +589,7 @@ def test_upload_warns_on_histograms():
     mock_run.close.assert_called_once()
 
 
-# upload_run_data - experiment name from sys/name
+# upload_run_data - metadata extraction from sys/ attributes
 
 
 def test_experiment_name_from_sys_name():
@@ -616,6 +617,35 @@ def test_experiment_name_from_sys_name():
     mock_run_class.assert_called_once()
     _, kwargs = mock_run_class.call_args
     assert kwargs["experiment_name"] == "my-experiment-name"
+
+
+def test_created_at_from_sys_creation_time():
+    """Test that sys/creation_time is passed as created_at to the GoodSeed Run."""
+    loader = _make_loader()
+    mock_run = Mock()
+
+    creation_time = pd.Timestamp("2024-01-15 10:30:00", tz="UTC")
+
+    table = _make_table(
+        {
+            "attribute_path": ["sys/creation_time"],
+            "attribute_type": ["datetime"],
+            "datetime_value": [creation_time],
+        }
+    )
+
+    with patch(
+        "neptune_exporter.loaders.goodseed_loader.goodseed.Run",
+        return_value=mock_run,
+    ) as mock_run_class:
+        loader.create_run("test-project", "RUN-1")
+        loader.upload_run_data(
+            _table_gen(table), "RUN-1", Path("/files"), step_multiplier=1
+        )
+
+    mock_run_class.assert_called_once()
+    _, kwargs = mock_run_class.call_args
+    assert kwargs["created_at"] == creation_time.isoformat()
 
 
 # upload_run_data - error handling
