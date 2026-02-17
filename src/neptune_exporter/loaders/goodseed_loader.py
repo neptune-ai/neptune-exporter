@@ -347,7 +347,7 @@ class GoodseedLoader(DataLoader):
         elif attr_type == "bool" and pd.notna(row.bool_value):
             return bool(row.bool_value)
         elif attr_type == "datetime" and pd.notna(row.datetime_value):
-            return str(row.datetime_value)
+            return pd.Timestamp(row.datetime_value).isoformat()
         elif attr_type == "string_set" and row.string_set_value is not None:
             return ",".join(row.string_set_value)
         return None

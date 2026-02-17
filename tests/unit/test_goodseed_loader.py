@@ -13,16 +13,22 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
+import sys
 from decimal import Decimal
 from pathlib import Path
-from unittest.mock import Mock, patch, call
+from unittest.mock import MagicMock, Mock, patch, call
 
 import pandas as pd
 import pyarrow as pa
 import pytest
 
-from neptune_exporter.loaders.goodseed_loader import GoodseedLoader
-from neptune_exporter import model
+# Mock goodseed before importing GoodseedLoader
+_goodseed_mock = MagicMock()
+sys.modules["goodseed"] = _goodseed_mock
+sys.modules["goodseed.config"] = _goodseed_mock.config
+
+from neptune_exporter.loaders.goodseed_loader import GoodseedLoader  # noqa: E402
+from neptune_exporter import model  # noqa: E402
 
 
 def _make_loader(**kwargs):
