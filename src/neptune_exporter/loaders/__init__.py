@@ -71,6 +71,12 @@ except Exception:  # pragma: no cover - pluto is optional
     PlutoLoader = None  # type: ignore[misc,assignment]
     PLUTO_AVAILABLE = False  # type: ignore[misc,assignment]
 
+try:
+    from .goodseed_loader import GoodseedLoader, GOODSEED_AVAILABLE
+except Exception:  # pragma: no cover - goodseed is optional
+    GoodseedLoader = None  # type: ignore[misc,assignment]
+    GOODSEED_AVAILABLE = False  # type: ignore[misc,assignment]
+
 __all__ = ["DataLoader"]
 if MLFLOW_AVAILABLE:
     __all__.append("MLflowLoader")
@@ -86,3 +92,5 @@ if MINFX_AVAILABLE:
     __all__.append("MinfxLoader")
 if PLUTO_AVAILABLE:
     __all__.append("PlutoLoader")
+if GOODSEED_AVAILABLE:
+    __all__.append("GoodseedLoader")

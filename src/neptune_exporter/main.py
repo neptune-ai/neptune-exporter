@@ -752,7 +752,16 @@ def export_models(
 @click.option(
     "--loader",
     type=click.Choice(
-        ["mlflow", "wandb", "litlogger", "zenml", "comet", "minfx", "pluto"],
+        [
+            "mlflow",
+            "wandb",
+            "litlogger",
+            "zenml",
+            "comet",
+            "minfx",
+            "pluto",
+            "goodseed",
+        ],
         case_sensitive=False,
     ),
     help="Target platform loader to use.",
@@ -802,6 +811,14 @@ def export_models(
     help="Pluto API key for authentication. Only used with --loader pluto.",
 )
 @click.option(
+    "--goodseed-home",
+    help="GoodSeed data directory. Only used with --loader goodseed. Default: ~/.goodseed.",
+)
+@click.option(
+    "--goodseed-project",
+    help="Override GoodSeed project name for all imported runs. Only used with --loader goodseed. If not set, uses the Neptune project ID.",
+)
+@click.option(
     "--name-prefix",
     help="Optional prefix for experiment/project and run names.",
 )
@@ -838,6 +855,8 @@ def load(
     minfx_project: str | None,
     minfx_api_token: str | None,
     pluto_api_key: str | None,
+    goodseed_home: str | None,
+    goodseed_project: str | None,
     name_prefix: str | None,
     verbose: bool,
     log_file: Path,
@@ -904,6 +923,14 @@ def load(
     \b
     # Load to Minfx
     neptune-exporter load --loader minfx --minfx-project "target-org/target-project" --minfx-api-token xxx
+
+    \b
+    # Load to GoodSeed (local)
+    neptune-exporter load --loader goodseed
+
+    \b
+    # Load to GoodSeed with custom data directory and project
+    neptune-exporter load --loader goodseed --goodseed-home /path/to/.goodseed --goodseed-project my-project
     """
     # Convert tuples to lists and handle None values
     project_ids_list = list(project_ids) if project_ids else None
@@ -1128,6 +1155,32 @@ def load(
         )
         loader_name = "Minfx"
         info_always(logger, f"  Minfx project: {minfx_project}")
+    elif loader == "goodseed":
+        from neptune_exporter.loaders.goodseed_loader import GoodseedLoader
+        from neptune_exporter.loaders import GOODSEED_AVAILABLE
+
+        if not GOODSEED_AVAILABLE:
+            raise click.BadParameter(
+                "GoodSeed loader selected but goodseed is not installed. "
+                "Install with `uv sync --extra goodseed`."
+            )
+
+        if not goodseed_home:
+            goodseed_home = os.getenv("GOODSEED_HOME")
+        if not goodseed_project:
+            goodseed_project = os.getenv("GOODSEED_PROJECT")
+
+        data_loader = GoodseedLoader(
+            goodseed_home=goodseed_home,
+            goodseed_project=goodseed_project,
+            name_prefix=name_prefix,
+            show_client_logs=verbose,
+        )
+        loader_name = "GoodSeed"
+        if goodseed_home:
+            info_always(logger, f"  GoodSeed home: {goodseed_home}")
+        if goodseed_project:
+            info_always(logger, f"  GoodSeed project: {goodseed_project}")
     else:
         raise click.BadParameter(f"Unknown loader: {loader}")
 

@@ -3,6 +3,7 @@
 Neptune Exporter is a CLI tool to move Neptune experiments (version `2.x` or `3.x`) to disk as parquet and files, with an option to load them into the following alternative tools:
 
 - Comet
+- GoodSeed
 - Lightning AI
 - Minfx
 - MLflow
@@ -31,6 +32,7 @@ Neptune Exporter is a CLI tool to move Neptune experiments (version `2.x` or `3.
   - Comet workspace and API key, set with `COMET_WORKSPACE`/`--comet-workspace` and `COMET_API_KEY`/`--comet-api-key`.
   - Lightning AI LitLogger requires auth credentials (set via `lightning login` or `--litlogger-user-id` and `--litlogger-api-key`). Optionally specify `--litlogger-owner` for the user or organization name where teamspaces will be created (defaults to the authenticated user).
   - Minfx project and API token, set with `MINFX_PROJECT`/`--minfx-project` and `MINFX_API_TOKEN`/`--minfx-api-token`.
+  - GoodSeed: no credentials needed (local storage). Optionally set `GOODSEED_HOME`/`--goodseed-home` to override the data directory and `GOODSEED_PROJECT`/`--goodseed-project` to override the project name.
   - Pluto SDK: install [`pluto-ml`](https://github.com/Trainy-ai/pluto) (or use `--extra pluto` during `uv sync`). Authenticate via `pluto login <api-key>` or set `PLUTO_API_KEY` environment variable. See the [Pluto repo](https://github.com/Trainy-ai/pluto) and the [Pluto project page](https://pluto.trainy.ai).
 
 ## Installation
@@ -56,6 +58,7 @@ uv sync --extra mlflow --extra wandb --extra zenml
 
 Available optional dependencies:
 - `cometml` - for Comet loader
+- `goodseed` - for GoodSeed loader
 - `litlogger` - for Lightning AI LitLogger loader
 - `minfx` - for Minfx loader
 - `mlflow` - for MLflow loader
@@ -216,6 +219,12 @@ Model version export is derived from selected models (all versions for selected 
     --data-path ./exports/data \
     --files-path ./exports/files
 
+  # GoodSeed (local)
+  uv run neptune-exporter load \
+    --loader goodseed \
+    --data-path ./exports/data \
+    --files-path ./exports/files
+
   # LitLogger
   uv run lightning login && \
   uv run neptune-exporter load \
@@ -273,6 +282,9 @@ Model version export is derived from selected models (all versions for selected 
 
   > [!NOTE]
   > For Minfx, the `--step-multiplier` option is not needed since Neptune v2 natively supports float steps. The loader recreates runs in a Neptune-compatible backend and stores the original run ID in `import/original_run_id` for tracking and duplicate prevention.
+
+  > [!NOTE]
+  > For GoodSeed, no authentication or server is needed. Data is written directly to local SQLite files. Use `goodseed serve` to view imported runs in the browser. GoodSeed uses integer steps, so use `--step-multiplier` if your Neptune steps contain decimals. Files and histograms are not supported and will be skipped with a warning.
 
   > [!NOTE]
   > For Pluto, the loader uses decimal steps natively (no `--step-multiplier` needed). Authentication is configured via `--pluto-api-key` option or `PLUTO_API_KEY` environment variable.
@@ -342,6 +354,12 @@ All records use `src/neptune_exporter/model.py::SCHEMA`:
 ## Loading flow
 
 - Data is streamed run-by-run from parquet, using the same `--step-multiplier` to turn decimal steps into integers. Keep the multiplier consistent across loads when your Neptune steps are floats.
+- **GoodSeed loader**:
+  - No authentication needed. Writes directly to local SQLite files at `~/.goodseed/projects/<project>/runs/<run>.sqlite`.
+  - Neptune `project_id` is used as the GoodSeed project name (override with `--goodseed-project`). `sys/name` becomes the experiment name.
+  - Parameters are logged as configs with native types. Float series are logged as metrics (integer steps, use `--step-multiplier` for decimals). String series are logged as string series.
+  - Files, file series, and histograms are skipped (GoodSeed has no file storage). Neptune origin metadata is stored as configs under `neptune/` prefix.
+  - View imported runs with `goodseed serve`.
 - **Comet loader**:
   - Requires `--comet-workspace`. Project names derive from `project_id`, plus optional `--name-prefix`, sanitized.
   - Attribute names are sanitized to Comet format (alphanumeric + underscore, must start with letter/underscore). Metrics/series use the integer step. Files are uploaded as assets/images from `--files-path`. String series become text assets, histograms use `log_histogram_3d`.
@@ -390,6 +408,10 @@ All records use `src/neptune_exporter/model.py::SCHEMA`:
 
 ## Experiment/run mapping to targets
 
+- **GoodSeed:**
+  - Neptune `project_id` is used directly as the GoodSeed project name (e.g., `workspace/my-project`). Override with `--goodseed-project` to put all runs in a single project.
+  - Neptune's `sys/name` becomes the GoodSeed `experiment_name`. The Neptune `run_id` becomes the GoodSeed `run_name`.
+  - Neptune origin metadata (`project_id`, `run_id`, fork info) is stored as configs under `neptune/` prefix for traceability.
 - **Comet:**
   - Neptune `project_id` maps to the Comet project name (sanitized, plus optional `--name-prefix`).
   - `sys/name` becomes the Comet experiment name.
@@ -423,6 +445,7 @@ All records use `src/neptune_exporter/model.py::SCHEMA`:
 
 - **Parameters** (`float`, `int`, `string`, `bool`, `datetime`, `string_set`):
   - Comet: logged as parameters with native types (string_set → list).
+  - GoodSeed: logged as configs with native types (datetime → ISO string, string_set → comma-separated string). Skips Neptune-internal `sys/` metadata (`sys/id`, `sys/custom_run_id`, `sys/name`, `sys/state`, `sys/owner`, `sys/size`, `sys/ping_time`, `sys/running_time`, `sys/monitoring_time`). `sys/name` is used as the experiment name.
   - LitLogger: logged as experiment metadata (string key-value pairs, searchable/filterable in the UI).
   - Minfx: logged with native types (datetime → timestamp, string_set → StringSet). Preserves `sys/hostname`, `sys/tags`, and `sys/group_tags` from original data; other `sys/*` attributes are skipped as they're managed by Neptune.
   - MLflow: logged as params (values stringified by the client).
@@ -430,11 +453,13 @@ All records use `src/neptune_exporter/model.py::SCHEMA`:
   - W&B: logged as config with native types (string_set → list).
   - ZenML: logged as nested metadata with native types (datetime → ISO string, string_set → list); paths are split for dashboard cards.
 - **Float series** (`float_series`):
+  - GoodSeed: logged as metrics using the integer step (`--step-multiplier` applied).
   - MLflow/W&B/Comet/LitLogger: logged as metrics using the integer step (`--step-multiplier` applied). Timestamps are forwarded when present.
   - Pluto: logged with decimal steps preserved. Large step datasets are handled efficiently to avoid memory issues.
   - ZenML: aggregated into summary statistics (min/max/final/count) stored as metadata, since the Model Control Plane doesn't have native time-series visualization.
 - **String series** (`string_series`):
   - Comet: uploaded as text assets.
+  - GoodSeed: logged as string series with integer steps.
   - LitLogger: uploaded as text assets.
   - MLflow: saved as artifacts (one text file per series).
   - Minfx: logged as StringSeries with steps preserved.
@@ -443,6 +468,7 @@ All records use `src/neptune_exporter/model.py::SCHEMA`:
   - ZenML: not uploaded (skipped).
 - **Histogram series** (`histogram_series`):
   - Comet: logged as `histogram_3d`.
+  - GoodSeed: not uploaded (skipped).
   - LitLogger: uploaded as image containing a histogram plot and as artifacts containing the histogram payload.
   - Minfx: not uploaded (skipped - not supported in Neptune v2 API).
   - MLflow: uploaded as artifacts containing the histogram payload.
@@ -452,6 +478,7 @@ All records use `src/neptune_exporter/model.py::SCHEMA`:
 - **Files** (`file`) and **file series** (`file_series`):
   - Downloaded to `--files-path/<sanitized_project_id>/...` with relative paths stored in `file_value.path`.
   - Comet: uploaded as assets. Comet detects images and uploads them as images.
+  - GoodSeed: not uploaded (skipped, GoodSeed has no file storage).
   - LitLogger: uploaded as artifacts.
   - Minfx: uploaded with auto-detected file extensions (via magic bytes) for proper UI rendering.
   - MLflow/W&B: uploaded as artifacts. File series include the step in the artifact name/path so steps remain distinguishable.
@@ -459,6 +486,7 @@ All records use `src/neptune_exporter/model.py::SCHEMA`:
   - ZenML: uploaded via `save_artifact()` and linked to Model Versions.
 - **Attribute names**:
   - Comet: sanitized to allowed pattern (`^[_a-zA-Z][_a-zA-Z0-9]*$`); invalid chars become `_`, and names are forced to start with a letter or underscore.
+  - GoodSeed: attribute paths are preserved as-is (GoodSeed uses `/` as path separator, matching Neptune). Skips Neptune-internal `sys/` attributes (`sys/id`, `sys/custom_run_id`, `sys/name`, `sys/state`, `sys/owner`, `sys/size`, heartbeat/monitoring times). `sys/name` is used for experiment name.
   - LitLogger: sanitized to allowed pattern (`^[a-zA-Z0-9_-]+$`); invalid chars become `_`. Experiment and teamspace names are truncated to 64 chars.
   - Minfx: Skips `sys/*` attributes except allowed ones (`sys/hostname`, `sys/tags`, `sys/group_tags`).
   - MLflow: sanitized to allowed chars (alphanumeric + `_-. /`), truncated at 250 chars.

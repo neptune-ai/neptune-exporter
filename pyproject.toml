@@ -33,6 +33,7 @@ litlogger = [
 ]
 minfx = ["minfx"]
 pluto = ["pluto-ml>=0.0.2"]
+goodseed = ["goodseed>=0.2.4"]
 
 [project.scripts]
 neptune-exporter = "neptune_exporter.main:main"
