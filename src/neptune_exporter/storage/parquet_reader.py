@@ -18,12 +18,15 @@ import pyarrow as pa
 import pyarrow.parquet as pq
 import pyarrow.compute as pc
 from pathlib import Path
-from typing import Any, Generator, Optional
+from typing import Any, Generator, Optional, Union
 import logging
 from dataclasses import dataclass
 from neptune_exporter import model
+from neptune_exporter.cloud_storage import GCSPath
 from neptune_exporter.types import ProjectId, RunFilePrefix, SourceRunId
 from neptune_exporter.utils import sanitize_path_part
+
+AnyPath = Union[Path, GCSPath]
 
 
 @dataclass(frozen=True, order=True, slots=True)
@@ -42,9 +45,29 @@ class RunMetadata:
 class ParquetReader:
     """Reads exported Neptune data from parquet files."""
 
-    def __init__(self, base_path: Path):
+    def __init__(self, base_path: AnyPath):
         self.base_path = base_path
         self._logger = logging.getLogger(__name__)
+        self._pa_filesystem = None  # lazily initialised for GCS paths
+
+    # ------------------------------------------------------------------
+    # Internal helpers
+    # ------------------------------------------------------------------
+
+    def _get_pa_filesystem(self):
+        """Return a PyArrow filesystem for GCS, or *None* for local paths."""
+        if isinstance(self.base_path, GCSPath):
+            if self._pa_filesystem is None:
+                self._pa_filesystem = self.base_path.get_pyarrow_filesystem()
+            return self._pa_filesystem
+        return None
+
+    def _read_parquet_table(self, path: AnyPath) -> pa.Table:
+        """Read a parquet file from either a local or GCS path."""
+        if isinstance(path, GCSPath):
+            pa_fs = self._get_pa_filesystem()
+            return pq.read_table(path.gcs_path, filesystem=pa_fs, schema=model.SCHEMA)
+        return pq.read_table(path, schema=model.SCHEMA)
 
     def check_run_exists(
         self,
@@ -78,7 +101,7 @@ class ParquetReader:
         self,
         project_ids: Optional[list[ProjectId]] = None,
         entity_scope: str | None = None,
-    ) -> list[Path]:
+    ) -> list[AnyPath]:
         """List all available projects in the exported data."""
         if not self.base_path.exists():
             return []
@@ -201,7 +224,7 @@ class ParquetReader:
 
         for part_file in run_part_files:
             try:
-                table = pq.read_table(part_file, schema=model.SCHEMA)
+                table = self._read_parquet_table(part_file)
                 table = self._filter_attributes(
                     table,
                     attribute_types=attribute_types,

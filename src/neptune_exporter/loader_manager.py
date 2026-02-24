@@ -13,11 +13,13 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
+import contextlib
 import datetime
 import heapq
 import logging
+import tempfile
 from pathlib import Path
-from typing import Optional
+from typing import Iterator, Optional
 
 from rich.progress import (
     BarColumn,
@@ -29,6 +31,7 @@ from rich.progress import (
     TimeElapsedColumn,
 )
 
+from neptune_exporter.cloud_storage import GCSPath
 from neptune_exporter.storage.parquet_reader import ParquetReader, RunMetadata
 from neptune_exporter.loaders.loader import DataLoader
 from neptune_exporter.logging_utils import get_rich_console
@@ -43,7 +46,7 @@ class LoaderManager:
         self,
         parquet_reader: ParquetReader,
         data_loader: DataLoader,
-        files_directory: Path,
+        files_directory: Path | GCSPath,
         step_multiplier: int,
         progress_bar: bool = True,
     ):
@@ -53,6 +56,31 @@ class LoaderManager:
         self._step_multiplier = step_multiplier
         self._progress_bar = progress_bar
         self._logger = logging.getLogger(__name__)
+
+    @contextlib.contextmanager
+    def _localize_files_dir(self, files_dir: Path | GCSPath) -> Iterator[Path]:
+        """Yield a local ``Path`` for *files_dir*.
+
+        If *files_dir* is a :class:`~neptune_exporter.cloud_storage.GCSPath`,
+        its contents are downloaded to a temporary directory which is cleaned
+        up after the context exits.  Local paths are yielded unchanged.
+        """
+        if isinstance(files_dir, GCSPath):
+            with tempfile.TemporaryDirectory() as tmp_dir:
+                local_dir = Path(tmp_dir)
+                if files_dir.exists():
+                    self._logger.info(
+                        f"Downloading files from {files_dir} to temporary directory ..."
+                    )
+                    files_dir.download_dir(local_dir)
+                else:
+                    self._logger.debug(
+                        f"GCS files directory {files_dir} does not exist; "
+                        "artifact upload will be skipped."
+                    )
+                yield local_dir
+        else:
+            yield files_dir
 
     def load(
         self,
@@ -280,28 +308,35 @@ class LoaderManager:
         # Track target run IDs for parent lookups
         run_id_to_target_run_id: dict[SourceRunId, TargetRunId] = {}
 
+        # Compute project-specific files directory and localise if GCS.
+        # The project subdirectory name equals sanitize_path_part(project_id)
+        # which is the same as project_directory.name.
+        project_files_source = self._files_directory / project_directory.name
+
         # Process runs in topological order
         runs_task = progress.add_task(
             f"Loading runs from {project_directory.name}",
             total=len(sorted_run_metadata),
         )
-        for metadata in sorted_run_metadata:
-            try:
-                self._process_run(
-                    project_directory=project_directory,
-                    source_run_file_prefix=source_run_id_to_file_prefix[
-                        metadata.run_id
-                    ],
-                    metadata=metadata,
-                    run_id_to_target_run_id=run_id_to_target_run_id,
-                )
-            except Exception:
-                self._logger.error(
-                    f"Error processing run {source_run_file_prefix}",
-                    exc_info=True,
-                )
-                continue
-            progress.advance(runs_task)
+        with self._localize_files_dir(project_files_source) as local_project_files_dir:
+            for metadata in sorted_run_metadata:
+                try:
+                    self._process_run(
+                        project_directory=project_directory,
+                        source_run_file_prefix=source_run_id_to_file_prefix[
+                            metadata.run_id
+                        ],
+                        metadata=metadata,
+                        run_id_to_target_run_id=run_id_to_target_run_id,
+                        project_files_dir=local_project_files_dir,
+                    )
+                except Exception:
+                    self._logger.error(
+                        f"Error processing run {source_run_file_prefix}",
+                        exc_info=True,
+                    )
+                    continue
+                progress.advance(runs_task)
         progress.remove_task(runs_task)
 
     def _process_run(
@@ -310,6 +345,7 @@ class LoaderManager:
         source_run_file_prefix: RunFilePrefix,
         metadata: RunMetadata,
         run_id_to_target_run_id: dict[SourceRunId, TargetRunId],
+        project_files_dir: Optional[Path] = None,
     ) -> None:
         """Process a single run.
 
@@ -320,6 +356,8 @@ class LoaderManager:
             source_run_file_prefix: Source run file prefix from Neptune
             metadata: Run metadata (project_id, custom_run_id, etc.)
             run_id_to_target_run_id: Dictionary mapping source run IDs to target run IDs
+            project_files_dir: Pre-localised (local) files directory for this project.
+                When provided, used directly; otherwise computed from ``self._files_directory``.
         """
         project_id = metadata.project_id
         custom_run_id = metadata.custom_run_id or metadata.run_id
@@ -366,11 +404,18 @@ class LoaderManager:
                 fork_step=fork_step,
                 step_multiplier=self._step_multiplier,
             )
-            # Upload run data only for newly created runs
+            # Upload run data only for newly created runs.
+            # project_files_dir is already the project-specific local directory
+            # (pre-localised from GCS by the caller if needed).
+            effective_files_dir = (
+                project_files_dir
+                if project_files_dir is not None
+                else self._files_directory / sanitize_path_part(project_id)
+            )
             self._data_loader.upload_run_data(
                 run_data=run_data_parts_generator,
                 run_id=target_run_id,
-                files_directory=self._files_directory / sanitize_path_part(project_id),
+                files_directory=effective_files_dir,
                 step_multiplier=self._step_multiplier,
             )
             self._logger.info(f"Created and uploaded run '{custom_run_id}'")

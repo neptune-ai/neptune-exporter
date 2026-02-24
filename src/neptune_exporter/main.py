@@ -21,6 +21,7 @@ from typing import Optional
 
 import click
 
+from neptune_exporter.cloud_storage import GCSPath, is_gcs_url
 from neptune_exporter.export_manager import ExportManager
 from neptune_exporter.model_registry_export_manager import (
     ModelRegistryExportManager,
@@ -49,6 +50,21 @@ from neptune_exporter.summary_manager import SummaryManager
 from neptune_exporter.types import ProjectId, SourceRunId
 from neptune_exporter.validation import ReportFormatter
 from neptune_exporter.workspace_projects import list_workspace_projects
+
+
+class _GCSAwarePath(click.ParamType):
+    """Click parameter type that accepts both local paths and ``gs://`` URIs."""
+
+    name = "PATH"
+
+    def convert(self, value, param, ctx):
+        if value is None:
+            return None
+        if isinstance(value, (Path, GCSPath)):
+            return value
+        if is_gcs_url(value):
+            return GCSPath(value)
+        return Path(value)
 
 
 @click.group()
@@ -720,16 +736,16 @@ def export_models(
 @click.option(
     "--data-path",
     "-d",
-    type=click.Path(path_type=Path),
+    type=_GCSAwarePath(),
     default="./exports/data",
-    help="Path for exported parquet data. Default: ./exports/data",
+    help="Path for exported parquet data. Accepts a local path or a GCS URI (gs://). Default: ./exports/data",
 )
 @click.option(
     "--files-path",
     "-f",
-    type=click.Path(path_type=Path),
+    type=_GCSAwarePath(),
     default="./exports/files",
-    help="Path for downloaded files. Default: ./exports/files",
+    help="Path for downloaded files. Accepts a local path or a GCS URI (gs://). Default: ./exports/files",
 )
 @click.option(
     "--project-ids",
@@ -840,8 +856,8 @@ def export_models(
     help="Disable progress bar.",
 )
 def load(
-    data_path: Path,
-    files_path: Path,
+    data_path: Path | GCSPath,
+    files_path: Path | GCSPath,
     project_ids: tuple[str, ...],
     runs: tuple[str, ...],
     step_multiplier: int,
