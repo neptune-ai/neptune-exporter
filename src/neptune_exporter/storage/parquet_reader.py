@@ -17,16 +17,14 @@ import datetime
 import pyarrow as pa
 import pyarrow.parquet as pq
 import pyarrow.compute as pc
-from pathlib import Path
-from typing import Any, Generator, Optional, Union
+from typing import Any, Generator, Optional
 import logging
 from dataclasses import dataclass
 from neptune_exporter import model
-from neptune_exporter.cloud_storage import GCSPath
+from neptune_exporter.storage.gcs import GCSPath
+from neptune_exporter.storage.types import AnyPath
 from neptune_exporter.types import ProjectId, RunFilePrefix, SourceRunId
 from neptune_exporter.utils import sanitize_path_part
-
-AnyPath = Union[Path, GCSPath]
 
 
 @dataclass(frozen=True, order=True, slots=True)
@@ -48,26 +46,6 @@ class ParquetReader:
     def __init__(self, base_path: AnyPath):
         self.base_path = base_path
         self._logger = logging.getLogger(__name__)
-        self._pa_filesystem = None  # lazily initialised for GCS paths
-
-    # ------------------------------------------------------------------
-    # Internal helpers
-    # ------------------------------------------------------------------
-
-    def _get_pa_filesystem(self):
-        """Return a PyArrow filesystem for GCS, or *None* for local paths."""
-        if isinstance(self.base_path, GCSPath):
-            if self._pa_filesystem is None:
-                self._pa_filesystem = self.base_path.get_pyarrow_filesystem()
-            return self._pa_filesystem
-        return None
-
-    def _read_parquet_table(self, path: AnyPath) -> pa.Table:
-        """Read a parquet file from either a local or GCS path."""
-        if isinstance(path, GCSPath):
-            pa_fs = self._get_pa_filesystem()
-            return pq.read_table(path.gcs_path, filesystem=pa_fs, schema=model.SCHEMA)
-        return pq.read_table(path, schema=model.SCHEMA)
 
     def check_run_exists(
         self,
@@ -126,11 +104,11 @@ class ParquetReader:
                 item for item in project_directories if (item / entity_scope).is_dir()
             ]
 
-        return sorted(project_directories)
+        return sorted(project_directories, key=str)
 
     def list_run_files(
         self,
-        project_directory: Path,
+        project_directory: AnyPath,
         run_ids: Optional[list[SourceRunId]] = None,
         entity_scope: str | None = None,
     ) -> list[RunFilePrefix]:
@@ -166,11 +144,11 @@ class ParquetReader:
             for file_path in run_files
         ]
 
-        return sorted(run_file_prefixes)
+        return sorted(run_file_prefixes, key=str)
 
     def read_project_data(
         self,
-        project_directory: Path,
+        project_directory: AnyPath,
         runs: Optional[list[SourceRunId]] = None,
         attribute_types: Optional[list[str]] = None,
         entity_scope: str | None = None,
@@ -199,7 +177,7 @@ class ParquetReader:
 
     def read_run_data(
         self,
-        project_directory: Path,
+        project_directory: AnyPath,
         run_file_prefix: RunFilePrefix,
         attribute_types: Optional[list[str]] = None,
         attribute_paths: Optional[list[str]] = None,
@@ -224,7 +202,17 @@ class ParquetReader:
 
         for part_file in run_part_files:
             try:
-                table = self._read_parquet_table(part_file)
+                if isinstance(part_file, GCSPath):
+                    pa_filesystem = part_file.get_pyarrow_filesystem()
+                    table = pq.read_table(
+                        part_file.gcs_path,
+                        filesystem=pa_filesystem,
+                        schema=model.SCHEMA,
+                    )
+
+                else:
+                    table = pq.read_table(part_file, schema=model.SCHEMA)
+
                 table = self._filter_attributes(
                     table,
                     attribute_types=attribute_types,
@@ -240,8 +228,8 @@ class ParquetReader:
                 continue
 
     def _get_run_files(
-        self, project_directory: Path, run_file_prefix: RunFilePrefix
-    ) -> list[Path]:
+        self, project_directory: AnyPath, run_file_prefix: RunFilePrefix
+    ) -> list[AnyPath]:
         """Get sorted list of all part files for a specific run.
 
         Args:
@@ -261,7 +249,7 @@ class ParquetReader:
             part_files.append(file_path)
 
         # Sort by part number
-        def get_part_number(path: Path) -> int:
+        def get_part_number(path: AnyPath) -> int:
             stem = path.stem  # run_id_part_N
             parts = stem.rsplit("_part_", 1)
             if len(parts) == 2:
@@ -290,7 +278,7 @@ class ParquetReader:
 
     def read_run_metadata(
         self,
-        project_directory: Path,
+        project_directory: AnyPath,
         run_file_prefix: RunFilePrefix,
         entity_scope: str | None = None,
     ) -> Optional[RunMetadata]:
@@ -413,8 +401,8 @@ class ParquetReader:
 
     @staticmethod
     def _get_project_directory(
-        project_directory: Path, entity_scope: str | None = None
-    ) -> Path:
+        project_directory: AnyPath, entity_scope: str | None = None
+    ) -> AnyPath:
         if entity_scope is None:
             return project_directory
         return project_directory / entity_scope

@@ -21,7 +21,7 @@ from typing import Optional
 
 import click
 
-from neptune_exporter.cloud_storage import GCSPath, is_gcs_url
+from neptune_exporter.storage.gcs import GCSPath, is_gcs_url
 from neptune_exporter.export_manager import ExportManager
 from neptune_exporter.model_registry_export_manager import (
     ModelRegistryExportManager,
@@ -46,6 +46,7 @@ from neptune_exporter.loaders.loader import DataLoader
 from neptune_exporter.logging_utils import create_console_handler, info_always
 from neptune_exporter.storage.parquet_reader import ParquetReader
 from neptune_exporter.storage.parquet_writer import ParquetWriter
+from neptune_exporter.storage.types import AnyPath
 from neptune_exporter.summary_manager import SummaryManager
 from neptune_exporter.types import ProjectId, SourceRunId
 from neptune_exporter.validation import ReportFormatter
@@ -60,8 +61,6 @@ class _GCSAwarePath(click.ParamType):
     def convert(self, value, param, ctx):
         if value is None:
             return None
-        if isinstance(value, (Path, GCSPath)):
-            return value
         if is_gcs_url(value):
             return GCSPath(value)
         return Path(value)
@@ -856,8 +855,8 @@ def export_models(
     help="Disable progress bar.",
 )
 def load(
-    data_path: Path | GCSPath,
-    files_path: Path | GCSPath,
+    data_path: AnyPath,
+    files_path: AnyPath,
     project_ids: tuple[str, ...],
     runs: tuple[str, ...],
     step_multiplier: int,

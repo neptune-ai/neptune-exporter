@@ -32,7 +32,6 @@ from __future__ import annotations
 import logging
 import re
 from dataclasses import dataclass
-from pathlib import Path
 from typing import (
     TYPE_CHECKING,
     Any,
@@ -46,6 +45,7 @@ import pandas as pd
 import pyarrow as pa
 
 from neptune_exporter.loaders.loader import DataLoader
+from neptune_exporter.storage.types import AnyPath
 from neptune_exporter.types import ProjectId, TargetExperimentId, TargetRunId
 
 if TYPE_CHECKING:
@@ -437,7 +437,7 @@ class ZenMLLoader(DataLoader):
         self,
         df: pd.DataFrame,
         file_refs: Dict[str, list[str]],
-        files_directory: Path,
+        files_directory: AnyPath,
     ) -> None:
         """Collect file and artifact references as metadata.
 
@@ -570,7 +570,7 @@ class ZenMLLoader(DataLoader):
 
     def _upload_artifact_to_zenml(
         self,
-        local_path: Path,
+        local_path: AnyPath,
         artifact_name: str,
         model_version_id: str,
         neptune_attr_path: str,
@@ -668,7 +668,7 @@ class ZenMLLoader(DataLoader):
     def _upload_files_as_artifacts(
         self,
         file_refs: Dict[str, list[str]],
-        files_directory: Path,
+        files_directory: AnyPath,
         model_version_id: str,
         all_metadata: Dict[str, Any],
     ) -> None:
@@ -986,7 +986,7 @@ class ZenMLLoader(DataLoader):
         self,
         run_data: Generator[pa.Table, None, None],
         run_id: TargetRunId,
-        files_directory: Path,
+        files_directory: AnyPath,
         step_multiplier: int,  # noqa: ARG002 - not required for summary-only stats
     ) -> None:
         """Upload all data for a single run to a ZenML Model Version.

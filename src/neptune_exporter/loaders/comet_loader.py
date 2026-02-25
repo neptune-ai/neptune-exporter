@@ -32,6 +32,7 @@ from comet_ml.messages import (
     SystemDetailsMessage,
 )
 
+from neptune_exporter.storage.types import AnyPath
 from neptune_exporter.types import ProjectId, TargetRunId, TargetExperimentId
 from neptune_exporter.loaders.loader import DataLoader
 
@@ -288,7 +289,7 @@ class CometLoader(DataLoader):
                 )
 
     def _upload_file_series(
-        self, step_multiplier: int, files_base_path: Path, run_data: pd.DataFrame
+        self, step_multiplier: int, files_base_path: AnyPath, run_data: pd.DataFrame
     ) -> None:
         """
         Upload file series data to Comet as assets or images.
@@ -338,7 +339,7 @@ class CometLoader(DataLoader):
                     else:
                         self._logger.warning(f"File not found: {file_path}")
 
-    def _upload_files(self, files_base_path: Path, file_data: pd.DataFrame) -> None:
+    def _upload_files(self, files_base_path: AnyPath, file_data: pd.DataFrame) -> None:
         """
         Upload file data to Comet as assets or folders.
 
@@ -549,7 +550,7 @@ class CometLoader(DataLoader):
         self,
         run_data: Generator[pa.Table, None, None],
         run_id: TargetRunId,
-        files_directory: Path,
+        files_directory: AnyPath,
         step_multiplier: int,
     ) -> None:
         """Upload all data for a single run to Comet.
@@ -732,7 +733,7 @@ class CometLoader(DataLoader):
         self,
         run_data: pd.DataFrame,
         run_id: TargetRunId,
-        files_base_path: Path,
+        files_base_path: AnyPath,
         step_multiplier: int,
     ) -> None:
         """Upload files and series as assets to Comet experiment.
