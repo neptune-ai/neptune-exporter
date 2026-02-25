@@ -15,11 +15,11 @@
 
 import os
 from pathlib import Path
-from unittest.mock import MagicMock, patch, call
+from unittest.mock import MagicMock, patch
 
 import pytest
 
-from neptune_exporter.cloud_storage import GCSPath, is_gcs_url
+from neptune_exporter.storage.gcs import GCSPath, is_gcs_url
 
 
 # ---------------------------------------------------------------------------
@@ -37,10 +37,6 @@ def test_is_gcs_url_with_local_path():
 
 def test_is_gcs_url_with_relative_path():
     assert is_gcs_url("relative/path") is False
-
-
-def test_is_gcs_url_with_path_object():
-    assert is_gcs_url(Path("/some/local/path")) is False
 
 
 def test_is_gcs_url_with_empty_string():

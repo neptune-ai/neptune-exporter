@@ -19,9 +19,9 @@ from pathlib import Path
 from typing import Iterator, Optional
 
 
-def is_gcs_url(path: str | Path) -> bool:
+def is_gcs_url(path: str) -> bool:
     """Return True if *path* looks like a GCS URI (gs://)."""
-    return str(path).startswith("gs://")
+    return path.startswith("gs://")
 
 
 class GCSPath:

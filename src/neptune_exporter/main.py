@@ -21,7 +21,7 @@ from typing import Optional
 
 import click
 
-from neptune_exporter.cloud_storage import GCSPath, is_gcs_url
+from neptune_exporter.storage.gcs import GCSPath, is_gcs_url
 from neptune_exporter.export_manager import ExportManager
 from neptune_exporter.model_registry_export_manager import (
     ModelRegistryExportManager,
@@ -60,8 +60,6 @@ class _GCSAwarePath(click.ParamType):
     def convert(self, value, param, ctx):
         if value is None:
             return None
-        if isinstance(value, (Path, GCSPath)):
-            return value
         if is_gcs_url(value):
             return GCSPath(value)
         return Path(value)
