@@ -46,6 +46,7 @@ from neptune_exporter.loaders.loader import DataLoader
 from neptune_exporter.logging_utils import create_console_handler, info_always
 from neptune_exporter.storage.parquet_reader import ParquetReader
 from neptune_exporter.storage.parquet_writer import ParquetWriter
+from neptune_exporter.storage.types import AnyPath
 from neptune_exporter.summary_manager import SummaryManager
 from neptune_exporter.types import ProjectId, SourceRunId
 from neptune_exporter.validation import ReportFormatter
@@ -854,8 +855,8 @@ def export_models(
     help="Disable progress bar.",
 )
 def load(
-    data_path: Path | GCSPath,
-    files_path: Path | GCSPath,
+    data_path: AnyPath,
+    files_path: AnyPath,
     project_ids: tuple[str, ...],
     runs: tuple[str, ...],
     step_multiplier: int,

@@ -16,7 +16,7 @@
 from __future__ import annotations
 
 from pathlib import Path
-from typing import Iterator, Optional
+from typing import Iterator
 
 
 def is_gcs_url(path: str) -> bool:
@@ -60,7 +60,7 @@ class GCSPath:
     def _raw(self) -> str:
         """Return the path **without** the ``gs://`` scheme for gcsfs/PyArrow."""
         if self._uri.startswith("gs://"):
-            return self._uri[len("gs://"):]
+            return self._uri[len("gs://") :]
         return self._uri
 
     # ------------------------------------------------------------------
@@ -165,7 +165,7 @@ class GCSPath:
         local_path.mkdir(parents=True, exist_ok=True)
         src = self._raw().rstrip("/")
         for remote_path in fs.find(src):
-            rel = remote_path[len(src):].lstrip("/")
+            rel = remote_path[len(src) :].lstrip("/")
             if not rel:
                 continue
             local_file = local_path / rel
@@ -175,6 +175,7 @@ class GCSPath:
     def get_pyarrow_filesystem(self):
         """Return a PyArrow-compatible filesystem wrapping gcsfs."""
         import pyarrow.fs as pafs  # noqa: PLC0415
+
         return pafs.PyFileSystem(pafs.FSSpecHandler(self.get_gcsfs()))
 
     # ------------------------------------------------------------------

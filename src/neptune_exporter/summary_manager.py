@@ -12,13 +12,13 @@
 # WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 # See the License for the specific language governing permissions and
 # limitations under the License.
-
-from pathlib import Path
 from typing import Any
 import logging
 import pyarrow as pa
 import pyarrow.compute as pc
+
 from neptune_exporter.storage.parquet_reader import ParquetReader
+from neptune_exporter.storage.types import AnyPath
 
 
 class SummaryManager:
@@ -48,7 +48,7 @@ class SummaryManager:
 
         return summary
 
-    def get_project_summary(self, project_directory: Path) -> dict[str, Any] | None:
+    def get_project_summary(self, project_directory: AnyPath) -> dict[str, Any] | None:
         """
         Get detailed summary for a specific project.
 

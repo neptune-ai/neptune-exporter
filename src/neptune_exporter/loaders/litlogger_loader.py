@@ -25,6 +25,7 @@ import pandas as pd
 import pyarrow as pa
 
 from neptune_exporter.loaders.loader import DataLoader
+from neptune_exporter.storage.types import AnyPath
 from neptune_exporter.types import ProjectId, TargetExperimentId, TargetRunId
 
 try:
@@ -407,7 +408,7 @@ class LitLoggerLoader(DataLoader):
         self,
         run_data: Generator[pa.Table, None, None],
         run_id: TargetRunId,
-        files_directory: Path,
+        files_directory: AnyPath,
         step_multiplier: int,
     ) -> None:
         """
@@ -727,7 +728,7 @@ class LitLoggerLoader(DataLoader):
         self,
         run_data: pd.DataFrame,
         run_id: TargetRunId,
-        files_base_path: Path,
+        files_base_path: AnyPath,
         step_multiplier: int,
     ) -> None:
         """

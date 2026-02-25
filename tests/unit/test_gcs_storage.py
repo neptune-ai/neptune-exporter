@@ -14,7 +14,6 @@
 # limitations under the License.
 
 import os
-from pathlib import Path
 from unittest.mock import MagicMock, patch
 
 import pytest
@@ -117,7 +116,11 @@ class TestGCSPathProperties:
         assert GCSPath("gs://bucket/a") != GCSPath("gs://bucket/b")
 
     def test_hashable(self):
-        s = {GCSPath("gs://bucket/a"), GCSPath("gs://bucket/a"), GCSPath("gs://bucket/b")}
+        s = {
+            GCSPath("gs://bucket/a"),
+            GCSPath("gs://bucket/a"),
+            GCSPath("gs://bucket/b"),
+        }
         assert len(s) == 2
 
     def test_equality_with_non_gcspath(self):
@@ -228,7 +231,9 @@ class TestDownloadDir:
 
         assert fs.get.call_count == 2
         fs.get.assert_any_call("bucket/exports/file1.txt", str(tmp_path / "file1.txt"))
-        fs.get.assert_any_call("bucket/exports/sub/file2.txt", str(tmp_path / "sub" / "file2.txt"))
+        fs.get.assert_any_call(
+            "bucket/exports/sub/file2.txt", str(tmp_path / "sub" / "file2.txt")
+        )
 
     def test_download_dir_skips_root_entry(self, tmp_path):
         """An entry equal to the source directory itself should be skipped."""
@@ -258,8 +263,12 @@ def test_get_pyarrow_filesystem():
     mock_handler = MagicMock()
     mock_pa_fs = MagicMock()
 
-    with patch("pyarrow.fs.FSSpecHandler", return_value=mock_handler) as mock_handler_cls, \
-         patch("pyarrow.fs.PyFileSystem", return_value=mock_pa_fs) as mock_pyfs_cls:
+    with (
+        patch(
+            "pyarrow.fs.FSSpecHandler", return_value=mock_handler
+        ) as mock_handler_cls,
+        patch("pyarrow.fs.PyFileSystem", return_value=mock_pa_fs) as mock_pyfs_cls,
+    ):
         result = p.get_pyarrow_filesystem()
 
     mock_handler_cls.assert_called_once_with(mock_fs)

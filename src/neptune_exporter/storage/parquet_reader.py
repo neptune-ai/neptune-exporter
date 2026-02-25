@@ -17,14 +17,15 @@ import datetime
 import pyarrow as pa
 import pyarrow.parquet as pq
 import pyarrow.compute as pc
-from pathlib import Path
 from typing import Any, Generator, Optional
 import logging
 from dataclasses import dataclass
 from neptune_exporter import model
 from neptune_exporter.storage.gcs import GCSPath
+from neptune_exporter.storage.types import AnyPath
 from neptune_exporter.types import ProjectId, RunFilePrefix, SourceRunId
 from neptune_exporter.utils import sanitize_path_part
+
 
 @dataclass(frozen=True, order=True, slots=True)
 class RunMetadata:
@@ -42,7 +43,7 @@ class RunMetadata:
 class ParquetReader:
     """Reads exported Neptune data from parquet files."""
 
-    def __init__(self, base_path: Path | GCSPath):
+    def __init__(self, base_path: AnyPath):
         self.base_path = base_path
         self._logger = logging.getLogger(__name__)
 
@@ -78,7 +79,7 @@ class ParquetReader:
         self,
         project_ids: Optional[list[ProjectId]] = None,
         entity_scope: str | None = None,
-    ) -> list[Path | GCSPath]:
+    ) -> list[AnyPath]:
         """List all available projects in the exported data."""
         if not self.base_path.exists():
             return []
@@ -103,11 +104,11 @@ class ParquetReader:
                 item for item in project_directories if (item / entity_scope).is_dir()
             ]
 
-        return sorted(project_directories)
+        return sorted(project_directories, key=str)
 
     def list_run_files(
         self,
-        project_directory: Path,
+        project_directory: AnyPath,
         run_ids: Optional[list[SourceRunId]] = None,
         entity_scope: str | None = None,
     ) -> list[RunFilePrefix]:
@@ -143,11 +144,11 @@ class ParquetReader:
             for file_path in run_files
         ]
 
-        return sorted(run_file_prefixes)
+        return sorted(run_file_prefixes, key=str)
 
     def read_project_data(
         self,
-        project_directory: Path,
+        project_directory: AnyPath,
         runs: Optional[list[SourceRunId]] = None,
         attribute_types: Optional[list[str]] = None,
         entity_scope: str | None = None,
@@ -176,7 +177,7 @@ class ParquetReader:
 
     def read_run_data(
         self,
-        project_directory: Path,
+        project_directory: AnyPath,
         run_file_prefix: RunFilePrefix,
         attribute_types: Optional[list[str]] = None,
         attribute_paths: Optional[list[str]] = None,
@@ -203,7 +204,11 @@ class ParquetReader:
             try:
                 if isinstance(part_file, GCSPath):
                     pa_filesystem = part_file.get_pyarrow_filesystem()
-                    table = pq.read_table(part_file.gcs_path, filesystem=pa_filesystem, schema=model.SCHEMA)
+                    table = pq.read_table(
+                        part_file.gcs_path,
+                        filesystem=pa_filesystem,
+                        schema=model.SCHEMA,
+                    )
 
                 else:
                     table = pq.read_table(part_file, schema=model.SCHEMA)
@@ -223,8 +228,8 @@ class ParquetReader:
                 continue
 
     def _get_run_files(
-        self, project_directory: Path, run_file_prefix: RunFilePrefix
-    ) -> list[Path]:
+        self, project_directory: AnyPath, run_file_prefix: RunFilePrefix
+    ) -> list[AnyPath]:
         """Get sorted list of all part files for a specific run.
 
         Args:
@@ -244,7 +249,7 @@ class ParquetReader:
             part_files.append(file_path)
 
         # Sort by part number
-        def get_part_number(path: Path) -> int:
+        def get_part_number(path: AnyPath) -> int:
             stem = path.stem  # run_id_part_N
             parts = stem.rsplit("_part_", 1)
             if len(parts) == 2:
@@ -273,7 +278,7 @@ class ParquetReader:
 
     def read_run_metadata(
         self,
-        project_directory: Path,
+        project_directory: AnyPath,
         run_file_prefix: RunFilePrefix,
         entity_scope: str | None = None,
     ) -> Optional[RunMetadata]:
@@ -396,8 +401,8 @@ class ParquetReader:
 
     @staticmethod
     def _get_project_directory(
-        project_directory: Path, entity_scope: str | None = None
-    ) -> Path:
+        project_directory: AnyPath, entity_scope: str | None = None
+    ) -> AnyPath:
         if entity_scope is None:
             return project_directory
         return project_directory / entity_scope

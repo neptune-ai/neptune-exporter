@@ -16,7 +16,6 @@
 import datetime
 import heapq
 import logging
-from pathlib import Path
 from typing import Optional
 
 from rich.progress import (
@@ -29,10 +28,10 @@ from rich.progress import (
     TimeElapsedColumn,
 )
 
-from neptune_exporter.storage.gcs import GCSPath
 from neptune_exporter.storage.parquet_reader import ParquetReader, RunMetadata
 from neptune_exporter.loaders.loader import DataLoader
 from neptune_exporter.logging_utils import get_rich_console
+from neptune_exporter.storage.types import AnyPath
 from neptune_exporter.types import ProjectId, SourceRunId, RunFilePrefix, TargetRunId
 from neptune_exporter.utils import sanitize_path_part
 
@@ -44,7 +43,7 @@ class LoaderManager:
         self,
         parquet_reader: ParquetReader,
         data_loader: DataLoader,
-        files_directory: Path | GCSPath,
+        files_directory: AnyPath,
         step_multiplier: int,
         progress_bar: bool = True,
     ):
@@ -208,7 +207,7 @@ class LoaderManager:
 
     def _load_project(
         self,
-        project_directory: Path,
+        project_directory: AnyPath,
         runs: Optional[list[SourceRunId]],
         *,
         progress: Progress | None = None,
@@ -307,7 +306,7 @@ class LoaderManager:
 
     def _process_run(
         self,
-        project_directory: Path,
+        project_directory: AnyPath,
         source_run_file_prefix: RunFilePrefix,
         metadata: RunMetadata,
         run_id_to_target_run_id: dict[SourceRunId, TargetRunId],
