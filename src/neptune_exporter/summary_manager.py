@@ -16,7 +16,6 @@
 from pathlib import Path
 from typing import Any
 import logging
-import pyarrow as pa
 import pyarrow.compute as pc
 from neptune_exporter.storage.parquet_reader import ParquetReader
 
@@ -59,12 +58,77 @@ class SummaryManager:
             Dictionary with detailed project information including statistics.
         """
         try:
-            project_data_generator = self._parquet_reader.read_project_data(
-                project_directory
-            )
-            all_tables = list(project_data_generator)
+            project_id: str | None = None
+            total_files = 0
+            total_records = 0
+            total_size_bytes = 0
+            records_per_file: list[int] = []
 
-            if not all_tables:
+            unique_runs: set[Any] = set()
+            unique_attribute_types: set[Any] = set()
+            attribute_paths_by_type: dict[Any, set[Any]] = {}
+            run_breakdown: dict[Any, int] = {}
+
+            step_stats: dict[str, Any] = {
+                "total_steps": 0,
+                "min_step": None,
+                "max_step": None,
+                "unique_steps": 0,
+            }
+            unique_steps: set[Any] = set()
+
+            for table in self._parquet_reader.read_project_data(project_directory):
+                record_count = len(table)
+                if record_count == 0:
+                    continue
+
+                total_files += 1
+                total_records += record_count
+                total_size_bytes += table.nbytes
+                records_per_file.append(record_count)
+
+                if project_id is None:
+                    project_id = table["project_id"][0].as_py()
+
+                run_counts = pc.value_counts(table["run_id"]).to_pylist()
+                for run_count in run_counts:
+                    run_id = run_count["values"]
+                    count = run_count["counts"]
+                    unique_runs.add(run_id)
+                    run_breakdown[run_id] = run_breakdown.get(run_id, 0) + count
+
+                table_attribute_types = pc.unique(table["attribute_type"]).to_pylist()
+                for attr_type in table_attribute_types:
+                    unique_attribute_types.add(attr_type)
+                    type_mask = pc.equal(table["attribute_type"], attr_type)
+                    unique_paths = pc.unique(
+                        pc.filter(table["attribute_path"], type_mask)
+                    ).to_pylist()
+                    if attr_type not in attribute_paths_by_type:
+                        attribute_paths_by_type[attr_type] = set()
+                    attribute_paths_by_type[attr_type].update(unique_paths)
+
+                # Update step statistics incrementally to avoid loading all tables.
+                if "step" in table.column_names:
+                    non_null_mask = pc.true_unless_null(table["step"])
+                    non_null_steps = pc.filter(table["step"], non_null_mask)
+                    if len(non_null_steps) > 0:
+                        step_stats["total_steps"] += len(non_null_steps)
+                        unique_steps.update(pc.unique(non_null_steps).to_pylist())
+                        table_min = pc.min(non_null_steps).as_py()
+                        table_max = pc.max(non_null_steps).as_py()
+                        if (
+                            step_stats["min_step"] is None
+                            or table_min < step_stats["min_step"]
+                        ):
+                            step_stats["min_step"] = table_min
+                        if (
+                            step_stats["max_step"] is None
+                            or table_max > step_stats["max_step"]
+                        ):
+                            step_stats["max_step"] = table_max
+
+            if total_files == 0:
                 return {
                     "project_id": None,
                     "total_runs": 0,
@@ -76,49 +140,22 @@ class SummaryManager:
                     "file_info": {},
                 }
 
-            # Get project_id from the first table
-            project_id = all_tables[0]["project_id"][0].as_py()
-
-            # Combine all tables for analysis
-            combined_table = pa.concat_tables(all_tables)
-            total_records = len(combined_table)
-
-            # Get unique runs and attribute types
-            unique_runs = pc.unique(combined_table["run_id"]).to_pylist()
-            unique_attribute_types = pc.unique(
-                combined_table["attribute_type"]
-            ).to_pylist()
-
-            # Calculate attribute breakdown (count of unique attribute paths per type)
-            attribute_breakdown = {}
-            for attr_type in unique_attribute_types:
-                type_mask = pc.equal(combined_table["attribute_type"], attr_type)
-                filtered_table = combined_table.filter(type_mask)
-                unique_paths = pc.unique(filtered_table["attribute_path"])
-                attribute_breakdown[attr_type] = len(unique_paths)
-
-            # Calculate run breakdown (record count per run)
-            run_breakdown = {}
-            for run_id in unique_runs:
-                run_mask = pc.equal(combined_table["run_id"], run_id)
-                run_table = combined_table.filter(run_mask)
-                run_breakdown[run_id] = len(run_table)
-
-            # Calculate file information
-            file_info = {
-                "total_files": len(all_tables),
-                "total_size_bytes": sum(table.nbytes for table in all_tables),
-                "records_per_file": [len(table) for table in all_tables],
+            step_stats["unique_steps"] = len(unique_steps)
+            attribute_breakdown = {
+                attr_type: len(paths)
+                for attr_type, paths in attribute_paths_by_type.items()
             }
-
-            # Calculate step statistics for numeric steps
-            step_stats = self._calculate_step_statistics(combined_table)
+            file_info = {
+                "total_files": total_files,
+                "total_size_bytes": total_size_bytes,
+                "records_per_file": records_per_file,
+            }
 
             return {
                 "project_id": project_id,
                 "total_runs": len(unique_runs),
-                "attribute_types": sorted(unique_attribute_types),
-                "runs": sorted(unique_runs),
+                "attribute_types": sorted(unique_attribute_types, key=lambda x: str(x)),
+                "runs": sorted(unique_runs, key=lambda x: str(x)),
                 "total_records": total_records,
                 "attribute_breakdown": attribute_breakdown,
                 "run_breakdown": run_breakdown,
@@ -130,36 +167,3 @@ class SummaryManager:
                 f"Error analyzing project {project_directory}", exc_info=True
             )
             return None
-
-    def _calculate_step_statistics(self, table: pa.Table) -> dict[str, Any]:
-        """Calculate statistics for step values in the table."""
-        try:
-            # Filter out null steps
-            non_null_mask = pc.true_unless_null(table["step"])
-            non_null_table = table.filter(non_null_mask)
-
-            if len(non_null_table) == 0:
-                return {
-                    "total_steps": 0,
-                    "min_step": None,
-                    "max_step": None,
-                    "unique_steps": 0,
-                }
-
-            # Get step values as Python floats
-            step_values = non_null_table["step"].to_pylist()
-
-            return {
-                "total_steps": len(step_values),
-                "min_step": min(step_values),
-                "max_step": max(step_values),
-                "unique_steps": len(set(step_values)),
-            }
-        except Exception:
-            self._logger.error("Could not calculate step statistics", exc_info=True)
-            return {
-                "total_steps": 0,
-                "min_step": None,
-                "max_step": None,
-                "unique_steps": 0,
-            }

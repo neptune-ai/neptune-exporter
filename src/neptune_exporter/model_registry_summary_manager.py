@@ -17,7 +17,6 @@ import logging
 from pathlib import Path
 from typing import Any
 
-import pyarrow as pa
 import pyarrow.compute as pc
 
 from neptune_exporter.storage.parquet_reader import ParquetReader
@@ -83,12 +82,36 @@ class ModelRegistrySummaryManager:
     def _get_entity_summary(
         self, project_directory: Path, entity_scope: str
     ) -> dict[str, Any]:
-        tables = list(
-            self._parquet_reader.read_project_data(
-                project_directory, entity_scope=entity_scope
-            )
-        )
-        if not tables:
+        project_id: str | None = None
+        total_records = 0
+        unique_entities: set[Any] = set()
+        unique_attribute_types: set[Any] = set()
+        attribute_paths_by_type: dict[Any, set[Any]] = {}
+
+        for table in self._parquet_reader.read_project_data(
+            project_directory, entity_scope=entity_scope
+        ):
+            if len(table) == 0:
+                continue
+
+            total_records += len(table)
+            if project_id is None:
+                project_id = table["project_id"][0].as_py()
+
+            unique_entities.update(pc.unique(table["run_id"]).to_pylist())
+            table_attribute_types = pc.unique(table["attribute_type"]).to_pylist()
+            unique_attribute_types.update(table_attribute_types)
+
+            for attr_type in table_attribute_types:
+                type_mask = pc.equal(table["attribute_type"], attr_type)
+                unique_paths = pc.unique(
+                    pc.filter(table["attribute_path"], type_mask)
+                ).to_pylist()
+                if attr_type not in attribute_paths_by_type:
+                    attribute_paths_by_type[attr_type] = set()
+                attribute_paths_by_type[attr_type].update(unique_paths)
+
+        if total_records == 0:
             return {
                 "project_id": None,
                 "total_entities": 0,
@@ -98,23 +121,16 @@ class ModelRegistrySummaryManager:
                 "attribute_breakdown": {},
             }
 
-        combined_table = pa.concat_tables(tables)
-        project_id = combined_table["project_id"][0].as_py()
-        unique_entities = pc.unique(combined_table["run_id"]).to_pylist()
-        unique_attribute_types = pc.unique(combined_table["attribute_type"]).to_pylist()
-
-        attribute_breakdown: dict[str, int] = {}
-        for attr_type in unique_attribute_types:
-            type_mask = pc.equal(combined_table["attribute_type"], attr_type)
-            filtered_table = combined_table.filter(type_mask)
-            unique_paths = pc.unique(filtered_table["attribute_path"])
-            attribute_breakdown[attr_type] = len(unique_paths)
+        attribute_breakdown: dict[Any, int] = {
+            attr_type: len(paths)
+            for attr_type, paths in attribute_paths_by_type.items()
+        }
 
         return {
             "project_id": project_id,
             "total_entities": len(unique_entities),
-            "entities": sorted(unique_entities),
-            "total_records": len(combined_table),
-            "attribute_types": sorted(unique_attribute_types),
+            "entities": sorted(unique_entities, key=lambda x: str(x)),
+            "total_records": total_records,
+            "attribute_types": sorted(unique_attribute_types, key=lambda x: str(x)),
             "attribute_breakdown": attribute_breakdown,
         }
