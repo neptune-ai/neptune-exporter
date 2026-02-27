@@ -17,7 +17,6 @@ import os
 import re
 import logging
 from decimal import Decimal
-from pathlib import Path
 from typing import Generator, Optional
 from mlflow.entities.run import Run
 import pandas as pd
@@ -27,6 +26,7 @@ from mlflow.tracking import MlflowClient
 from mlflow.entities import Metric
 from mlflow.utils.mlflow_tags import MLFLOW_PARENT_RUN_ID
 
+from neptune_exporter.storage.types import AnyPath
 from neptune_exporter.types import ProjectId, TargetExperimentId, TargetRunId
 from neptune_exporter.loaders.loader import DataLoader
 
@@ -185,7 +185,7 @@ class MLflowLoader(DataLoader):
         self,
         run_data: Generator[pa.Table, None, None],
         run_id: TargetRunId,
-        files_directory: Path,
+        files_directory: AnyPath,
         step_multiplier: int,
     ) -> None:
         """Upload all data for a single run to MLflow.
@@ -296,7 +296,7 @@ class MLflowLoader(DataLoader):
         self,
         run_data: pd.DataFrame,
         run_id: TargetRunId,
-        files_base_path: Path,
+        files_base_path: AnyPath,
         step_multiplier: int,
     ) -> None:
         """Upload files and series as artifacts to MLflow run."""

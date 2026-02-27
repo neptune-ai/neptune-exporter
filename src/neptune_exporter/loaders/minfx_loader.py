@@ -79,6 +79,8 @@ from typing import Any, Generator, Optional
 import pandas as pd
 import pyarrow as pa
 
+from neptune_exporter.storage.types import AnyPath
+
 # Allow OAuth over HTTP for local development/testing.
 # Must be set BEFORE importing Neptune to avoid InsecureTransportError.
 os.environ.setdefault("OAUTHLIB_INSECURE_TRANSPORT", "1")
@@ -536,7 +538,7 @@ class MinfxLoader(DataLoader):
         self,
         run_data: Generator[pa.Table, None, None],
         run_id: TargetRunId,
-        files_directory: Path,
+        files_directory: AnyPath,
         step_multiplier: int,
     ) -> None:
         """Upload all data for a single run to Neptune.
@@ -716,7 +718,7 @@ class MinfxLoader(DataLoader):
         self,
         run_data: pd.DataFrame,
         run_id: TargetRunId,
-        files_base_path: Path,
+        files_base_path: AnyPath,
     ) -> None:
         """Upload files and file series to Neptune run."""
         if self._active_run is None:
@@ -739,7 +741,7 @@ class MinfxLoader(DataLoader):
             )
 
     def _get_file_path_from_tuple(
-        self, row: tuple, files_base_path: Path
+        self, row: tuple, files_base_path: AnyPath
     ) -> Optional[Path]:
         """Extract and validate file path from namedtuple row (from itertuples)."""
         file_value = getattr(row, "file_value", None)
@@ -758,7 +760,7 @@ class MinfxLoader(DataLoader):
         return full_path
 
     def _upload_regular_files(
-        self, file_data: pd.DataFrame, files_base_path: Path
+        self, file_data: pd.DataFrame, files_base_path: AnyPath
     ) -> int:
         """Upload regular files (file, file_set, artifact).
 
@@ -837,7 +839,9 @@ class MinfxLoader(DataLoader):
             self._create_file_with_extension(full_path), wait=False
         )
 
-    def _upload_file_series(self, run_data: pd.DataFrame, files_base_path: Path) -> int:
+    def _upload_file_series(
+        self, run_data: pd.DataFrame, files_base_path: AnyPath
+    ) -> int:
         """Upload file series data.
 
         PERFORMANCE: Pre-filters sys/ attributes and uses itertuples() for faster iteration.

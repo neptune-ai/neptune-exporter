@@ -14,12 +14,12 @@
 # limitations under the License.
 
 import logging
-from pathlib import Path
 from typing import Any
 
 import pyarrow.compute as pc
 
 from neptune_exporter.storage.parquet_reader import ParquetReader
+from neptune_exporter.storage.types import AnyPath
 
 
 class ModelRegistrySummaryManager:
@@ -36,7 +36,7 @@ class ModelRegistrySummaryManager:
         model_version_projects = set(
             self._parquet_reader.list_project_directories(entity_scope="model_versions")
         )
-        project_directories = sorted(model_projects | model_version_projects)
+        project_directories = sorted(model_projects | model_version_projects, key=str)
 
         summary: dict[str, Any] = {
             "total_projects": len(project_directories),
@@ -57,7 +57,7 @@ class ModelRegistrySummaryManager:
 
         return summary
 
-    def get_project_summary(self, project_directory: Path) -> dict[str, Any] | None:
+    def get_project_summary(self, project_directory: AnyPath) -> dict[str, Any] | None:
         try:
             models_summary = self._get_entity_summary(project_directory, "models")
             model_versions_summary = self._get_entity_summary(
@@ -80,7 +80,7 @@ class ModelRegistrySummaryManager:
             return None
 
     def _get_entity_summary(
-        self, project_directory: Path, entity_scope: str
+        self, project_directory: AnyPath, entity_scope: str
     ) -> dict[str, Any]:
         project_id: str | None = None
         total_records = 0

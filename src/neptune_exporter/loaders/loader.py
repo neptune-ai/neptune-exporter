@@ -16,10 +16,10 @@
 """Core loader abstract base class for data loading to target platforms."""
 
 from abc import ABC, abstractmethod
-from pathlib import Path
 from typing import Generator, Optional
 import pyarrow as pa
 
+from neptune_exporter.storage.types import AnyPath
 from neptune_exporter.types import ProjectId, TargetExperimentId, TargetRunId
 
 
@@ -84,7 +84,7 @@ class DataLoader(ABC):
         self,
         run_data: Generator[pa.Table, None, None],
         run_id: TargetRunId,
-        files_directory: Path,
+        files_directory: AnyPath,
         step_multiplier: int,
     ) -> None:
         """

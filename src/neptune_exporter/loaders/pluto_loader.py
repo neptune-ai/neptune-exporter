@@ -30,6 +30,7 @@ from typing import Generator, Optional
 import pandas as pd
 import pyarrow as pa
 
+from neptune_exporter.storage.types import AnyPath
 from neptune_exporter.types import ProjectId, TargetExperimentId, TargetRunId
 from neptune_exporter.loaders.loader import DataLoader
 
@@ -340,7 +341,7 @@ class PlutoLoader(DataLoader):
         self,
         run_data: Generator[pa.Table, None, None],
         run_id: TargetRunId,
-        files_directory: Path,
+        files_directory: AnyPath,
         step_multiplier: int,
     ) -> None:
         run_id_str = str(run_id)

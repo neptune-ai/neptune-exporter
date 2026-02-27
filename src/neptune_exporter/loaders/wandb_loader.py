@@ -18,12 +18,12 @@ import re
 import logging
 import tempfile
 from decimal import Decimal
-from pathlib import Path
 from typing import Generator, Optional, Any
 import pandas as pd
 import pyarrow as pa
 import wandb
 
+from neptune_exporter.storage.types import AnyPath
 from neptune_exporter.types import ProjectId, TargetRunId, TargetExperimentId
 from neptune_exporter.loaders.loader import DataLoader
 
@@ -224,7 +224,7 @@ class WandBLoader(DataLoader):
         self,
         run_data: Generator[pa.Table, None, None],
         run_id: TargetRunId,
-        files_directory: Path,
+        files_directory: AnyPath,
         step_multiplier: int,
     ) -> None:
         """Upload all data for a single run to W&B.
@@ -336,7 +336,7 @@ class WandBLoader(DataLoader):
         self,
         run_data: pd.DataFrame,
         run_id: TargetRunId,
-        files_base_path: Path,
+        files_base_path: AnyPath,
         step_multiplier: int,
     ) -> None:
         """Upload files and series as artifacts to W&B run.
