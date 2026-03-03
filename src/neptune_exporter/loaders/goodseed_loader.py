@@ -26,13 +26,9 @@ import pyarrow as pa
 from neptune_exporter.loaders.loader import DataLoader
 from neptune_exporter.types import ProjectId, TargetExperimentId, TargetRunId
 
-try:
-    import goodseed
-
-    GOODSEED_AVAILABLE = True
-except ImportError:
-    GOODSEED_AVAILABLE = False
-    goodseed = None  # type: ignore
+import goodseed
+import goodseed.config as goodseed_config
+from goodseed.sync import upload_run as sync_upload_run
 
 
 # Neptune sys/ attributes to skip (platform internals + attributes extracted separately).
@@ -58,20 +54,21 @@ _FILE_TYPES = {"file", "file_series", "file_set", "artifact"}
 
 class GoodseedLoader(DataLoader):
     """
-    Loads Neptune data from parquet files into GoodSeed local experiment tracker.
+    Loads Neptune data from parquet files into GoodSeed experiment tracker.
 
-    This loader migrates experiment data from Neptune to GoodSeed's local SQLite
-    storage. GoodSeed operates entirely locally with no server or authentication
-    required.
+    Supports two storage modes:
+    - **local**: Writes directly to GoodSeed's local SQLite storage (default).
+    - **remote**: Writes to local SQLite first, then uploads to a GoodSeed
+      server via API. Requires an API key.
 
     Neptune Concept -> GoodSeed Concept
     ------------------------------------
-    - Project       -> Project (passed through as-is)
-    - Run           -> Run (SQLite file)
+    - Project       -> Project (passed through or remapped for remote)
+    - Run           -> Run (SQLite file, optionally synced to server)
     - Parameters    -> Configs (log_configs)
     - Float Series  -> Metrics (log_metrics)
-    - String Series -> String Series (log_string_series)
-    - sys/name      -> experiment_name
+    - String Series -> String Series (log_strings)
+    - sys/name      -> name
     - Files         -> Skipped (not supported)
     - Histograms    -> Skipped (not supported)
 
@@ -83,8 +80,9 @@ class GoodseedLoader(DataLoader):
 
     def __init__(
         self,
-        goodseed_home: Optional[str] = None,
+        storage_mode: str = "auto",
         goodseed_project: Optional[str] = None,
+        goodseed_api_key: Optional[str] = None,
         name_prefix: Optional[str] = None,
         show_client_logs: bool = False,
     ):
@@ -92,21 +90,32 @@ class GoodseedLoader(DataLoader):
         Initialize GoodSeed loader.
 
         Args:
-            goodseed_home: Override for GoodSeed data directory (default: ~/.goodseed).
-                Can also be set via GOODSEED_HOME environment variable.
+            storage_mode: Target mode: ``auto``, ``local`` (sqlite files), or
+                ``remote`` (API). ``auto`` selects ``remote`` when API key is set.
             goodseed_project: Override project name for all imported runs. If not set,
                 uses the Neptune project ID directly.
+            goodseed_api_key: API key for remote mode.
             name_prefix: Optional prefix for run names.
             show_client_logs: Enable verbose logging (unused, kept for interface consistency).
         """
-        if not GOODSEED_AVAILABLE:
+        normalized_storage = storage_mode.lower()
+        if normalized_storage not in {"auto", "local", "remote"}:
             raise RuntimeError(
-                "GoodSeed is not installed. Install with "
-                "`pip install 'neptune-exporter[goodseed]'` to use the GoodSeed loader."
+                f"Invalid GoodSeed storage mode: {storage_mode!r}. "
+                "Use 'auto', 'local', or 'remote'."
+            )
+        if normalized_storage == "auto":
+            normalized_storage = "remote" if goodseed_api_key else "local"
+        self._storage_mode = normalized_storage
+
+        if self._storage_mode == "remote" and not goodseed_api_key:
+            raise RuntimeError(
+                "GoodSeed API key is required in remote mode. "
+                "Set GOODSEED_API_KEY or pass --goodseed-api-key."
             )
 
-        self._goodseed_home = goodseed_home
         self._goodseed_project = goodseed_project
+        self._goodseed_api_key = goodseed_api_key
         self._name_prefix = name_prefix
         self._logger = logging.getLogger(__name__)
 
@@ -114,6 +123,9 @@ class GoodseedLoader(DataLoader):
         self._active_run: Optional[Any] = None
         self._current_run_id: Optional[TargetRunId] = None
         self._pending_run: Optional[Dict[str, Any]] = None
+        self._remote_project_cache: Dict[str, Dict[str, Any]] = {}
+        self._me_name: Optional[str] = None
+        self._warned_remaps: set[str] = set()
 
         # Track warnings to avoid spamming
         self._warned_file_skip = False
@@ -131,10 +143,73 @@ class GoodseedLoader(DataLoader):
             return self._goodseed_project
         return project_id
 
+    def _resolve_remote_target_project(self, source_project_id: str) -> dict[str, Any]:
+        cached = self._remote_project_cache.get(source_project_id)
+        if cached is not None:
+            return cached
+
+        source_workspace = ""
+        source_project = source_project_id
+        parts = source_project_id.split("/", 1)
+        if len(parts) == 2 and parts[0] and parts[1]:
+            source_workspace, source_project = parts
+
+        if self._me_name is None:
+            profile = goodseed.me(api_key=self._goodseed_api_key or "")
+            me_name = profile.get("name")
+            if not me_name:
+                raise RuntimeError(
+                    "Could not resolve user name from /auth/me response."
+                )
+            self._me_name = str(me_name)
+
+        requested_workspace = source_workspace
+        requested_project = source_project
+        if self._goodseed_project:
+            parts = self._goodseed_project.split("/", 1)
+            if len(parts) == 2 and parts[0] and parts[1]:
+                requested_workspace, requested_project = parts
+            else:
+                requested_workspace = ""
+                requested_project = self._goodseed_project
+
+        workspace = requested_workspace or self._me_name
+        target_project = requested_project
+        remapped = False
+
+        # Always write to the authenticated user's workspace.
+        # Cross-workspace projects are namespaced as "<workspace>_<project>".
+        if requested_workspace and requested_workspace != self._me_name:
+            workspace = self._me_name
+            target_project = f"{requested_workspace}_{requested_project}"
+            remapped = True
+
+        payload = goodseed.ensure_project(
+            workspace=workspace,
+            project_name=target_project,
+            storage="remote",
+            api_key=self._goodseed_api_key,
+        )
+        info = {
+            "workspace": workspace,
+            "project": payload.get("name", target_project),
+            "remapped": remapped,
+        }
+        self._remote_project_cache[source_project_id] = info
+
+        warning_key = f"{source_project_id}->{info['workspace']}/{info['project']}"
+        if info["remapped"] and warning_key not in self._warned_remaps:
+            self._warned_remaps.add(warning_key)
+            self._logger.warning(
+                "Source project '%s' mapped to default workspace target '%s/%s'.",
+                source_project_id,
+                info["workspace"],
+                info["project"],
+            )
+        return info
+
     def _convert_step(self, step: Decimal, step_multiplier: int) -> int:
         """Convert Neptune decimal step to GoodSeed integer step."""
-        if step is None:
-            return 0
         return int(float(step) * step_multiplier)
 
     # DataLoader interface
@@ -162,17 +237,41 @@ class GoodseedLoader(DataLoader):
         Looks for the SQLite file at the expected path. If found, returns the
         run ID so LoaderManager can skip re-importing.
         """
-        from goodseed.config import get_run_db_path
-
         gs_run_name = self._get_run_name(run_name)
-        gs_project = self._get_project(project_id)
+        if self._storage_mode == "remote":
+            return self._find_remote_run(project_id, gs_run_name)
 
-        db_path = get_run_db_path(gs_project, gs_run_name, self._goodseed_home)
+        gs_project = self._get_project(project_id)
+        db_path = goodseed_config.get_run_db_path(gs_project, gs_run_name)
         if db_path.exists():
             self._logger.info(
                 f"Run '{gs_run_name}' already exists in project '{gs_project}', skipping."
             )
             return TargetRunId(gs_run_name)
+        return None
+
+    def _find_remote_run(
+        self,
+        project_id: ProjectId,
+        gs_run_name: str,
+    ) -> Optional[TargetRunId]:
+        """Check run existence in remote GoodSeed project using list-runs API."""
+        target = self._resolve_remote_target_project(project_id)
+        runs = goodseed.list_runs(
+            workspace=target["workspace"],
+            project_name=target["project"],
+            storage="remote",
+            api_key=self._goodseed_api_key,
+        )
+        for run in runs:
+            if run.get("run_id") == gs_run_name:
+                self._logger.info(
+                    "Run '%s' already exists in remote project '%s/%s', skipping.",
+                    gs_run_name,
+                    target["workspace"],
+                    target["project"],
+                )
+                return TargetRunId(gs_run_name)
         return None
 
     def create_run(
@@ -192,10 +291,16 @@ class GoodseedLoader(DataLoader):
         """
         gs_run_name = self._get_run_name(run_name)
         gs_project = self._get_project(project_id)
+        remote_workspace = None
+        if self._storage_mode == "remote":
+            target = self._resolve_remote_target_project(project_id)
+            remote_workspace = target["workspace"]
+            gs_project = f"{remote_workspace}/{target['project']}"
 
         self._pending_run = {
             "run_name": gs_run_name,
             "project": gs_project,
+            "remote_workspace": remote_workspace,
             "project_id": project_id,
             "original_run_name": run_name,
             "experiment_name": str(experiment_id) if experiment_id else None,
@@ -227,6 +332,7 @@ class GoodseedLoader(DataLoader):
         if self._pending_run is None or self._current_run_id != run_id:
             raise RuntimeError(f"Run {run_id} is not prepared. Call create_run first.")
 
+        run_closed = False
         try:
             first_chunk = True
             for run_data_part in run_data:
@@ -241,14 +347,20 @@ class GoodseedLoader(DataLoader):
                 self._upload_string_series(run_df, step_multiplier)
                 self._warn_skipped_types(run_df)
 
-            # Close the run
+            # Close the run locally first (sync needs the finalized DB)
             if self._active_run is not None:
                 self._active_run.close()
+                run_closed = True
+                if self._storage_mode == "remote":
+                    self._sync_remote_run(
+                        project=self._pending_run["project"],
+                        run_id=self._pending_run["run_name"],
+                    )
                 self._logger.info(f"Successfully uploaded run {run_id} to GoodSeed")
 
         except Exception:
             self._logger.error(f"Error uploading data for run {run_id}", exc_info=True)
-            if self._active_run is not None:
+            if self._active_run is not None and not run_closed:
                 try:
                     self._active_run.close(status="failed")
                 except Exception:
@@ -268,13 +380,15 @@ class GoodseedLoader(DataLoader):
         if self._pending_run is None:
             raise RuntimeError("No pending run")
 
-        # Extract sys/name and sys/creation_time from data
+        # Extract sys/name, sys/creation_time, and sys/modification_time from data
         experiment_name = self._pending_run["experiment_name"]
         created_at = None
+        modified_at = None
 
         for attr_path, attr_type, col in [
             ("sys/name", "string", "string_value"),
             ("sys/creation_time", "datetime", "datetime_value"),
+            ("sys/modification_time", "datetime", "datetime_value"),
         ]:
             rows = run_df[
                 (run_df["attribute_path"] == attr_path)
@@ -285,15 +399,18 @@ class GoodseedLoader(DataLoader):
                 if pd.notna(val):
                     if attr_path == "sys/name":
                         experiment_name = str(val)
-                    else:
+                    elif attr_path == "sys/creation_time":
                         created_at = pd.Timestamp(val).isoformat()
+                    elif attr_path == "sys/modification_time":
+                        modified_at = pd.Timestamp(val).isoformat()
 
         self._active_run = goodseed.Run(
-            experiment_name=experiment_name,
+            name=experiment_name,
             project=self._pending_run["project"],
-            run_name=self._pending_run["run_name"],
-            goodseed_home=self._goodseed_home,
+            run_id=self._pending_run["run_name"],
             created_at=created_at,
+            modified_at=modified_at,
+            storage="local",
         )
 
         # Log Neptune origin metadata as configs
@@ -307,6 +424,15 @@ class GoodseedLoader(DataLoader):
             origin_configs["neptune/fork_step"] = self._pending_run["fork_step"]
 
         self._active_run.log_configs(origin_configs)
+
+    def _sync_remote_run(self, *, project: str, run_id: str) -> None:
+        """Delegate remote upload to the GoodSeed package uploader."""
+        if not self._goodseed_api_key:
+            raise RuntimeError("Missing GoodSeed API key for remote upload.")
+        db_path = goodseed_config.get_run_db_path(project, run_id)
+        if not db_path.exists():
+            raise RuntimeError(f"Run database not found for remote upload: {db_path}")
+        sync_upload_run(db_path, self._goodseed_api_key)
 
     # Parameter upload
 
@@ -388,7 +514,7 @@ class GoodseedLoader(DataLoader):
                     if pd.notna(row.step)
                     else 0
                 )
-                self._active_run.log_string_series(
+                self._active_run.log_strings(
                     {row.attribute_path: str(row.string_value)}, step=step
                 )
 

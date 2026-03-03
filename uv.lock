@@ -897,11 +897,14 @@ wheels = [
 
 [[package]]
 name = "goodseed"
-version = "0.2.4"
+version = "0.3.1"
 source = { registry = "https://pypi.org/simple" }
-sdist = { url = "https://files.pythonhosted.org/packages/9f/98/65f2295b0d32655445a26f0904cec25668b5fbd41ac7dfdcd0fea34506e5/goodseed-0.2.4.tar.gz", hash = "sha256:9f6a116f40c380da09c66527c669a3e6a583d26469095f5fc829e2d05edba49b", size = 22553, upload-time = "2026-02-16T16:36:22.828Z" }
+dependencies = [
+    { name = "psutil" },
+]
+sdist = { url = "https://files.pythonhosted.org/packages/33/f2/0e55adcdcbbc362235275045fad1892c650dd9a0e9c0838ef293cfdf082e/goodseed-0.3.1.tar.gz", hash = "sha256:a4eccbc65a140d21e9efb58b924381528ff27427cf813049e13ef4b00eb9e8bd", size = 188000, upload-time = "2026-03-03T13:12:40.494Z" }
 wheels = [
-    { url = "https://files.pythonhosted.org/packages/18/d7/26144dc67fbf5e88d08c9d5f81892f7583539298807e2aa9e9c84376da9f/goodseed-0.2.4-py3-none-any.whl", hash = "sha256:3d165557c90668c192b28db735514c640a1254bf7b39d0032de24379f12cc255", size = 16539, upload-time = "2026-02-16T16:36:21.695Z" },
+    { url = "https://files.pythonhosted.org/packages/3b/57/dec0edbb5eb63f34cc88b73422e515cba4265bb1dfd38c966b0b4ec8ebdd/goodseed-0.3.1-py3-none-any.whl", hash = "sha256:865dc145e2850de0a8d085901ce0dd8d9ef447a1c4a5411e85032091bca48eaf", size = 50924, upload-time = "2026-03-03T13:12:38.16Z" },
 ]
 
 [[package]]
@@ -2017,7 +2020,7 @@ dev = [
 requires-dist = [
     { name = "click", specifier = ">=8.1.0,<9.0.0" },
     { name = "comet-ml", marker = "extra == 'cometml'", specifier = ">=3.55.0" },
-    { name = "goodseed", marker = "extra == 'goodseed'", specifier = ">=0.2.4" },
+    { name = "goodseed", marker = "extra == 'goodseed'", specifier = ">=0.3.1" },
     { name = "litlogger", marker = "extra == 'litlogger'", specifier = ">=0.1.0,<0.2.0" },
     { name = "matplotlib", marker = "extra == 'litlogger'" },
     { name = "minfx", marker = "extra == 'minfx'" },

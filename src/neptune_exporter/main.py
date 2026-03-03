@@ -811,12 +811,17 @@ def export_models(
     help="Pluto API key for authentication. Only used with --loader pluto.",
 )
 @click.option(
-    "--goodseed-home",
-    help="GoodSeed data directory. Only used with --loader goodseed. Default: ~/.goodseed.",
-)
-@click.option(
     "--goodseed-project",
     help="Override GoodSeed project name for all imported runs. Only used with --loader goodseed. If not set, uses the Neptune project ID.",
+)
+@click.option(
+    "--goodseed-storage",
+    type=click.Choice(["auto", "local", "remote"], case_sensitive=False),
+    help="GoodSeed target storage mode. Only used with --loader goodseed. Defaults to auto (remote when API key is set, local otherwise).",
+)
+@click.option(
+    "--goodseed-api-key",
+    help="GoodSeed API key for remote mode. Only used with --loader goodseed.",
 )
 @click.option(
     "--name-prefix",
@@ -855,8 +860,9 @@ def load(
     minfx_project: str | None,
     minfx_api_token: str | None,
     pluto_api_key: str | None,
-    goodseed_home: str | None,
     goodseed_project: str | None,
+    goodseed_storage: str | None,
+    goodseed_api_key: str | None,
     name_prefix: str | None,
     verbose: bool,
     log_file: Path,
@@ -925,12 +931,12 @@ def load(
     neptune-exporter load --loader minfx --minfx-project "target-org/target-project" --minfx-api-token xxx
 
     \b
-    # Load to GoodSeed (local)
+    # Load to GoodSeed (local, default when API key is not set)
     neptune-exporter load --loader goodseed
 
     \b
-    # Load to GoodSeed with custom data directory and project
-    neptune-exporter load --loader goodseed --goodseed-home /path/to/.goodseed --goodseed-project my-project
+    # Load to GoodSeed (remote, auto-selected when API key is set)
+    neptune-exporter load --loader goodseed --goodseed-api-key gsk_xxx
     """
     # Convert tuples to lists and handle None values
     project_ids_list = list(project_ids) if project_ids else None
@@ -1156,7 +1162,6 @@ def load(
         loader_name = "Minfx"
         info_always(logger, f"  Minfx project: {minfx_project}")
     elif loader == "goodseed":
-        from neptune_exporter.loaders.goodseed_loader import GoodseedLoader
         from neptune_exporter.loaders import GOODSEED_AVAILABLE
 
         if not GOODSEED_AVAILABLE:
@@ -1165,20 +1170,46 @@ def load(
                 "Install with `uv sync --extra goodseed`."
             )
 
-        if not goodseed_home:
-            goodseed_home = os.getenv("GOODSEED_HOME")
+        from neptune_exporter.loaders.goodseed_loader import GoodseedLoader
+
+        if not goodseed_api_key:
+            goodseed_api_key = os.getenv("GOODSEED_API_KEY")
+        if not goodseed_storage:
+            goodseed_storage = os.getenv("GOODSEED_STORAGE", "auto")
+        goodseed_storage = goodseed_storage.lower()
+        if goodseed_storage == "auto":
+            goodseed_storage = "remote" if goodseed_api_key else "local"
+        if goodseed_storage not in {"local", "remote"}:
+            raise click.BadParameter(
+                "GOODSEED_STORAGE must be one of: auto, local, remote."
+            )
+
         if not goodseed_project:
             goodseed_project = os.getenv("GOODSEED_PROJECT")
 
+        if goodseed_storage == "remote" and not goodseed_api_key:
+            raise click.BadParameter(
+                "GoodSeed API key is required in remote mode. "
+                "Set GOODSEED_API_KEY or pass --goodseed-api-key."
+            )
+        if goodseed_storage == "remote" and goodseed_project:
+            if goodseed_project.count("/") > 1 or (
+                "/" in goodseed_project and not all(goodseed_project.split("/", 1))
+            ):
+                raise click.BadParameter(
+                    "In GoodSeed remote mode, --goodseed-project must be either "
+                    "'project' or 'workspace/project'."
+                )
+
         data_loader = GoodseedLoader(
-            goodseed_home=goodseed_home,
+            storage_mode=goodseed_storage,
             goodseed_project=goodseed_project,
+            goodseed_api_key=goodseed_api_key,
             name_prefix=name_prefix,
             show_client_logs=verbose,
         )
         loader_name = "GoodSeed"
-        if goodseed_home:
-            info_always(logger, f"  GoodSeed home: {goodseed_home}")
+        info_always(logger, f"  GoodSeed storage: {goodseed_storage}")
         if goodseed_project:
             info_always(logger, f"  GoodSeed project: {goodseed_project}")
     else:

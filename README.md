@@ -32,7 +32,9 @@ Neptune Exporter is a CLI tool to move Neptune experiments (version `2.x` or `3.
   - Comet workspace and API key, set with `COMET_WORKSPACE`/`--comet-workspace` and `COMET_API_KEY`/`--comet-api-key`.
   - Lightning AI LitLogger requires auth credentials (set via `lightning login` or `--litlogger-user-id` and `--litlogger-api-key`). Optionally specify `--litlogger-owner` for the user or organization name where teamspaces will be created (defaults to the authenticated user).
   - Minfx project and API token, set with `MINFX_PROJECT`/`--minfx-project` and `MINFX_API_TOKEN`/`--minfx-api-token`.
-  - GoodSeed: no credentials needed (local storage). Optionally set `GOODSEED_HOME`/`--goodseed-home` to override the data directory and `GOODSEED_PROJECT`/`--goodseed-project` to override the project name.
+  - GoodSeed:
+    - Local mode: no credentials needed. Optionally set `GOODSEED_PROJECT`/`--goodseed-project` to override the project name.
+    - Remote mode: set `GOODSEED_API_KEY` or pass `--goodseed-api-key`.
   - Pluto SDK: install [`pluto-ml`](https://github.com/Trainy-ai/pluto) (or use `--extra pluto` during `uv sync`). Authenticate via `pluto login <api-key>` or set `PLUTO_API_KEY` environment variable. See the [Pluto repo](https://github.com/Trainy-ai/pluto) and the [Pluto project page](https://pluto.trainy.ai).
 
 ## Installation
@@ -219,11 +221,12 @@ Model version export is derived from selected models (all versions for selected 
     --data-path ./exports/data \
     --files-path ./exports/files
 
-  # GoodSeed (local)
+  # GoodSeed (remote if API key is set; --goodseed-api-key is optional)
   uv run neptune-exporter load \
     --loader goodseed \
     --data-path ./exports/data \
-    --files-path ./exports/files
+    --files-path ./exports/files \
+    --goodseed-api-key "$GOODSEED_API_KEY"  # optional (remove for local export)
 
   # LitLogger
   uv run lightning login && \
@@ -284,7 +287,11 @@ Model version export is derived from selected models (all versions for selected 
   > For Minfx, the `--step-multiplier` option is not needed since Neptune v2 natively supports float steps. The loader recreates runs in a Neptune-compatible backend and stores the original run ID in `import/original_run_id` for tracking and duplicate prevention.
 
   > [!NOTE]
-  > For GoodSeed, no authentication or server is needed. Data is written directly to local SQLite files. Use `goodseed serve` to view imported runs in the browser. GoodSeed uses integer steps, so use `--step-multiplier` if your Neptune steps contain decimals. Files and histograms are not supported and will be skipped with a warning.
+  > For GoodSeed local mode, no authentication or server is needed. Data is written directly to local SQLite files. Use `goodseed serve` to view imported runs in the browser.
+  >
+  > For GoodSeed remote mode (auto-selected when API key is provided), the loader writes to the backend API using your API key. Imported projects are created in your default workspace. If source project is from a different workspace (for example `Y/abc`), it is imported as `Y_abc` in your default workspace with a warning.
+  >
+  > GoodSeed uses integer steps, so use `--step-multiplier` if your Neptune steps contain decimals. Files and histograms are not supported and will be skipped with a warning.
 
   > [!NOTE]
   > For Pluto, the loader uses decimal steps natively (no `--step-multiplier` needed). Authentication is configured via `--pluto-api-key` option or `PLUTO_API_KEY` environment variable.
@@ -355,9 +362,12 @@ All records use `src/neptune_exporter/model.py::SCHEMA`:
 
 - Data is streamed run-by-run from parquet, using the same `--step-multiplier` to turn decimal steps into integers. Keep the multiplier consistent across loads when your Neptune steps are floats.
 - **GoodSeed loader**:
-  - No authentication needed. Writes directly to local SQLite files at `~/.goodseed/projects/<project>/runs/<run>.sqlite`.
-  - Neptune `project_id` is used as the GoodSeed project name (override with `--goodseed-project`). `sys/name` becomes the experiment name.
+  - Supports local mode (default when API key is not set) and remote mode (auto-selected when API key is set, or forced via `--goodseed-storage remote`).
+  - Local mode writes directly to SQLite files at `~/.goodseed/projects/<project>/runs/<run>.sqlite`.
+  - Remote mode writes to GoodSeed backend API (`GOODSEED_API_KEY` required).
+  - `sys/name` becomes the run experiment name. Run ID is preserved.
   - Parameters are logged as configs with native types. Float series are logged as metrics (integer steps, use `--step-multiplier` for decimals). String series are logged as string series.
+  - In remote mode, source projects from foreign workspaces are mapped into your default workspace as `<source_workspace>_<source_project>` and a warning is emitted.
   - Files, file series, and histograms are skipped (GoodSeed has no file storage). Neptune origin metadata is stored as configs under `neptune/` prefix.
   - View imported runs with `goodseed serve`.
 - **Comet loader**:
@@ -409,8 +419,9 @@ All records use `src/neptune_exporter/model.py::SCHEMA`:
 ## Experiment/run mapping to targets
 
 - **GoodSeed:**
-  - Neptune `project_id` is used directly as the GoodSeed project name (e.g., `workspace/my-project`). Override with `--goodseed-project` to put all runs in a single project.
-  - Neptune's `sys/name` becomes the GoodSeed `experiment_name`. The Neptune `run_id` becomes the GoodSeed `run_name`.
+  - Local mode: Neptune `project_id` is used directly as GoodSeed project name (override with `--goodseed-project`).
+  - Remote mode: runs are imported into your default workspace. If source workspace differs, project `Y/abc` is mapped to `Y_abc` in default workspace.
+  - Neptune's `sys/name` becomes the GoodSeed experiment name. Neptune `run_id` becomes GoodSeed `run_id`.
   - Neptune origin metadata (`project_id`, `run_id`, fork info) is stored as configs under `neptune/` prefix for traceability.
 - **Comet:**
   - Neptune `project_id` maps to the Comet project name (sanitized, plus optional `--name-prefix`).

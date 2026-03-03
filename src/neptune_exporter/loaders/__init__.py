@@ -72,7 +72,9 @@ except Exception:  # pragma: no cover - pluto is optional
     PLUTO_AVAILABLE = False  # type: ignore[misc,assignment]
 
 try:
-    from .goodseed_loader import GoodseedLoader, GOODSEED_AVAILABLE
+    from .goodseed_loader import GoodseedLoader
+
+    GOODSEED_AVAILABLE = True
 except Exception:  # pragma: no cover - goodseed is optional
     GoodseedLoader = None  # type: ignore[misc,assignment]
     GOODSEED_AVAILABLE = False  # type: ignore[misc,assignment]
