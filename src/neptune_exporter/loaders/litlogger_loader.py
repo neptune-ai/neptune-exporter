@@ -388,9 +388,12 @@ class LitLoggerLoader(DataLoader):
 
         # Store experiment info for deferred creation in upload_run_data
         # This allows us to extract parameters from data and use them as metadata
+        # Store teamspace.name (string) not the Teamspace object — litlogger.init()
+        # expects a string and resolves it internally via _resolve_teamspace().
+        # Passing a Teamspace object causes it to fall back to the user's default teamspace.
         self._pending_experiment = {
             "experiment_name": experiment_name,
-            "teamspace": teamspace,
+            "teamspace": teamspace.name,
             "project_id": project_id,
             "run_name": run_name,
         }
@@ -511,7 +514,6 @@ class LitLoggerLoader(DataLoader):
         metadata["neptune_project"] = self._pending_experiment["project_id"]
         metadata["neptune_run"] = self._pending_experiment["run_name"]
 
-        # Use teamspace from project_id, or fallback to global teamspace if set
         teamspace = self._pending_experiment.get("teamspace")
 
         # Initialize the LitLogger experiment
