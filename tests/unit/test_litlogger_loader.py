@@ -395,7 +395,33 @@ class TestCreateRun:
                 assert loader._pending_experiment["experiment_name"] == "run-name"
                 assert loader._pending_experiment["project_id"] == "project-id"
                 assert loader._pending_experiment["run_name"] == "run-name"
-                assert loader._pending_experiment["teamspace"] == mock_teamspace
+                assert loader._pending_experiment["teamspace"] == mock_teamspace.name
+
+    def test_create_run_stores_teamspace_name_not_object(self, mock_owner, mock_teamspace):
+        """Regression test: teamspace must be stored as a string, not a Teamspace object.
+
+        litlogger.init() expects teamspace to be a string and resolves it internally
+        via _resolve_teamspace(). Passing a Teamspace object causes _resolve_teamspace
+        to fall back to the user's default teamspace, so experiments end up in the
+        wrong place.
+        """
+        with patch(
+            "neptune_exporter.loaders.litlogger_loader.LitLoggerLoader._validate_owner",
+            return_value=mock_owner,
+        ):
+            with patch(
+                "neptune_exporter.loaders.litlogger_loader.Teamspace",
+                return_value=mock_teamspace,
+            ):
+                loader = LitLoggerLoader()
+                loader.create_run("workspace/my-project", "run-name")
+
+                teamspace_value = loader._pending_experiment["teamspace"]
+                assert isinstance(teamspace_value, str), (
+                    "teamspace must be a string for litlogger.init(), "
+                    f"got {type(teamspace_value)}"
+                )
+                assert teamspace_value == mock_teamspace.name
 
     def test_create_run_creates_teamspace_from_project_id(
         self, mock_owner, mock_teamspace
@@ -1364,7 +1390,7 @@ class TestUploadRunData:
                 mock_litlogger.init.assert_called_once()
                 init_kwargs = mock_litlogger.init.call_args[1]
                 assert init_kwargs["name"] == "run-name"
-                assert init_kwargs["teamspace"] == mock_teamspace
+                assert init_kwargs["teamspace"] == mock_teamspace.name
 
                 # Verify experiment was finalized
                 mock_experiment.finalize.assert_called_once()
